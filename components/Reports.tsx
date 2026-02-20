@@ -440,9 +440,21 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
       <div className="bg-[#0a0a0a] rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl">
         <div className="p-8 border-b border-zinc-800 bg-zinc-900/20 space-y-8">
           <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
-            <div>
-              <h3 className="text-lg font-bold gold-text uppercase tracking-widest">Controle de Carteira</h3>
-              <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">Gestão centralizada de recebíveis e liquidação</p>
+            <div className="flex items-center gap-4">
+              <div>
+                <h3 className="text-lg font-bold gold-text uppercase tracking-widest flex items-center gap-3">
+                  Controle de Carteira
+                  {loans.some(l => l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)) && (
+                    <div className="flex items-center gap-1.5 px-3 py-1 bg-red-500/20 border border-red-500/30 rounded-full animate-pulse">
+                      <BellRing size={12} className="text-red-500" />
+                      <span className="text-[9px] font-black text-red-500 tracking-tighter">
+                        {loans.filter(l => l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)).length} ALERTAS
+                      </span>
+                    </div>
+                  )}
+                </h3>
+                <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">Gestão centralizada de recebíveis e liquidação</p>
+              </div>
             </div>
             
             <div className="flex flex-col md:flex-row items-start md:items-center gap-6 w-full xl:w-auto">
@@ -527,6 +539,11 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
                           <User size={14} className={allPaid ? 'text-emerald-500' : hasOverdue ? 'text-red-500' : 'text-[#BF953F]'} />
                           <h4 className="text-sm font-black text-zinc-100 uppercase tracking-tight">{loan.customerName}</h4>
                           {allPaid && <CheckCircle size={14} className="text-emerald-500 ml-1" />}
+                          {hasOverdue && (
+                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-red-600 text-white text-[7px] font-black animate-bounce shadow-[0_0_10px_rgba(220,38,38,0.5)]">
+                              <AlertTriangle size={8} /> PENDÊNCIA CRÍTICA
+                            </div>
+                          )}
                         </div>
                         <p className="text-[10px] text-zinc-600 font-mono uppercase">Contrato #{loan.contractNumber}</p>
                       </div>

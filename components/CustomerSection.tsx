@@ -28,6 +28,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { Customer, CustomerDocument, Loan, PaymentStatus } from '../types';
+import { validateCPF } from '../src/utils/validation';
 
 interface CustomerSectionProps {
   customers: Customer[];
@@ -49,6 +50,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
+  const [cpfValid, setCpfValid] = useState<boolean | null>(null);
   
   const getTodayStr = () => new Date().toISOString().split('T')[0];
 
@@ -82,6 +84,16 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       const numericValue = value.replace(/\D/g, ''); 
       if (numericValue.length <= 11) {
         setFormData(prev => ({ ...prev, [name]: numericValue }));
+        
+        if (name === 'cpf') {
+          if (numericValue.length === 11) {
+            setCpfValid(validateCPF(numericValue));
+          } else if (numericValue.length === 0) {
+            setCpfValid(null);
+          } else {
+            setCpfValid(false);
+          }
+        }
       }
       return;
     }
@@ -101,6 +113,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     }
 
     setEditingCustomer(c);
+    setCpfValid(validateCPF(c.cpf));
     setFormData({
       name: c.name,
       cpf: c.cpf,
@@ -151,8 +164,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (formData.cpf.length !== 11) {
-      alert("O CPF deve conter exatamente 11 dígitos numéricos.");
+    if (!validateCPF(formData.cpf)) {
+      alert("Por favor, insira um CPF válido.");
       return;
     }
     
@@ -189,6 +202,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const closeForm = () => {
     setIsAdding(false);
     setEditingCustomer(null);
+    setCpfValid(null);
     setFormData({ 
       name: '', 
       cpf: '', 
@@ -491,7 +505,17 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             </div>
 
             <InputField label="Nome Completo" name="name" value={formData.name} onChange={handleInputChange} required />
-            <InputField label="CPF (Apenas Números)" name="cpf" value={formData.cpf} onChange={handleInputChange} required maxLength={11} placeholder="Ex: 12345678901" />
+            <InputField 
+              label="CPF (Apenas Números)" 
+              name="cpf" 
+              value={formData.cpf} 
+              onChange={handleInputChange} 
+              required 
+              maxLength={11} 
+              placeholder="Ex: 12345678901"
+              isValid={cpfValid}
+              helperText={cpfValid === false ? "CPF Inválido" : undefined}
+            />
             <InputField label="RG" name="rg" value={formData.rg} onChange={handleInputChange} required />
             <InputField label="E-mail Corporativo" name="email" type="email" value={formData.email} onChange={handleInputChange} required />
             <InputField label="Telefone / WhatsApp (Apenas Números)" name="phone" value={formData.phone} onChange={handleInputChange} required maxLength={11} placeholder="Ex: 11999999999" />
@@ -652,19 +676,47 @@ const ContactInfo: React.FC<{ icon: React.ReactNode; text: string }> = ({ icon, 
   </div>
 );
 
-const InputField: React.FC<{ label: string; name: string; value: string; onChange: any; type?: string; required?: boolean; maxLength?: number; placeholder?: string; }> = ({ label, name, value, onChange, type = 'text', required, maxLength, placeholder }) => (
+const InputField: React.FC<{ 
+  label: string; 
+  name: string; 
+  value: string; 
+  onChange: any; 
+  type?: string; 
+  required?: boolean; 
+  maxLength?: number; 
+  placeholder?: string;
+  isValid?: boolean | null;
+  helperText?: string;
+}> = ({ label, name, value, onChange, type = 'text', required, maxLength, placeholder, isValid, helperText }) => (
   <div className="space-y-2">
-    <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest ml-1">{label}</label>
-    <input
-      type={type}
-      name={name}
-      value={value}
-      onChange={onChange}
-      required={required}
-      maxLength={maxLength}
-      placeholder={placeholder}
-      className="w-full px-5 py-3.5 bg-[#050505] border border-zinc-800 rounded-2xl focus:border-[#BF953F] outline-none transition-all text-sm text-zinc-200 placeholder:text-zinc-800"
-    />
+    <div className="flex justify-between items-center ml-1">
+      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">{label}</label>
+      {isValid !== null && value.length > 0 && (
+        <span className={`text-[8px] font-black uppercase tracking-tighter flex items-center gap-1 ${isValid ? 'text-emerald-500' : 'text-red-500'}`}>
+          {isValid ? <CheckCircle size={10} /> : <XCircle size={10} />}
+          {isValid ? 'Válido' : 'Inválido'}
+        </span>
+      )}
+    </div>
+    <div className="relative">
+      <input
+        type={type}
+        name={name}
+        value={value}
+        onChange={onChange}
+        required={required}
+        maxLength={maxLength}
+        placeholder={placeholder}
+        className={`w-full px-5 py-3.5 bg-[#050505] border rounded-2xl outline-none transition-all text-sm text-zinc-200 placeholder:text-zinc-800 ${
+          isValid === true ? 'border-emerald-500/50 focus:border-emerald-500' : 
+          isValid === false ? 'border-red-500/50 focus:border-red-500' : 
+          'border-zinc-800 focus:border-[#BF953F]'
+        }`}
+      />
+    </div>
+    {helperText && (
+      <p className="text-[8px] font-bold text-red-500 uppercase tracking-widest ml-1">{helperText}</p>
+    )}
   </div>
 );
 

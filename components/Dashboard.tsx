@@ -1,5 +1,5 @@
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { 
   BarChart, 
   Bar, 
@@ -29,10 +29,15 @@ interface DashboardProps {
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
+  const [isMounted, setIsMounted] = useState(false);
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
   const currentMonth = today.getMonth();
   const currentYear = today.getFullYear();
+
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   const stats = useMemo(() => {
     const activeContracts = loans.filter(l => 
@@ -139,7 +144,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Gráfico Principal */}
-        <div className="lg:col-span-8 bg-[#0a0a0a] p-6 lg:p-10 rounded-[2.5rem] border border-zinc-900 shadow-2xl">
+        <div className="lg:col-span-8 bg-[#0a0a0a] p-6 lg:p-10 rounded-[2.5rem] border border-zinc-900 shadow-2xl min-w-0">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
             <div>
               <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-1">Performance por Período</h3>
@@ -157,33 +162,35 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
             </div>
           </div>
           
-          <div className="h-[250px] lg:h-[350px] w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyHistory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#3f3f46', fontSize: 10, fontWeight: 700 }} 
-                />
-                <YAxis 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{ fill: '#3f3f46', fontSize: 9 }}
-                  tickFormatter={(value) => `R$ ${value >= 1000 ? (value/1000).toFixed(0)+'k' : value}`}
-                />
-                <Tooltip 
-                  cursor={{ fill: 'rgba(255,255,255,0.02)' }} 
-                  contentStyle={{ backgroundColor: '#050505', border: '1px solid #27272a', borderRadius: '16px', padding: '12px' }}
-                  itemStyle={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase' }}
-                  labelStyle={{ color: '#BF953F', marginBottom: '8px', fontSize: '10px', fontWeight: 900 }}
-                  formatter={(value: number) => [value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), '']}
-                />
-                <Bar dataKey="saida" fill="#FF8C00" radius={[6, 6, 0, 0]} barSize={24} />
-                <Bar dataKey="retorno" fill="#00C853" radius={[6, 6, 0, 0]} barSize={24} />
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="h-[250px] lg:h-[350px] w-full min-w-0 min-h-0">
+            {isMounted && (
+              <ResponsiveContainer width="99%" height="100%" minWidth={0} minHeight={250} debounce={50} aspect={2}>
+                <BarChart data={monthlyHistory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
+                  <XAxis 
+                    dataKey="name" 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: '#3f3f46', fontSize: 10, fontWeight: 700 }} 
+                  />
+                  <YAxis 
+                    axisLine={false} 
+                    tickLine={false} 
+                    tick={{ fill: '#3f3f46', fontSize: 9 }}
+                    tickFormatter={(value) => `R$ ${value >= 1000 ? (value/1000).toFixed(0)+'k' : value}`}
+                  />
+                  <Tooltip 
+                    cursor={{ fill: 'rgba(255,255,255,0.02)' }} 
+                    contentStyle={{ backgroundColor: '#050505', border: '1px solid #27272a', borderRadius: '16px', padding: '12px' }}
+                    itemStyle={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase' }}
+                    labelStyle={{ color: '#BF953F', marginBottom: '8px', fontSize: '10px', fontWeight: 900 }}
+                    formatter={(value: number) => [value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), '']}
+                  />
+                  <Bar dataKey="saida" fill="#FF8C00" radius={[6, 6, 0, 0]} barSize={24} />
+                  <Bar dataKey="retorno" fill="#00C853" radius={[6, 6, 0, 0]} barSize={24} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
 
