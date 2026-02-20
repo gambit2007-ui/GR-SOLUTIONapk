@@ -1,5 +1,5 @@
 
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   Search, 
   UserPlus, 
@@ -46,12 +46,23 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   onDeleteCustomer 
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
   const [cpfValid, setCpfValid] = useState<boolean | null>(null);
   
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setSearchTerm(searchInput);
+    }, 400);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [searchInput]);
+
   const getTodayStr = () => new Date().toISOString().split('T')[0];
 
   const [formData, setFormData] = useState({
@@ -454,8 +465,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             type="text"
             placeholder="Buscar por nome ou CPF..."
             className="w-full pl-12 pr-4 py-3 bg-zinc-900 border border-zinc-800 rounded-full focus:border-[#BF953F] outline-none transition-all text-sm text-zinc-200"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
           />
         </div>
         <div className="flex gap-3 w-full md:w-auto">

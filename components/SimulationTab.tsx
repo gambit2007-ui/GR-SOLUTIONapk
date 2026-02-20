@@ -53,7 +53,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
     const schedule = [];
 
     if (interestType === 'SIMPLES') {
-      totalToReturn = amount * (1 + (rateDecimal * installments));
+      totalToReturn = amount * (1 + rateDecimal);
       installmentValue = totalToReturn / installments;
     } else {
       const rate = rateDecimal;

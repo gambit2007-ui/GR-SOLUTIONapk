@@ -59,7 +59,7 @@ const LoanRegistration: React.FC<LoanRegistrationProps> = ({ customers, loans, o
     const schedule = [];
 
     if (interestType === 'SIMPLES') {
-      totalToReturn = amount * (1 + (rateDecimal * installmentsCount));
+      totalToReturn = amount * (1 + rateDecimal);
       installmentValue = totalToReturn / installmentsCount;
     } else {
       const factor = Math.pow(1 + rateDecimal, installmentsCount);

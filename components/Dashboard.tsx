@@ -1,14 +1,12 @@
 
 import React, { useMemo, useState, useEffect } from 'react';
 import { 
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
+  PieChart, 
+  Pie, 
+  Cell, 
   Tooltip, 
   ResponsiveContainer,
-  Cell
+  Legend
 } from 'recharts';
 import { 
   Users, 
@@ -114,6 +112,27 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
     return data;
   }, [loans, currentMonth, currentYear]);
 
+  const cashFlowData = useMemo(() => {
+    const totalSaida = monthlyHistory.reduce((acc, m) => acc + m.saida, 0);
+    const totalRetorno = monthlyHistory.reduce((acc, m) => acc + m.retorno, 0);
+    return [
+      { name: 'Saída (Capital)', value: totalSaida, color: '#FF8C00' },
+      { name: 'Retorno (Recebido)', value: totalRetorno, color: '#00C853' }
+    ];
+  }, [monthlyHistory]);
+
+  const statusData = useMemo(() => {
+    const active = loans.filter(l => !l.installments.every(i => i.status === 'PAGO') && !l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)).length;
+    const overdue = loans.filter(l => !l.installments.every(i => i.status === 'PAGO') && l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)).length;
+    const finished = loans.filter(l => l.installments.every(i => i.status === 'PAGO')).length;
+    
+    return [
+      { name: 'Ativos', value: active, color: '#BF953F' },
+      { name: 'Atrasados', value: overdue, color: '#EF4444' },
+      { name: 'Finalizados', value: finished, color: '#10B981' }
+    ];
+  }, [loans, todayStr]);
+
   return (
     <div className="space-y-6 lg:space-y-8 animate-in fade-in duration-700">
       {/* Cards de Status */}
@@ -143,54 +162,81 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Gráfico Principal */}
-        <div className="lg:col-span-8 bg-[#0a0a0a] p-6 lg:p-10 rounded-[2.5rem] border border-zinc-900 shadow-2xl min-w-0">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-10">
-            <div>
-              <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-1">Performance por Período</h3>
-              <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Fluxo de Caixa: Capital vs Recebíveis</p>
+        {/* Gráficos em Pizza */}
+        <div className="lg:col-span-8 grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 shadow-2xl flex flex-col">
+            <div className="mb-6">
+              <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-1">Distribuição de Capital</h3>
+              <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Saída vs Retorno (Período)</p>
             </div>
-            <div className="flex gap-4">
-               <div className="flex items-center gap-2">
-                 <div className="w-2.5 h-2.5 rounded-full bg-[#FF8C00]"></div>
-                 <span className="text-[9px] font-black text-zinc-500 uppercase">Saída</span>
-               </div>
-               <div className="flex items-center gap-2">
-                 <div className="w-2.5 h-2.5 rounded-full bg-[#00C853]"></div>
-                 <span className="text-[9px] font-black text-zinc-500 uppercase">Retorno</span>
-               </div>
+            <div className="h-[250px] w-full">
+              {isMounted && (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={cashFlowData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {cashFlowData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#050505', border: '1px solid #27272a', borderRadius: '12px' }}
+                      itemStyle={{ color: '#fff', fontSize: '10px', fontWeight: 'bold' }}
+                      formatter={(value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36}
+                      formatter={(value) => <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
-          
-          <div className="h-[250px] lg:h-[350px] w-full min-w-0 min-h-0">
-            {isMounted && (
-              <ResponsiveContainer width="99%" height="100%" minWidth={0} minHeight={250} debounce={50} aspect={2}>
-                <BarChart data={monthlyHistory} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#18181b" />
-                  <XAxis 
-                    dataKey="name" 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fill: '#3f3f46', fontSize: 10, fontWeight: 700 }} 
-                  />
-                  <YAxis 
-                    axisLine={false} 
-                    tickLine={false} 
-                    tick={{ fill: '#3f3f46', fontSize: 9 }}
-                    tickFormatter={(value) => `R$ ${value >= 1000 ? (value/1000).toFixed(0)+'k' : value}`}
-                  />
-                  <Tooltip 
-                    cursor={{ fill: 'rgba(255,255,255,0.02)' }} 
-                    contentStyle={{ backgroundColor: '#050505', border: '1px solid #27272a', borderRadius: '16px', padding: '12px' }}
-                    itemStyle={{ fontSize: '11px', fontWeight: 800, textTransform: 'uppercase' }}
-                    labelStyle={{ color: '#BF953F', marginBottom: '8px', fontSize: '10px', fontWeight: 900 }}
-                    formatter={(value: number) => [value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), '']}
-                  />
-                  <Bar dataKey="saida" fill="#FF8C00" radius={[6, 6, 0, 0]} barSize={24} />
-                  <Bar dataKey="retorno" fill="#00C853" radius={[6, 6, 0, 0]} barSize={24} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
+
+          <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 shadow-2xl flex flex-col">
+            <div className="mb-6">
+              <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-1">Status da Carteira</h3>
+              <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Contratos por Situação</p>
+            </div>
+            <div className="h-[250px] w-full">
+              {isMounted && (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={statusData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {statusData.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#050505', border: '1px solid #27272a', borderRadius: '12px' }}
+                      itemStyle={{ color: '#fff', fontSize: '10px', fontWeight: 'bold' }}
+                    />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36}
+                      formatter={(value) => <span className="text-[9px] font-black text-zinc-500 uppercase tracking-tighter">{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
           </div>
         </div>
 
