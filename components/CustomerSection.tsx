@@ -25,7 +25,10 @@ import {
   AlertTriangle,
   Camera,
   User as UserIcon,
-  MessageSquare
+  MessageSquare,
+  FileImage,
+  Maximize2,
+  Download
 } from 'lucide-react';
 import { Customer, CustomerDocument, Loan, PaymentStatus } from '../types';
 import { validateCPF } from '../src/utils/validation';
@@ -50,6 +53,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const [isAdding, setIsAdding] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [viewingCustomer, setViewingCustomer] = useState<Customer | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<CustomerDocument | null>(null);
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
   const [cpfValid, setCpfValid] = useState<boolean | null>(null);
   
@@ -240,6 +244,67 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     return 'PENDENTE';
   };
 
+  const calculateCustomerScore = (customerId: string) => {
+    const customerLoans = loans.filter(l => l.customerId === customerId);
+    if (customerLoans.length === 0) return 500; // Pontuação inicial neutra
+
+    let score = 500;
+    let totalBorrowed = 0;
+    let totalInstallments = 0;
+    let paidOnTime = 0;
+    let paidWithDelay = 0;
+    let currentlyOverdue = 0;
+
+    customerLoans.forEach(loan => {
+      totalBorrowed += loan.amount;
+      loan.installments.forEach(inst => {
+        totalInstallments++;
+        const status = getInstStatus(inst.dueDate, inst.status);
+        
+        if (inst.status === 'PAGO') {
+          // Verifica se pagou após o vencimento
+          const paidDate = inst.paidAt ? new Date(inst.paidAt).toISOString().split('T')[0] : '';
+          if (paidDate && paidDate > inst.dueDate) {
+            paidWithDelay++;
+            score += 2; // Pequeno ganho por pagar mesmo com atraso
+          } else {
+            paidOnTime++;
+            score += 15; // Ganho significativo por pontualidade
+          }
+        } else if (status === 'ATRASADO') {
+          currentlyOverdue++;
+          score -= 40; // Penalidade forte por atraso ativo
+        }
+      });
+    });
+
+    // Bônus por volume de crédito movimentado (1 ponto a cada R$ 2000)
+    score += Math.floor(totalBorrowed / 2000);
+
+    // Limites do Score
+    return Math.max(0, Math.min(1000, score));
+  };
+
+  const getScoreColor = (score: number) => {
+    if (score >= 800) return 'text-emerald-500';
+    if (score >= 600) return 'text-blue-400';
+    if (score >= 400) return 'text-[#BF953F]';
+    return 'text-red-500';
+  };
+
+  const getScoreLabel = (score: number) => {
+    if (score >= 800) return 'Excelente';
+    if (score >= 600) return 'Bom';
+    if (score >= 400) return 'Regular';
+    return 'Crítico';
+  };
+
+  const getFileIcon = (type: string) => {
+    if (type.startsWith('image/')) return <FileImage size={24} className="text-emerald-500" />;
+    if (type.includes('pdf')) return <FileText size={24} className="text-red-500" />;
+    return <FileText size={24} className="text-[#BF953F]" />;
+  };
+
   if (viewingCustomer) {
     const customerLoans = getCustomerLoans(viewingCustomer.id);
     const hasAnyOverdue = customerLoans.some(loan => 
@@ -248,6 +313,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     const totalInstallments = customerLoans.reduce((acc, curr) => acc + curr.installmentCount, 0);
     const paidInstallments = customerLoans.reduce((acc, curr) => acc + curr.installments.filter(i => i.status === 'PAGO').length, 0);
     const punctualityRate = totalInstallments > 0 ? (paidInstallments / totalInstallments * 100).toFixed(0) : '0';
+    const creditScore = calculateCustomerScore(viewingCustomer.id);
 
     return (
       <div className="space-y-8 animate-in fade-in zoom-in-95 duration-300">
@@ -274,7 +340,16 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 )}
               </div>
               <h2 className="text-2xl font-black text-white mb-2">{viewingCustomer.name}</h2>
-              <p className="text-[#BF953F] font-mono text-[10px] uppercase tracking-widest">ID #{viewingCustomer.id}</p>
+              <div className="flex items-center justify-center gap-3 mb-2">
+                <p className="text-[#BF953F] font-mono text-[10px] uppercase tracking-widest">ID #{viewingCustomer.id}</p>
+                <span className="w-1 h-1 bg-zinc-800 rounded-full"></span>
+                <div className="flex items-center gap-1.5">
+                  <TrendingUp size={12} className={getScoreColor(creditScore)} />
+                  <span className={`text-[10px] font-black uppercase tracking-widest ${getScoreColor(creditScore)}`}>
+                    Score: {creditScore}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <div className="space-y-6 pt-6 border-t border-zinc-900">
@@ -299,10 +374,29 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
               {viewingCustomer.documents && viewingCustomer.documents.length > 0 ? (
                 <div className="grid grid-cols-2 gap-3">
                   {viewingCustomer.documents.map((doc, idx) => (
-                    <div key={idx} className="p-3 bg-zinc-900 border border-zinc-800 rounded-xl flex flex-col items-center gap-2">
-                      <FileText size={18} className="text-[#BF953F]" />
-                      <span className="text-[8px] text-zinc-500 font-bold truncate w-full text-center">{doc.name}</span>
-                      <a href={doc.data} download={doc.name} className="text-[8px] text-[#BF953F] hover:underline font-black uppercase">Baixar</a>
+                    <div key={idx} className="p-4 bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col items-center gap-3 group relative overflow-hidden transition-all hover:border-[#BF953F]/50">
+                      <div className="p-3 bg-black rounded-xl border border-zinc-800">
+                        {getFileIcon(doc.type)}
+                      </div>
+                      <span className="text-[9px] text-zinc-400 font-bold truncate w-full text-center px-1">{doc.name}</span>
+                      
+                      <div className="flex gap-2 mt-1">
+                        <button 
+                          onClick={() => setPreviewDoc(doc)}
+                          className="p-1.5 bg-zinc-800 text-zinc-400 hover:text-[#BF953F] rounded-lg transition-colors"
+                          title="Visualizar"
+                        >
+                          <Maximize2 size={12} />
+                        </button>
+                        <a 
+                          href={doc.data} 
+                          download={doc.name} 
+                          className="p-1.5 bg-zinc-800 text-zinc-400 hover:text-emerald-500 rounded-lg transition-colors"
+                          title="Baixar"
+                        >
+                          <Download size={12} />
+                        </a>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -427,24 +521,25 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             </div>
 
             <div className={`${hasAnyOverdue ? 'bg-red-500/10 border-red-500/20' : 'bg-emerald-500/5 border-emerald-500/10'} p-8 rounded-[2.5rem] border flex items-center gap-6 transition-all duration-500 shadow-lg`}>
-                <div className={`p-4 rounded-2xl ${hasAnyOverdue ? 'bg-red-500/10 text-red-500 animate-pulse' : 'bg-emerald-500/10 text-emerald-500'}`}>
-                   {hasAnyOverdue ? <AlertTriangle size={24} /> : <TrendingUp size={24} />}
+                <div className={`p-4 rounded-2xl flex flex-col items-center justify-center min-w-[100px] ${hasAnyOverdue ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500'}`}>
+                   <span className="text-2xl font-black">{creditScore}</span>
+                   <span className="text-[8px] font-black uppercase tracking-tighter opacity-70">Credit Score</span>
                 </div>
                 <div>
                    <h4 className={`text-xs font-black uppercase tracking-widest mb-1 ${hasAnyOverdue ? 'text-red-500' : 'text-emerald-500'}`}>
-                     {hasAnyOverdue ? 'RESTRIÇÃO DE CRÉDITO DETECTADA' : 'Análise de Pontualidade'}
+                     {hasAnyOverdue ? 'RESTRIÇÃO DE CRÉDITO DETECTADA' : `PERFIL ${getScoreLabel(creditScore).toUpperCase()}`}
                    </h4>
                    <p className="text-[11px] text-zinc-500 leading-relaxed font-bold">
                      {hasAnyOverdue ? (
                        <span className="text-red-500 font-black uppercase">
-                         Atenção: Este cliente possui parcelas em aberto vencidas. Operação atualmente em status de inadimplência.
+                         Atenção: Este cliente possui parcelas em aberto vencidas. Operação atualmente em status de inadimplência. Score impactado negativamente.
                        </span>
                      ) : (
                        <>
-                         Baseado no histórico total de parcelas. O cliente apresenta uma taxa de adimplência de 
+                         Baseado no histórico total de parcelas e volume de capital movimentado. O cliente apresenta uma taxa de adimplência de 
                          <span className="text-emerald-500 font-black ml-1">
                            {punctualityRate}%
-                         </span>. Perfil apto para novas operações.
+                         </span>. {creditScore > 700 ? 'Excelente pagador, perfil de baixo risco.' : 'Perfil apto para operações controladas.'}
                        </>
                      )}
                    </p>
@@ -573,10 +668,21 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
               {documents.length > 0 && (
                 <div className="mt-4 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
                   {documents.map((doc, idx) => (
-                    <div key={idx} className="relative p-3 bg-zinc-900 border border-zinc-800 rounded-xl flex flex-col items-center gap-2 group">
-                      <FileText size={20} className="text-[#BF953F]" />
-                      <span className="text-[9px] text-zinc-400 font-bold truncate w-full text-center">{doc.name}</span>
-                      <button type="button" onClick={() => removeDocument(idx)} className="absolute -top-2 -right-2 text-zinc-600 hover:text-red-500 bg-black rounded-full shadow-lg">
+                    <div key={idx} className="relative p-4 bg-zinc-900 border border-zinc-800 rounded-2xl flex flex-col items-center gap-3 group">
+                      <div className="p-2 bg-black rounded-lg border border-zinc-800">
+                        {getFileIcon(doc.type)}
+                      </div>
+                      <span className="text-[9px] text-zinc-400 font-bold truncate w-full text-center px-1">{doc.name}</span>
+                      <div className="flex gap-2">
+                        <button 
+                          type="button"
+                          onClick={() => setPreviewDoc(doc)}
+                          className="text-zinc-600 hover:text-[#BF953F] transition-colors"
+                        >
+                          <Maximize2 size={12} />
+                        </button>
+                      </div>
+                      <button type="button" onClick={() => removeDocument(idx)} className="absolute -top-2 -right-2 text-zinc-600 hover:text-red-500 bg-black rounded-full shadow-lg p-0.5 border border-zinc-800">
                         <XCircle size={16} />
                       </button>
                     </div>
@@ -600,10 +706,17 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             const customerLoans = getCustomerLoans(customer.id);
             const activeLoans = customerLoans.filter(l => l.installments.some(i => i.status === 'PENDENTE')).length;
             const customerOverdue = customerLoans.some(loan => loan.installments.some(inst => getInstStatus(inst.dueDate, inst.status) === 'ATRASADO'));
+            const score = calculateCustomerScore(customer.id);
 
             return (
               <div key={customer.id} className={`bg-zinc-950 p-6 rounded-3xl border ${customerOverdue ? 'border-red-500/30' : 'border-zinc-800'} hover:border-[#BF953F]/40 transition-all group relative overflow-hidden flex flex-col shadow-lg`}>
-                {customerOverdue && <div className="absolute top-0 right-0 p-2 bg-red-500 text-white text-[8px] font-black uppercase tracking-widest rounded-bl-xl shadow-lg">Inadimplente</div>}
+                <div className="absolute top-0 right-0 flex">
+                  <div className={`px-3 py-1.5 ${getScoreColor(score).replace('text-', 'bg-').replace('500', '500/20')} border-l border-b border-zinc-900 rounded-bl-xl flex items-center gap-2`}>
+                    <TrendingUp size={10} className={getScoreColor(score)} />
+                    <span className={`text-[9px] font-black uppercase tracking-tighter ${getScoreColor(score)}`}>{score}</span>
+                  </div>
+                  {customerOverdue && <div className="px-3 py-1.5 bg-red-500 text-white text-[8px] font-black uppercase tracking-widest rounded-bl-none shadow-lg">Inadimplente</div>}
+                </div>
                 <div className="flex items-start justify-between mb-6">
                   <div className="w-12 h-12 gold-gradient rounded-2xl flex items-center justify-center overflow-hidden text-black font-black text-xl shadow-lg relative border border-[#BF953F]/20">
                     {customer.avatar ? (
@@ -669,6 +782,72 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
           </div>
         )}
       </div>
+
+      {/* Modal de Pré-visualização de Documento */}
+      {previewDoc && (
+        <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 md:p-10 animate-in fade-in duration-300">
+          <div className="relative w-full max-w-5xl h-full max-h-[90vh] bg-[#0a0a0a] border border-zinc-800 rounded-[2.5rem] overflow-hidden flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.8)]">
+            <div className="p-6 border-b border-zinc-900 flex justify-between items-center bg-zinc-900/20">
+              <div className="flex items-center gap-4">
+                <div className="p-2 bg-black rounded-xl border border-zinc-800">
+                  {getFileIcon(previewDoc.type)}
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase tracking-widest">{previewDoc.name}</h3>
+                  <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-tighter">{previewDoc.type}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <a 
+                  href={previewDoc.data} 
+                  download={previewDoc.name}
+                  className="p-3 bg-zinc-900 text-zinc-400 hover:text-emerald-500 rounded-2xl border border-zinc-800 transition-all"
+                  title="Baixar Arquivo"
+                >
+                  <Download size={18} />
+                </a>
+                <button 
+                  onClick={() => setPreviewDoc(null)}
+                  className="p-3 bg-zinc-900 text-zinc-400 hover:text-red-500 rounded-2xl border border-zinc-800 transition-all"
+                  title="Fechar"
+                >
+                  <XCircle size={18} />
+                </button>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-auto p-6 flex items-center justify-center bg-black/40">
+              {previewDoc.type.startsWith('image/') ? (
+                <img 
+                  src={previewDoc.data} 
+                  alt={previewDoc.name} 
+                  className="max-w-full max-h-full object-contain rounded-xl shadow-2xl" 
+                />
+              ) : previewDoc.type.includes('pdf') ? (
+                <iframe 
+                  src={previewDoc.data} 
+                  className="w-full h-full rounded-xl" 
+                  title={previewDoc.name}
+                />
+              ) : (
+                <div className="text-center space-y-4">
+                  <div className="w-20 h-20 bg-zinc-900 rounded-3xl flex items-center justify-center mx-auto border border-zinc-800">
+                    <FileText size={40} className="text-zinc-700" />
+                  </div>
+                  <p className="text-zinc-500 font-bold uppercase text-xs tracking-widest">Pré-visualização não disponível para este tipo de arquivo</p>
+                  <a 
+                    href={previewDoc.data} 
+                    download={previewDoc.name}
+                    className="inline-block px-8 py-3 gold-gradient text-black font-black rounded-full text-[10px] uppercase tracking-widest"
+                  >
+                    Baixar para Visualizar
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

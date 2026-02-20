@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { 
   PieChart, 
   Pie, 
@@ -17,21 +17,66 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   TrendingUp,
-  CalendarDays
+  CalendarDays,
+  Filter,
+  Calendar,
+  FileDown,
+  FileText
 } from 'lucide-react';
 import { Loan, Customer } from '../types';
+import { jsPDF } from 'jspdf';
+import { toPng } from 'html-to-image';
 
 interface DashboardProps {
   loans: Loan[];
   customers: Customer[];
 }
 
+type FilterPeriod = '7D' | '30D' | '90D' | '12M' | 'ALL' | 'CUSTOM';
+
 const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
   const [isMounted, setIsMounted] = useState(false);
+  const [period, setPeriod] = useState<FilterPeriod>('30D');
+  const [customStart, setCustomStart] = useState('');
+  const [customEnd, setCustomEnd] = useState('');
+  const dashboardRef = useRef<HTMLDivElement>(null);
+
   const today = new Date();
   const todayStr = today.toISOString().split('T')[0];
-  const currentMonth = today.getMonth();
-  const currentYear = today.getFullYear();
+
+  const dateRange = useMemo(() => {
+    let start = new Date();
+    let end = new Date();
+
+    switch (period) {
+      case '7D':
+        start.setDate(today.getDate() - 7);
+        break;
+      case '30D':
+        start.setDate(today.getDate() - 30);
+        break;
+      case '90D':
+        start.setDate(today.getDate() - 90);
+        break;
+      case '12M':
+        start.setFullYear(today.getFullYear() - 1);
+        break;
+      case 'ALL':
+        start = new Date(2000, 0, 1);
+        break;
+      case 'CUSTOM':
+        if (customStart) start = new Date(customStart + 'T00:00:00');
+        if (customEnd) end = new Date(customEnd + 'T23:59:59');
+        break;
+    }
+    
+    return { 
+      start: start.toISOString().split('T')[0], 
+      end: end.toISOString().split('T')[0],
+      startDate: start,
+      endDate: end
+    };
+  }, [period, customStart, customEnd]);
 
   useEffect(() => {
     setIsMounted(true);
@@ -46,12 +91,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
       l.installments.some(inst => inst.status === 'PENDENTE' && inst.dueDate < todayStr)
     ).length;
 
-    // Total recebido este mês especificamente
-    const receivedThisMonth = loans.reduce((acc, l) => {
+    // Total recebido no período selecionado
+    const receivedInPeriod = loans.reduce((acc, l) => {
       return acc + l.installments.reduce((sum, inst) => {
         if (inst.status === 'PAGO' && inst.paidAt) {
-          const paidDate = new Date(inst.paidAt);
-          if (paidDate.getMonth() === currentMonth && paidDate.getFullYear() === currentYear) {
+          const paidDateStr = inst.paidAt.split('T')[0];
+          if (paidDateStr >= dateRange.start && paidDateStr <= dateRange.end) {
             return sum + inst.value + (inst.penaltyApplied || 0);
           }
         }
@@ -68,15 +113,20 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
       }, 0);
     }, 0);
 
-    return { activeContracts, overdueContracts, customerCount: customers.length, receivedThisMonth, totalPaidAllTime };
-  }, [loans, customers, todayStr, currentMonth, currentYear]);
+    return { activeContracts, overdueContracts, customerCount: customers.length, receivedInPeriod, totalPaidAllTime };
+  }, [loans, customers, todayStr, dateRange]);
 
   const monthlyHistory = useMemo(() => {
     const monthsShort = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
     const data = [];
+    
+    // Determinar quantos meses mostrar baseado no range
+    const diffTime = Math.abs(dateRange.endDate.getTime() - dateRange.startDate.getTime());
+    const diffMonths = Math.ceil(diffTime / (1000 * 60 * 60 * 24 * 30));
+    const monthsToDisplay = Math.min(Math.max(diffMonths, 1), 12);
 
-    for (let i = 5; i >= 0; i--) {
-      const targetDate = new Date(currentYear, currentMonth - i, 1);
+    for (let i = monthsToDisplay - 1; i >= 0; i--) {
+      const targetDate = new Date(dateRange.endDate.getFullYear(), dateRange.endDate.getMonth() - i, 1);
       const mIdx = targetDate.getMonth();
       const yIdx = targetDate.getFullYear();
 
@@ -110,7 +160,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
       });
     }
     return data;
-  }, [loans, currentMonth, currentYear]);
+  }, [loans, dateRange]);
 
   const cashFlowData = useMemo(() => {
     const totalSaida = monthlyHistory.reduce((acc, m) => acc + m.saida, 0);
@@ -120,6 +170,53 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
       { name: 'Retorno (Recebido)', value: totalRetorno, color: '#00C853' }
     ];
   }, [monthlyHistory]);
+
+  const exportToPDF = async () => {
+    if (!dashboardRef.current) return;
+    try {
+      const dataUrl = await toPng(dashboardRef.current, { 
+        quality: 0.95, 
+        backgroundColor: '#050505',
+        style: {
+          borderRadius: '0'
+        }
+      });
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(dataUrl);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`dashboard-gr-solution-${dateRange.start}-a-${dateRange.end}.pdf`);
+    } catch (err) {
+      console.error('Erro ao exportar PDF:', err);
+      alert('Erro ao gerar PDF. Tente novamente.');
+    }
+  };
+
+  const exportToCSV = () => {
+    const headers = ['Mes', 'Saida', 'Retorno', 'Resultado'];
+    const rows = monthlyHistory.map(m => [
+      m.fullName,
+      m.saida.toFixed(2),
+      m.retorno.toFixed(2),
+      m.resultado.toFixed(2)
+    ]);
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `fluxo-caixa-gr-solution-${dateRange.start}-a-${dateRange.end}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const statusData = useMemo(() => {
     const active = loans.filter(l => !l.installments.every(i => i.status === 'PAGO') && !l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)).length;
@@ -135,8 +232,77 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
 
   return (
     <div className="space-y-6 lg:space-y-8 animate-in fade-in duration-700">
-      {/* Cards de Status */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* Filtros de Período e Exportação */}
+      <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-[#0a0a0a] p-4 rounded-3xl border border-zinc-900 shadow-xl">
+        <div className="flex flex-col md:flex-row md:items-center gap-4">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-black rounded-xl border border-zinc-800">
+              <Filter size={16} className="text-[#BF953F]" />
+            </div>
+            <div>
+              <h4 className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Filtro de Período</h4>
+              <p className="text-[8px] text-zinc-600 font-bold uppercase tracking-tighter">Visualizando dados de {dateRange.start} até {dateRange.end}</p>
+            </div>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2">
+            {(['7D', '30D', '90D', '12M', 'ALL', 'CUSTOM'] as FilterPeriod[]).map((p) => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-3 py-1.5 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${
+                  period === p 
+                    ? 'bg-[#BF953F] text-black shadow-[0_0_15px_rgba(191,149,63,0.3)]' 
+                    : 'bg-black text-zinc-500 border border-zinc-800 hover:border-zinc-700'
+                }`}
+              >
+                {p === '7D' ? '7 Dias' : p === '30D' ? '30 Dias' : p === '90D' ? '90 Dias' : p === '12M' ? '1 Ano' : p === 'ALL' ? 'Tudo' : 'Personalizado'}
+              </button>
+            ))}
+          </div>
+
+          {period === 'CUSTOM' && (
+            <div className="flex items-center gap-2 animate-in slide-in-from-right-4 duration-300">
+              <div className="relative">
+                <input 
+                  type="date" 
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="bg-black border border-zinc-800 rounded-xl px-3 py-1.5 text-[9px] font-bold text-zinc-300 outline-none focus:border-[#BF953F] transition-colors"
+                />
+              </div>
+              <span className="text-zinc-700 text-[10px] font-black">→</span>
+              <div className="relative">
+                <input 
+                  type="date" 
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="bg-black border border-zinc-800 rounded-xl px-3 py-1.5 text-[9px] font-bold text-zinc-300 outline-none focus:border-[#BF953F] transition-colors"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 border-t xl:border-t-0 xl:border-l border-zinc-900 pt-4 xl:pt-0 xl:pl-4">
+          <button 
+            onClick={exportToCSV}
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-[9px] font-black uppercase tracking-widest text-zinc-400 hover:text-white hover:border-zinc-700 transition-all"
+          >
+            <FileText size={14} /> CSV
+          </button>
+          <button 
+            onClick={exportToPDF}
+            className="flex items-center gap-2 px-4 py-2 gold-gradient text-black rounded-xl text-[9px] font-black uppercase tracking-widest shadow-lg hover:scale-105 transition-all"
+          >
+            <FileDown size={14} /> Exportar PDF
+          </button>
+        </div>
+      </div>
+
+      <div ref={dashboardRef} className="space-y-6 lg:space-y-8 p-1">
+        {/* Cards de Status */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard 
           title="Ativos" 
           value={stats.activeContracts.toString()}
@@ -149,8 +315,8 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
           border={stats.overdueContracts > 0 ? "border-red-500/30" : "border-zinc-800"}
         />
         <StatCard 
-          title="Retorno Mensal" 
-          value={stats.receivedThisMonth.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0 })}
+          title="Retorno no Período" 
+          value={stats.receivedInPeriod.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0 })}
           icon={<ArrowUpRight size={18} className="text-emerald-500" />}
           border="border-emerald-500/20"
         />
@@ -355,7 +521,8 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
         </div>
       </div>
     </div>
-  );
+  </div>
+);
 };
 
 const StatCard = ({ title, value, icon, border }: any) => (

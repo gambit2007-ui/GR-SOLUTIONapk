@@ -1,5 +1,5 @@
 
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { 
   TrendingUp, 
   ArrowDownCircle, 
@@ -21,9 +21,13 @@ import {
   Trash2,
   Edit3,
   Calendar,
-  X
+  X,
+  FileDown,
+  Download
 } from 'lucide-react';
 import { Loan, PaymentStatus, Installment, CashMovement } from '../types';
+import { jsPDF } from 'jspdf';
+import { toPng } from 'html-to-image';
 
 interface ReportsProps {
   loans: Loan[];
@@ -34,6 +38,7 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['ATIVOS', 'INADIMPLENTES', 'FINALIZADOS']);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const reportsRef = useRef<HTMLDivElement>(null);
   
   // Gestão de Caixa
   const [cashMovements, setCashMovements] = useState<CashMovement[]>([]);
@@ -243,10 +248,65 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
 
   const clearDateRange = () => setDateRange({ start: '', end: '' });
 
+  const exportToCSV = () => {
+    const headers = ['Contrato', 'Cliente', 'Valor Principal', 'Total a Retornar', 'Status'];
+    const rows = filteredLoans.map(loan => {
+      const isLiquidated = loan.installments.every(i => i.status === 'PAGO');
+      const hasOverdue = loan.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr);
+      let status = 'ATIVO';
+      if (isLiquidated) status = 'FINALIZADO';
+      else if (hasOverdue) status = 'INADIMPLENTE';
+
+      return [
+        loan.contractNumber,
+        loan.customerName,
+        loan.amount.toString(),
+        loan.totalToReturn.toString(),
+        status
+      ];
+    });
+    
+    const csvContent = [
+      headers.join(','),
+      ...rows.map(r => r.join(','))
+    ].join('\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `relatorio-carteira-${new Date().toISOString().split('T')[0]}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const exportToPDF = async () => {
+    if (!reportsRef.current) return;
+    try {
+      const dataUrl = await toPng(reportsRef.current, { 
+        quality: 0.95, 
+        backgroundColor: '#050505',
+        style: { borderRadius: '0' }
+      });
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(dataUrl);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`relatorio-gr-solution-${new Date().toISOString().split('T')[0]}.pdf`);
+    } catch (err) {
+      console.error('Erro ao exportar PDF:', err);
+      alert('Erro ao gerar PDF. Tente novamente.');
+    }
+  };
+
   return (
     <div className="space-y-10 animate-in fade-in duration-500">
       
-      {/* Seção de Tesouraria e Caixa */}
+      <div ref={reportsRef} className="space-y-10 p-1">
+        {/* Seção de Tesouraria e Caixa */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="lg:col-span-1 bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-800 shadow-2xl flex flex-col justify-between">
            <div>
@@ -458,6 +518,23 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
             </div>
             
             <div className="flex flex-col md:flex-row items-start md:items-center gap-6 w-full xl:w-auto">
+              {/* Exportação */}
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={exportToCSV}
+                  className="p-2.5 bg-zinc-900 border border-zinc-800 rounded-xl text-zinc-500 hover:text-white transition-all"
+                  title="Exportar CSV"
+                >
+                  <Download size={16} />
+                </button>
+                <button 
+                  onClick={exportToPDF}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-[#BF953F]/10 border border-[#BF953F]/30 rounded-xl text-[9px] font-black text-[#BF953F] uppercase tracking-widest hover:bg-[#BF953F] hover:text-black transition-all"
+                >
+                  <FileDown size={14} /> PDF
+                </button>
+              </div>
+
               {/* Filtro de Status */}
               <div className="flex flex-wrap gap-2">
                 <FilterButton 
@@ -671,7 +748,8 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
         </div>
       </div>
     </div>
-  );
+  </div>
+);
 };
 
 const ReportCard: React.FC<{ title: string; value: string; icon: React.ReactNode; subtitle: string; isGold?: boolean }> = ({ title, value, icon, subtitle, isGold }) => (

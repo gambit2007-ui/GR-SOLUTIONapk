@@ -11,7 +11,11 @@ import {
   Activity,
   ChevronLeft,
   ChevronRight,
-  User as UserIcon
+  User as UserIcon,
+  CheckCircle2,
+  Info,
+  AlertCircle,
+  X
 } from 'lucide-react';
 import { Customer, Loan, View, AuthUser } from './types';
 import Dashboard from './components/Dashboard';
@@ -19,6 +23,12 @@ import CustomerSection from './components/CustomerSection';
 import LoanRegistration from './components/LoanRegistration';
 import SimulationTab from './components/SimulationTab';
 import Reports from './components/Reports';
+
+interface Toast {
+  id: string;
+  message: string;
+  type: 'success' | 'info' | 'error';
+}
 
 const App: React.FC = () => {
   const [currentUser] = useState<AuthUser>({
@@ -32,6 +42,19 @@ const App: React.FC = () => {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
+    const id = Math.random().toString(36).substr(2, 9);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 4000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   useEffect(() => {
     const storedCustomers = localStorage.getItem('gr_solution_customers');
@@ -55,21 +78,25 @@ const App: React.FC = () => {
 
   const addCustomer = (customer: Customer) => {
     setCustomers(prev => [...prev, customer]);
+    showToast('Cliente cadastrado com sucesso!', 'success');
   };
 
   const updateCustomer = (updated: Customer) => {
     setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
+    showToast('Cadastro atualizado!', 'info');
   };
 
   const deleteCustomer = (id: string) => {
     if (window.confirm('Tem certeza que deseja excluir este cliente? Isso não removerá os contratos existentes.')) {
       setCustomers(prev => prev.filter(c => c.id !== id));
+      showToast('Cliente removido da base.', 'info');
     }
   };
 
   const addLoan = (loan: Loan) => {
     setLoans(prev => [...prev, loan]);
     setCurrentView('REPORTS');
+    showToast('Novo contrato efetivado!', 'success');
   };
 
   const navItems = [
@@ -239,6 +266,32 @@ const App: React.FC = () => {
             {currentView === 'SIMULATION' && <SimulationTab customers={customers} />}
             {currentView === 'REPORTS' && <Reports loans={loans} onUpdateLoans={setLoans} />}
           </div>
+        </div>
+
+        {/* Toast Notifications */}
+        <div className="fixed top-6 right-6 z-[200] flex flex-col gap-3 pointer-events-none">
+          {toasts.map(toast => (
+            <div 
+              key={toast.id}
+              className={`
+                pointer-events-auto flex items-center gap-3 px-6 py-4 rounded-2xl border shadow-2xl animate-in slide-in-from-right duration-300
+                ${toast.type === 'success' ? 'bg-zinc-950 border-emerald-500/30 text-emerald-500' : 
+                  toast.type === 'error' ? 'bg-zinc-950 border-red-500/30 text-red-500' : 
+                  'bg-zinc-950 border-[#BF953F]/30 text-[#BF953F]'}
+              `}
+            >
+              {toast.type === 'success' && <CheckCircle2 size={18} />}
+              {toast.type === 'error' && <AlertCircle size={18} />}
+              {toast.type === 'info' && <Info size={18} />}
+              <span className="text-[10px] font-black uppercase tracking-widest">{toast.message}</span>
+              <button 
+                onClick={() => removeToast(toast.id)}
+                className="ml-2 p-1 hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
         </div>
 
         {/* Menu Inferior Fixo para Celulares */}
