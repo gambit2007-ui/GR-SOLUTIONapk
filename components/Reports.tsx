@@ -19,7 +19,9 @@ import {
   MinusCircle,
   History,
   Trash2,
-  Edit3
+  Edit3,
+  Calendar,
+  X
 } from 'lucide-react';
 import { Loan, PaymentStatus, Installment, CashMovement } from '../types';
 
@@ -30,13 +32,18 @@ interface ReportsProps {
 
 const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
-  const [filterStatus, setFilterStatus] = useState<'TODOS' | 'ATIVOS' | 'INADIMPLENTES' | 'FINALIZADOS'>('TODOS');
+  const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['ATIVOS', 'INADIMPLENTES', 'FINALIZADOS']);
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
   
   // Gestão de Caixa
   const [cashMovements, setCashMovements] = useState<CashMovement[]>([]);
   const [isAddingMovement, setIsAddingMovement] = useState(false);
   const [editingMovementId, setEditingMovementId] = useState<string | null>(null);
   const [movementForm, setMovementForm] = useState({ type: 'APORTE' as any, amount: '', description: '' });
+
+  // Pagamento Parcial
+  const [partialPaymentModal, setPartialPaymentModal] = useState<{ loanId: string, instId: string } | null>(null);
+  const [partialAmount, setPartialAmount] = useState('');
 
   useEffect(() => {
     const stored = localStorage.getItem('gr_solution_cash_movements');
@@ -70,12 +77,21 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
       const isLiquidated = loan.installments.every(i => i.status === 'PAGO');
       const hasOverdue = loan.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr);
       
-      if (filterStatus === 'FINALIZADOS') return isLiquidated;
-      if (filterStatus === 'INADIMPLENTES') return !isLiquidated && hasOverdue;
-      if (filterStatus === 'ATIVOS') return !isLiquidated && !hasOverdue;
-      return true;
+      let status = 'ATIVOS';
+      if (isLiquidated) status = 'FINALIZADOS';
+      else if (hasOverdue) status = 'INADIMPLENTES';
+
+      const matchesStatus = selectedStatuses.includes(status);
+      
+      const matchesDate = !dateRange.start && !dateRange.end ? true : loan.installments.some(inst => {
+        const startMatch = !dateRange.start || inst.dueDate >= dateRange.start;
+        const endMatch = !dateRange.end || inst.dueDate <= dateRange.end;
+        return startMatch && endMatch;
+      });
+
+      return matchesStatus && matchesDate;
     });
-  }, [loans, filterStatus, todayStr]);
+  }, [loans, selectedStatuses, dateRange, todayStr]);
 
   const treasuryStats = useMemo(() => {
     const totalAportes = cashMovements.filter(m => m.type === 'APORTE').reduce((acc, m) => acc + m.amount, 0);
@@ -85,7 +101,9 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
     let totalRecebido = 0;
     loans.forEach(loan => {
       loan.installments.forEach(inst => {
-        if (inst.status === 'PAGO') {
+        if (inst.paidValue) {
+          totalRecebido += inst.paidValue;
+        } else if (inst.status === 'PAGO') {
           totalRecebido += inst.value + (inst.penaltyApplied || 0);
         }
       });
@@ -149,13 +167,15 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
       if (loan.id === loanId) {
         const updatedInstallments = loan.installments.map(inst => {
           if (inst.id === instId) {
-            const newStatus: PaymentStatus = inst.status === 'PAGO' ? 'PENDENTE' : 'PAGO';
+            const isPaying = inst.status !== 'PAGO';
+            const newStatus: PaymentStatus = isPaying ? 'PAGO' : 'PENDENTE';
             const penalty = calculatePenalty(inst);
             return { 
               ...inst, 
               status: newStatus, 
-              paidAt: newStatus === 'PAGO' ? Date.now() : undefined,
-              penaltyApplied: newStatus === 'PAGO' ? penalty : 0 
+              paidAt: isPaying ? Date.now() : undefined,
+              penaltyApplied: isPaying ? penalty : 0,
+              paidValue: isPaying ? (inst.value + penalty) : 0
             };
           }
           return inst;
@@ -167,6 +187,44 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
     onUpdateLoans(updatedLoans);
   };
 
+  const handlePartialPayment = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!partialPaymentModal || !partialAmount || !onUpdateLoans) return;
+    
+    const amount = parseFloat(partialAmount);
+    if (isNaN(amount) || amount <= 0) return;
+
+    const updatedLoans = loans.map(loan => {
+      if (loan.id === partialPaymentModal.loanId) {
+        const updatedInstallments = loan.installments.map(inst => {
+          if (inst.id === partialPaymentModal.instId) {
+            const currentPaid = inst.paidValue || 0;
+            const newPaid = currentPaid + amount;
+            const penalty = calculatePenalty(inst);
+            const totalDue = inst.value + penalty;
+            
+            const isFullyPaid = newPaid >= totalDue;
+            
+            return {
+              ...inst,
+              paidValue: newPaid,
+              status: isFullyPaid ? 'PAGO' : inst.status,
+              paidAt: isFullyPaid ? Date.now() : inst.paidAt,
+              penaltyApplied: isFullyPaid ? penalty : inst.penaltyApplied
+            };
+          }
+          return inst;
+        });
+        return { ...loan, installments: updatedInstallments };
+      }
+      return loan;
+    });
+
+    onUpdateLoans(updatedLoans);
+    setPartialPaymentModal(null);
+    setPartialAmount('');
+  };
+
   const generateWhatsAppURL = (loan: Loan, inst: Installment) => {
     const penalty = calculatePenalty(inst);
     const total = inst.value + penalty;
@@ -174,6 +232,16 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
     const message = `*GR SOLUTION - AVISO DE COBRANÇA*%0A%0AOlá *${loan.customerName}*, identificamos que a parcela nº ${inst.number} do seu contrato *#${loan.contractNumber}* está em atraso.%0A%0A💵 *Valor para Liquidação:* *${total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}*%0A%0ASolicitamos regularização imediata.`;
     return `https://wa.me/55${phone}?text=${message}`;
   };
+
+  const toggleStatus = (status: string) => {
+    setSelectedStatuses(prev => 
+      prev.includes(status) 
+        ? prev.filter(s => s !== status) 
+        : [...prev, status]
+    );
+  };
+
+  const clearDateRange = () => setDateRange({ start: '', end: '' });
 
   return (
     <div className="space-y-10 animate-in fade-in duration-500">
@@ -298,6 +366,38 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
         </div>
       )}
 
+      {/* Modal Pagamento Parcial */}
+      {partialPaymentModal && (
+        <div className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6">
+           <div className="bg-[#0a0a0a] border border-zinc-800 w-full max-w-md rounded-[2.5rem] p-10 animate-in zoom-in-95 duration-300 shadow-[0_0_50px_rgba(0,0,0,0.8)]">
+              <h3 className="text-sm font-black gold-text uppercase tracking-widest mb-8 flex items-center gap-3">
+                <PlusCircle className="text-[#BF953F]" />
+                Registrar Pagamento Parcial
+              </h3>
+              <form onSubmit={handlePartialPayment} className="space-y-6">
+                 <div>
+                   <label className="text-[10px] font-black text-zinc-600 uppercase mb-2 block">Valor do Pagamento (R$)</label>
+                   <input 
+                    type="number" 
+                    autoFocus
+                    value={partialAmount} 
+                    onChange={e => setPartialAmount(e.target.value)}
+                    className="w-full bg-black border border-zinc-800 rounded-2xl px-6 py-4 outline-none focus:border-[#BF953F] text-zinc-200 font-bold"
+                    placeholder="0.00"
+                    step="0.01"
+                   />
+                 </div>
+                 <div className="flex gap-4 pt-4">
+                    <button type="button" onClick={() => setPartialPaymentModal(null)} className="flex-1 py-4 text-[10px] font-black uppercase bg-zinc-900 text-zinc-500 rounded-2xl">Cancelar</button>
+                    <button type="submit" className="flex-1 py-4 text-[10px] font-black uppercase rounded-2xl gold-gradient text-black">
+                      Confirmar Pagamento
+                    </button>
+                 </div>
+              </form>
+           </div>
+        </div>
+      )}
+
       {/* Resumo de Operações */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <ReportCard 
@@ -315,7 +415,7 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
         />
         <ReportCard 
           title="A Receber" 
-          value={loans.reduce((acc, l) => acc + l.installments.filter(i => i.status === 'PENDENTE').reduce((sum, i) => sum + i.value + calculatePenalty(i), 0), 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+          value={loans.reduce((acc, l) => acc + l.installments.filter(i => i.status !== 'PAGO').reduce((sum, i) => sum + (i.value + calculatePenalty(i) - (i.paidValue || 0)), 0), 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
           icon={<Clock className="text-[#BF953F]" />}
           subtitle="Previsão Bruta"
         />
@@ -329,7 +429,7 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
              <p className="text-[9px] text-zinc-600 font-bold uppercase mt-1">Contratos com Atraso</p>
            </div>
            <button 
-             onClick={() => { setFilterStatus('INADIMPLENTES'); }}
+             onClick={() => { setSelectedStatuses(['INADIMPLENTES']); setDateRange({ start: '', end: '' }); }}
              className="w-full mt-4 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 text-white text-[9px] font-black uppercase py-2.5 rounded-xl transition-all"
            >
              Ver Lista de Cobrança
@@ -339,16 +439,62 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
 
       <div className="bg-[#0a0a0a] rounded-3xl border border-zinc-800 overflow-hidden shadow-2xl">
         <div className="p-8 border-b border-zinc-800 bg-zinc-900/20 space-y-8">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6">
             <div>
               <h3 className="text-lg font-bold gold-text uppercase tracking-widest">Controle de Carteira</h3>
               <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">Gestão centralizada de recebíveis e liquidação</p>
             </div>
-            <div className="flex flex-wrap gap-2">
-               <FilterButton active={filterStatus === 'TODOS'} onClick={() => setFilterStatus('TODOS')} label="Todos" count={loans.length} />
-               <FilterButton active={filterStatus === 'ATIVOS'} onClick={() => setFilterStatus('ATIVOS')} label="Ativos" count={loans.filter(l => !l.installments.every(i => i.status === 'PAGO') && !l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)).length} />
-               <FilterButton active={filterStatus === 'INADIMPLENTES'} onClick={() => setFilterStatus('INADIMPLENTES')} label="Atrasados" count={loans.filter(l => !l.installments.every(i => i.status === 'PAGO') && l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)).length} />
-               <FilterButton active={filterStatus === 'FINALIZADOS'} onClick={() => setFilterStatus('FINALIZADOS')} label="Finalizados" count={loans.filter(l => l.installments.every(i => i.status === 'PAGO')).length} />
+            
+            <div className="flex flex-col md:flex-row items-start md:items-center gap-6 w-full xl:w-auto">
+              {/* Filtro de Status */}
+              <div className="flex flex-wrap gap-2">
+                <FilterButton 
+                  active={selectedStatuses.includes('ATIVOS')} 
+                  onClick={() => toggleStatus('ATIVOS')} 
+                  label="Ativos" 
+                  count={loans.filter(l => !l.installments.every(i => i.status === 'PAGO') && !l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)).length} 
+                />
+                <FilterButton 
+                  active={selectedStatuses.includes('INADIMPLENTES')} 
+                  onClick={() => toggleStatus('INADIMPLENTES')} 
+                  label="Atrasados" 
+                  count={loans.filter(l => !l.installments.every(i => i.status === 'PAGO') && l.installments.some(i => i.status === 'PENDENTE' && i.dueDate < todayStr)).length} 
+                />
+                <FilterButton 
+                  active={selectedStatuses.includes('FINALIZADOS')} 
+                  onClick={() => toggleStatus('FINALIZADOS')} 
+                  label="Finalizados" 
+                  count={loans.filter(l => l.installments.every(i => i.status === 'PAGO')).length} 
+                />
+              </div>
+
+              {/* Filtro de Data */}
+              <div className="flex items-center gap-3 bg-black border border-zinc-800 p-2 rounded-2xl">
+                <div className="flex items-center gap-2 px-2 border-r border-zinc-800">
+                  <Calendar size={14} className="text-zinc-600" />
+                  <span className="text-[9px] font-black text-zinc-500 uppercase">Vencimento</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="date" 
+                    value={dateRange.start}
+                    onChange={e => setDateRange({...dateRange, start: e.target.value})}
+                    className="bg-transparent text-[10px] font-bold text-zinc-300 outline-none w-28"
+                  />
+                  <span className="text-zinc-700 text-[10px]">até</span>
+                  <input 
+                    type="date" 
+                    value={dateRange.end}
+                    onChange={e => setDateRange({...dateRange, end: e.target.value})}
+                    className="bg-transparent text-[10px] font-bold text-zinc-300 outline-none w-28"
+                  />
+                  {(dateRange.start || dateRange.end) && (
+                    <button onClick={clearDateRange} className="p-1 hover:bg-zinc-800 rounded-full text-zinc-500 transition-colors">
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -412,8 +558,8 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
                             <tr>
                               <th className="px-12 py-4">Ref.</th>
                               <th className="px-8 py-4">Vencimento</th>
-                              <th className="px-8 py-4 text-right">Nominal</th>
-                              <th className="px-8 py-4 text-right text-red-500">Acréscimo (1.5%)</th>
+                              <th className="px-8 py-4 text-right">Saldo Devedor</th>
+                              <th className="px-8 py-4 text-right text-red-500">Multa</th>
                               <th className="px-8 py-4 text-center">Status</th>
                               <th className="px-12 py-4 text-right">Operações</th>
                             </tr>
@@ -421,6 +567,9 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
                           <tbody className="divide-y divide-zinc-900/50">
                             {loan.installments.map((inst) => {
                               const penalty = calculatePenalty(inst);
+                              const totalDue = inst.value + penalty;
+                              const paid = inst.paidValue || 0;
+                              const remaining = Math.max(0, totalDue - paid);
                               const isOverdue = inst.status === 'PENDENTE' && inst.dueDate < todayStr;
                               
                               return (
@@ -428,7 +577,17 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
                                   <td className="px-12 py-4 text-[10px] font-black text-zinc-600">PARCELA {inst.number}</td>
                                   <td className="px-8 py-4 text-xs font-bold text-zinc-400">{inst.dueDate.split('-').reverse().join('/')}</td>
                                   <td className="px-8 py-4 text-right font-bold text-zinc-400 text-xs">
-                                    {inst.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                    <div className="flex flex-col items-end">
+                                      <span className={remaining > 0 && paid > 0 ? "gold-text" : inst.status === 'PAGO' ? "text-emerald-500" : "text-zinc-200"}>
+                                        {remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                      </span>
+                                      {paid > 0 && (
+                                        <div className="flex flex-col items-end">
+                                          <span className="text-[8px] text-zinc-600 uppercase">Total: {totalDue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                          <span className="text-[8px] text-emerald-600 uppercase font-black">Pago: {paid.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                        </div>
+                                      )}
+                                    </div>
                                   </td>
                                   <td className="px-8 py-4 text-right font-black text-red-500/80 text-xs italic">
                                     {penalty > 0 ? `+ ${penalty.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : '—'}
@@ -446,6 +605,15 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
                                   </td>
                                   <td className="px-12 py-4 text-right">
                                     <div className="flex justify-end gap-2">
+                                      {inst.status !== 'PAGO' && (
+                                        <button 
+                                          onClick={(e) => { e.stopPropagation(); setPartialPaymentModal({ loanId: loan.id, instId: inst.id }); }}
+                                          className="p-2 bg-[#BF953F]/10 text-[#BF953F] hover:bg-[#BF953F] hover:text-black rounded-lg transition-all border border-[#BF953F]/20"
+                                          title="Pagamento Parcial"
+                                        >
+                                          <TrendingUp size={14} />
+                                        </button>
+                                      )}
                                       {isOverdue && (
                                         <button 
                                           onClick={() => window.open(generateWhatsAppURL(loan, inst), '_blank')}

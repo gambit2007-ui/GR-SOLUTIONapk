@@ -39,6 +39,7 @@ export interface Installment {
   value: number; // Valor original
   status: PaymentStatus;
   paidAt?: number;
+  paidValue?: number; // Valor total já pago (incluindo pagamentos parciais)
   penaltyApplied?: number; // Valor da multa acumulada
 }
 
