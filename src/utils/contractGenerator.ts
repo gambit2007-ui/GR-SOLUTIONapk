@@ -40,15 +40,15 @@ export const generateContractPDF = (customer: Customer, loan: Loan) => {
   doc.setFont('helvetica', 'normal');
   doc.text('Nome: GR SOLUTION', margin, y);
   y += 5;
-  doc.text('CPF/CNPJ: [PREENCHER]', margin, y);
+  doc.text('CPF/CNPJ: ', margin, y);
   y += 5;
-  doc.text('RG: [PREENCHER]', margin, y);
+  doc.text('RG: ', margin, y);
   y += 5;
-  doc.text('Endereço: [PREENCHER]', margin, y);
+  doc.text('Endereço: ', margin, y);
   y += 5;
-  doc.text('Telefone: [PREENCHER]', margin, y);
+  doc.text('Telefone: 021967519287', margin, y);
   y += 5;
-  doc.text('E-mail: [PREENCHER]', margin, y);
+  doc.text('E-mail: ', margin, y);
   y += 10;
 
   // 6-10. Debtor

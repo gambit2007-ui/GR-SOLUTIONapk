@@ -417,17 +417,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
             <div className="h-[350px] w-full">
               {isMounted && (
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={monthlyHistory}>
-                    <defs>
-                      <linearGradient id="colorSaida" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#FF8C00" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#FF8C00" stopOpacity={0}/>
-                      </linearGradient>
-                      <linearGradient id="colorRetorno" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#00C853" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#00C853" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
+                  <BarChart data={monthlyHistory} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#18181b" vertical={false} />
                     <XAxis 
                       dataKey="name" 
@@ -443,14 +433,29 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
                       tickFormatter={(value) => `R$ ${value.toLocaleString('pt-BR', { notation: 'compact' })}`}
                     />
                     <Tooltip 
-                      contentStyle={{ backgroundColor: '#050505', border: '1px solid #27272a', borderRadius: '16px', padding: '12px' }}
+                      cursor={{ fill: 'rgba(255, 255, 255, 0.05)', radius: 8 }}
+                      contentStyle={{ backgroundColor: '#050505', border: '1px solid #27272a', borderRadius: '16px', padding: '12px', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5)' }}
                       itemStyle={{ fontSize: '11px', fontWeight: 'bold', padding: '2px 0' }}
                       labelStyle={{ color: '#BF953F', fontWeight: 'black', marginBottom: '8px', fontSize: '10px', textTransform: 'uppercase' }}
                       formatter={(value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                     />
-                    <Area type="monotone" dataKey="saida" name="Saída" stroke="#FF8C00" strokeWidth={3} fillOpacity={1} fill="url(#colorSaida)" />
-                    <Area type="monotone" dataKey="retorno" name="Retorno" stroke="#00C853" strokeWidth={3} fillOpacity={1} fill="url(#colorRetorno)" />
-                  </AreaChart>
+                    <Bar 
+                      dataKey="saida" 
+                      name="Saída" 
+                      fill="#FF8C00" 
+                      radius={[6, 6, 0, 0]} 
+                      barSize={20}
+                      animationDuration={1500}
+                    />
+                    <Bar 
+                      dataKey="retorno" 
+                      name="Retorno" 
+                      fill="#00C853" 
+                      radius={[6, 6, 0, 0]} 
+                      barSize={20}
+                      animationDuration={1500}
+                    />
+                  </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
