@@ -24,7 +24,7 @@ import CustomerSection from './components/CustomerSection';
 import LoanRegistration from './components/LoanRegistration';
 import SimulationTab from './components/SimulationTab';
 import Reports from './components/Reports';
-
+import logoImg from './gr-logo.jpeg';
 interface Toast {
   id: string;
   message: string;
