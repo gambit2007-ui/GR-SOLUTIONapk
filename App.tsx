@@ -1,8 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
-import { 
-  import { db } from "./firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { db } from "./firebase"; 
+import { collection, addDoc, getDocs } from "firebase/firestore";
 
   LayoutDashboard, 
   Users, 
@@ -60,8 +59,18 @@ const App: React.FC = () => {
   };
 
   useEffect(() => {
-    const storedCustomers = localStorage.getItem('gr_solution_customers');
-    const storedLoans = localStorage.getItem('gr_solution_loans');
+    useEffect(() => {
+  const fetchCustomers = async () => {
+    const querySnapshot = await getDocs(collection(db, "customers"));
+    const customersData = querySnapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+    setCustomers(customersData as any);
+  };
+
+  fetchCustomers();
+},
     
     if (storedCustomers) setCustomers(JSON.parse(storedCustomers));
     if (storedLoans) setLoans(JSON.parse(storedLoans));
@@ -79,10 +88,15 @@ const App: React.FC = () => {
     localStorage.setItem('gr_solution_loans', JSON.stringify(loans));
   }, [loans]);
 
-  const addCustomer = (customer: Customer) => {
-    setCustomers(prev => [...prev, customer]);
-    showToast('Cliente cadastrado com sucesso!', 'success');
-  };
+const addCustomer = async (customer: Customer) => {
+  await addDoc(collection(db, "customers"), customer);
+  const querySnapshot = await getDocs(collection(db, "customers"));
+  const customersData = querySnapshot.docs.map(doc => ({
+    id: doc.id,
+    ...doc.data()
+  }));
+  setCustomers(customersData as any);
+};
 
   const updateCustomer = (updated: Customer) => {
     setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
@@ -127,8 +141,7 @@ function App() {
     buscarDados();
   }, []);
 
-  return (
-
+  return
   return (
     <div className="flex h-screen bg-black overflow-hidden text-white font-sans">
       <style>
