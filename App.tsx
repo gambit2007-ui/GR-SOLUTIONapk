@@ -16,9 +16,9 @@ import { collection, addDoc, getDocs } from "firebase/firestore";
   User as UserIcon,
   CheckCircle2,
   Info,
-  AlertCircle,
-  X
-} from 'lucide-react';
+   AlertCircle,
+   X,
+  } from 'lucide-react';
 import { Customer, Loan, View, AuthUser } from './types';
 import Dashboard from './components/Dashboard';
 import CustomerSection from './components/CustomerSection';
@@ -79,14 +79,6 @@ const App: React.FC = () => {
       setIsSidebarOpen(false);
     }
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('gr_solution_customers', JSON.stringify(customers));
-  }, [customers]);
-
-  useEffect(() => {
-    localStorage.setItem('gr_solution_loans', JSON.stringify(loans));
-  }, [loans]);
 
 const addCustomer = async (customer: Customer) => {
   await addDoc(collection(db, "customers"), customer);
