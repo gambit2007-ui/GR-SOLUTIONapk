@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db } from "./firebase.ts"; 
+import { db } from "./src/firebase.ts"; 
 import { collection, addDoc, getDocs } from "firebase/firestore";
 import { 
   LayoutDashboard, 
