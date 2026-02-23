@@ -16,8 +16,8 @@ import { collection, addDoc, getDocs } from "firebase/firestore";
   User as UserIcon,
   CheckCircle2,
   Info,
-   AlertCircle,
-   X,
+  AlertCircle,
+  X,
   } from 'lucide-react';
 import { Customer, Loan, View, AuthUser } from './types';
 import Dashboard from './components/Dashboard';
