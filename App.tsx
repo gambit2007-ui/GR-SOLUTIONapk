@@ -1,6 +1,9 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
+  import { db } from "./firebase";
+import { collection, getDocs } from "firebase/firestore";
+
   LayoutDashboard, 
   Users, 
   FileText, 
@@ -107,6 +110,24 @@ const App: React.FC = () => {
     { id: 'SIMULATION', label: 'Simular', icon: Calculator },
     { id: 'REPORTS', label: 'Financeiro', icon: PieChart },
   ];
+function App() {
+
+  useEffect(() => {
+    const buscarDados = async () => {
+      try {
+        const querySnapshot = await getDocs(collection(db, "clientes"));
+        querySnapshot.forEach((doc) => {
+          console.log(doc.id, " => ", doc.data());
+        });
+      } catch (error) {
+        console.error("Erro ao buscar dados:", error);
+      }
+    };
+
+    buscarDados();
+  }, []);
+
+  return (
 
   return (
     <div className="flex h-screen bg-black overflow-hidden text-white font-sans">
