@@ -217,6 +217,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
       const dataUrl = await toPng(dashboardRef.current, { 
         quality: 0.95, 
         backgroundColor: '#050505',
+        skipFonts: true,
         style: {
           borderRadius: '0'
         }

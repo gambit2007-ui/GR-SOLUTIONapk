@@ -1,9 +1,9 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Calculator, 
   MessageCircle, 
-  Printer, 
+  FileText, 
   Users, 
   Eye, 
   Settings2,
@@ -11,6 +11,8 @@ import {
   ChevronRight,
   Share2
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import { toPng } from 'html-to-image';
 import { Frequency, InterestType, Customer } from '../types';
 
 interface SimulationTabProps {
@@ -18,6 +20,7 @@ interface SimulationTabProps {
 }
 
 const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
+  const proposalRef = useRef<HTMLDivElement>(null);
   const [activeSubTab, setActiveSubTab] = useState<'CONFIG' | 'PROPOSAL'>('CONFIG');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [clientName, setClientName] = useState('');
@@ -110,12 +113,35 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
     window.open(`https://api.whatsapp.com/send?phone=${finalPhone}&text=${message}`, '_blank');
   };
 
-  const handlePrint = () => {
+  const handleExportPDF = async () => {
+    if (!proposalRef.current) return;
+    
+    // Se não estiver na aba de proposta, muda para ela primeiro
     if (activeSubTab !== 'PROPOSAL') {
       setActiveSubTab('PROPOSAL');
-      setTimeout(() => window.print(), 300);
-    } else {
-      window.print();
+      // Pequeno delay para garantir que o DOM renderizou a aba de proposta
+      await new Promise(resolve => setTimeout(resolve, 300));
+    }
+
+    try {
+      const element = proposalRef.current;
+      const dataUrl = await toPng(element, { 
+        quality: 1, 
+        backgroundColor: '#ffffff',
+        skipFonts: true,
+        pixelRatio: 2 // Melhora a qualidade
+      });
+      
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgProps = pdf.getImageProperties(dataUrl);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`proposta-gr-solution-${clientName || 'cliente'}.pdf`);
+    } catch (err) {
+      console.error('Erro ao exportar PDF:', err);
+      alert('Erro ao gerar PDF. Tente novamente.');
     }
   };
 
@@ -270,16 +296,16 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
               </button>
               
               <button 
-                onClick={handlePrint}
-                title="Imprimir ou Gerar PDF"
+                onClick={handleExportPDF}
+                title="Gerar Proposta em PDF"
                 className="w-10 h-10 flex items-center justify-center rounded-xl border border-zinc-800 hover:border-[#BF953F]/50 hover:bg-[#BF953F]/5 text-zinc-600 hover:text-[#BF953F] transition-all active:scale-90"
               >
-                <Printer size={18} />
+                <FileText size={18} />
               </button>
             </div>
           </div>
 
-          <div className="print-area bg-white rounded-[2rem] overflow-hidden shadow-2xl transition-all border border-zinc-900/10">
+          <div ref={proposalRef} className="print-area bg-white rounded-[2rem] overflow-hidden shadow-2xl transition-all border border-zinc-900/10">
              <div className="proposal-card bg-white p-8 lg:p-20 text-black font-sans min-h-[1000px] flex flex-col text-left">
                 
                 {/* Header Documento */}
