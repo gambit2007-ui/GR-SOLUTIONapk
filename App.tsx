@@ -150,6 +150,7 @@ const App: React.FC = () => {
               <div className="flex flex-col">
                 <span className="font-black text-lg leading-none gold-text tracking-tighter">GR SULUTION</span>
                 <span className="text-[7px] text-zinc-600 font-bold uppercase tracking-widest">ajudando voce e sua familia</span>
+                <span className="text-[6px] text-[#BF953F]/40 font-black uppercase tracking-[0.3em] mt-0.5">v1.0.0</span>
               </div>
             )}
           </div>
