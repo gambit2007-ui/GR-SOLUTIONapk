@@ -12,6 +12,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { Customer, Loan, Frequency, InterestType, Installment } from '../types';
+import { generateContractPDF } from '../src/utils/contractGenerator';
 
 interface LoanRegistrationProps {
   customers: Customer[];
@@ -29,6 +30,8 @@ const LoanRegistration: React.FC<LoanRegistrationProps> = ({ customers, loans, o
   const [startDate, setStartDate] = useState(''); 
   const [notes, setNotes] = useState('');
   const [showProjection, setShowProjection] = useState(false);
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [lastCreatedLoan, setLastCreatedLoan] = useState<{customer: Customer, loan: Loan} | null>(null);
   
   const [simulation, setSimulation] = useState<{
     totalToReturn: number;
@@ -130,10 +133,55 @@ const LoanRegistration: React.FC<LoanRegistrationProps> = ({ customers, loans, o
       notes: notes,
       installments: installments
     };
+
+    // Generate PDF Contract
+    generateContractPDF(customer, newLoan);
+    
     onSaveLoan(newLoan);
+    setLastCreatedLoan({ customer, loan: newLoan });
+    setIsSuccess(true);
+  };
+
+  const resetForm = () => {
+    setIsSuccess(false);
+    setLastCreatedLoan(null);
+    setSelectedCustomerId('');
+    setAmount(1000);
+    setInterestRate(5);
+    setInstallmentsCount(12);
+    setNotes('');
   };
 
   const isFormValid = selectedCustomerId !== '' && startDate !== '' && amount > 0;
+
+  if (isSuccess && lastCreatedLoan) {
+    return (
+      <div className="max-w-2xl mx-auto py-20 text-center animate-in fade-in zoom-in-95 duration-500">
+        <div className="w-24 h-24 bg-emerald-500/20 rounded-full flex items-center justify-center mx-auto mb-8 border border-emerald-500/30">
+          <ShieldCheck size={48} className="text-emerald-500" />
+        </div>
+        <h2 className="text-3xl font-black text-white mb-4 uppercase tracking-widest">Contrato Registrado!</h2>
+        <p className="text-zinc-500 mb-10 font-bold uppercase text-xs tracking-widest">
+          O contrato #{lastCreatedLoan.loan.contractNumber} foi gerado e o PDF foi baixado automaticamente.
+        </p>
+        
+        <div className="flex flex-col sm:flex-row gap-4 justify-center">
+          <button 
+            onClick={() => generateContractPDF(lastCreatedLoan.customer, lastCreatedLoan.loan)}
+            className="px-8 py-4 bg-zinc-900 border border-zinc-800 rounded-2xl text-[10px] font-black uppercase tracking-widest text-zinc-300 hover:bg-zinc-800 transition-all"
+          >
+            Baixar PDF Novamente
+          </button>
+          <button 
+            onClick={resetForm}
+            className="px-8 py-4 gold-gradient text-black rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-xl"
+          >
+            Novo Registro
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 lg:space-y-10">

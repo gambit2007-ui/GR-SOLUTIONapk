@@ -264,7 +264,7 @@ const App: React.FC = () => {
               />
             )}
             {currentView === 'SIMULATION' && <SimulationTab customers={customers} />}
-            {currentView === 'REPORTS' && <Reports loans={loans} onUpdateLoans={setLoans} />}
+            {currentView === 'REPORTS' && <Reports loans={loans} onUpdateLoans={setLoans} customers={customers} />}
           </div>
         </div>
 

@@ -25,16 +25,18 @@ import {
   FileDown,
   Download
 } from 'lucide-react';
-import { Loan, PaymentStatus, Installment, CashMovement } from '../types';
+import { Loan, PaymentStatus, Installment, CashMovement, Customer } from '../types';
+import { generateContractPDF } from '../src/utils/contractGenerator';
 import { jsPDF } from 'jspdf';
 import { toPng } from 'html-to-image';
 
 interface ReportsProps {
   loans: Loan[];
   onUpdateLoans?: (loans: Loan[]) => void;
+  customers?: Customer[];
 }
 
-const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
+const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans, customers = [] }) => {
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(null);
   const [selectedStatuses, setSelectedStatuses] = useState<string[]>(['ATIVOS', 'INADIMPLENTES', 'FINALIZADOS']);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
@@ -621,6 +623,21 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans }) => {
                               <AlertTriangle size={8} /> PENDÊNCIA CRÍTICA
                             </div>
                           )}
+                          <button 
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const customer = customers.find(c => c.id === loan.customerId);
+                              if (customer) {
+                                generateContractPDF(customer, loan);
+                              } else {
+                                alert('Dados do cliente não encontrados para gerar o contrato.');
+                              }
+                            }}
+                            className="ml-2 p-1.5 bg-zinc-800 text-zinc-500 hover:text-[#BF953F] rounded-lg transition-all border border-zinc-700"
+                            title="Baixar Contrato PDF"
+                          >
+                            <FileDown size={14} />
+                          </button>
                         </div>
                         <p className="text-[10px] text-zinc-600 font-mono uppercase">Contrato #{loan.contractNumber}</p>
                       </div>

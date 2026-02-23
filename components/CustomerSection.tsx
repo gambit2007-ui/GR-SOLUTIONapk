@@ -28,9 +28,11 @@ import {
   MessageSquare,
   FileImage,
   Maximize2,
-  Download
+  Download,
+  FileDown
 } from 'lucide-react';
 import { Customer, CustomerDocument, Loan, PaymentStatus } from '../types';
+import { generateContractPDF } from '../src/utils/contractGenerator';
 import { validateCPF } from '../src/utils/validation';
 
 interface CustomerSectionProps {
@@ -438,6 +440,18 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                                <div>
                                   <div className="flex items-center gap-3 mb-1">
                                      <span className="text-xs font-black text-zinc-100 uppercase tracking-tighter">CONTRATO #{loan.contractNumber}</span>
+                                      <button 
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          if (viewingCustomer) {
+                                            generateContractPDF(viewingCustomer, loan);
+                                          }
+                                        }}
+                                        className="p-1 bg-zinc-900 text-zinc-500 hover:text-[#BF953F] rounded-lg transition-all border border-zinc-800"
+                                        title="Baixar Contrato PDF"
+                                      >
+                                        <FileDown size={12} />
+                                      </button>
                                      {progress === 100 && <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-500 text-[8px] font-black rounded-full border border-emerald-500/20 uppercase">LIQUIDADO</span>}
                                   </div>
                                   <div className="flex items-center gap-4 text-[10px] text-zinc-600 font-bold uppercase">
