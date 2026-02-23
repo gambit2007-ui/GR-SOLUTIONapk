@@ -32,6 +32,15 @@ export interface Customer {
   createdAt: number;
 }
 
+export interface PaymentRecord {
+  id: string;
+  date: number;
+  amount: number;
+  penalty?: number;
+  interest?: number;
+  notes?: string;
+}
+
 export interface Installment {
   id: string;
   number: number;
@@ -41,6 +50,7 @@ export interface Installment {
   paidAt?: number;
   paidValue?: number; // Valor total já pago (incluindo pagamentos parciais)
   penaltyApplied?: number; // Valor da multa acumulada
+  paymentHistory?: PaymentRecord[];
 }
 
 export interface CashMovement {

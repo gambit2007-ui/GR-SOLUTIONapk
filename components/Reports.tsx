@@ -25,7 +25,7 @@ import {
   FileDown,
   Download
 } from 'lucide-react';
-import { Loan, PaymentStatus, Installment, CashMovement, Customer } from '../types';
+import { Loan, PaymentStatus, Installment, CashMovement, Customer, PaymentRecord } from '../types';
 import { generateContractPDF } from '../src/utils/contractGenerator';
 import { jsPDF } from 'jspdf';
 import { toPng } from 'html-to-image';
@@ -51,6 +51,7 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans, customers = [] 
   // Pagamento Parcial
   const [partialPaymentModal, setPartialPaymentModal] = useState<{ loanId: string, instId: string } | null>(null);
   const [partialAmount, setPartialAmount] = useState('');
+  const [expandedInstHistory, setExpandedInstHistory] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('gr_solution_cash_movements');
@@ -177,12 +178,29 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans, customers = [] 
             const isPaying = inst.status !== 'PAGO';
             const newStatus: PaymentStatus = isPaying ? 'PAGO' : 'PENDENTE';
             const penalty = calculatePenalty(inst);
+            const amountPaid = isPaying ? (inst.value + penalty) : 0;
+            
+            let history = inst.paymentHistory || [];
+            if (isPaying) {
+              const newRecord: PaymentRecord = {
+                id: Math.random().toString(36).substr(2, 9),
+                date: Date.now(),
+                amount: amountPaid,
+                penalty: penalty,
+                notes: 'Liquidação total'
+              };
+              history = [...history, newRecord];
+            } else {
+              history = [];
+            }
+
             return { 
               ...inst, 
               status: newStatus, 
               paidAt: isPaying ? Date.now() : undefined,
               penaltyApplied: isPaying ? penalty : 0,
-              paidValue: isPaying ? (inst.value + penalty) : 0
+              paidValue: amountPaid,
+              paymentHistory: history
             };
           }
           return inst;
@@ -212,12 +230,20 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans, customers = [] 
             
             const isFullyPaid = newPaid >= totalDue;
             
+            const newRecord: PaymentRecord = {
+              id: Math.random().toString(36).substr(2, 9),
+              date: Date.now(),
+              amount: amount,
+              notes: 'Pagamento parcial'
+            };
+
             return {
               ...inst,
               paidValue: newPaid,
               status: isFullyPaid ? 'PAGO' : inst.status,
               paidAt: isFullyPaid ? Date.now() : inst.paidAt,
-              penaltyApplied: isFullyPaid ? penalty : inst.penaltyApplied
+              penaltyApplied: isFullyPaid ? penalty : inst.penaltyApplied,
+              paymentHistory: [...(inst.paymentHistory || []), newRecord]
             };
           }
           return inst;
@@ -684,66 +710,108 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans, customers = [] 
                               const isOverdue = inst.status === 'PENDENTE' && inst.dueDate < todayStr;
                               
                               return (
-                                <tr key={inst.id} className="hover:bg-zinc-800/20 transition-colors">
-                                  <td className="px-12 py-4 text-[10px] font-black text-zinc-600">PARCELA {inst.number}</td>
-                                  <td className="px-8 py-4 text-xs font-bold text-zinc-400">{inst.dueDate.split('-').reverse().join('/')}</td>
-                                  <td className="px-8 py-4 text-right font-bold text-zinc-400 text-xs">
-                                    <div className="flex flex-col items-end">
-                                      <span className={remaining > 0 && paid > 0 ? "gold-text" : inst.status === 'PAGO' ? "text-emerald-500" : "text-zinc-200"}>
-                                        {remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                      </span>
-                                      {paid > 0 && (
-                                        <div className="flex flex-col items-end">
-                                          <span className="text-[8px] text-zinc-600 uppercase">Total: {totalDue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                          <span className="text-[8px] text-emerald-600 uppercase font-black">Pago: {paid.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                <React.Fragment key={inst.id}>
+                                  <tr className="hover:bg-zinc-800/20 transition-colors">
+                                    <td className="px-12 py-4 text-[10px] font-black text-zinc-600">PARCELA {inst.number}</td>
+                                    <td className="px-8 py-4 text-xs font-bold text-zinc-400">{inst.dueDate.split('-').reverse().join('/')}</td>
+                                    <td className="px-8 py-4 text-right font-bold text-zinc-400 text-xs">
+                                      <div className="flex flex-col items-end">
+                                        <span className={remaining > 0 && paid > 0 ? "gold-text" : inst.status === 'PAGO' ? "text-emerald-500" : "text-zinc-200"}>
+                                          {remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                        </span>
+                                        {paid > 0 && (
+                                          <div className="flex flex-col items-end">
+                                            <span className="text-[8px] text-zinc-600 uppercase">Total: {totalDue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                            <span className="text-[8px] text-emerald-600 uppercase font-black">Pago: {paid.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-8 py-4 text-right font-black text-red-500/80 text-xs italic">
+                                      {penalty > 0 ? `+ ${penalty.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : '—'}
+                                    </td>
+                                    <td className="px-8 py-4 text-center">
+                                      <div className="flex items-center justify-center">
+                                        {inst.status === 'PAGO' ? (
+                                          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[8px] font-black bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 uppercase">Liquidado</span>
+                                        ) : isOverdue ? (
+                                          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[8px] font-black bg-red-500/10 text-red-500 border border-red-500/20 uppercase">Em Atraso</span>
+                                        ) : (
+                                          <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[8px] font-black bg-zinc-800 text-zinc-500 border border-zinc-700 uppercase">Pendente</span>
+                                        )}
+                                      </div>
+                                    </td>
+                                    <td className="px-12 py-4 text-right">
+                                      <div className="flex justify-end gap-2">
+                                        {inst.paymentHistory && inst.paymentHistory.length > 0 && (
+                                          <button 
+                                            onClick={(e) => { e.stopPropagation(); setExpandedInstHistory(expandedInstHistory === inst.id ? null : inst.id); }}
+                                            className={`p-2 rounded-lg transition-all border ${expandedInstHistory === inst.id ? 'bg-[#BF953F] text-black border-[#BF953F]' : 'bg-zinc-800 text-zinc-500 border-zinc-700 hover:text-[#BF953F]'}`}
+                                            title="Ver Histórico de Pagamentos"
+                                          >
+                                            <History size={14} />
+                                          </button>
+                                        )}
+                                        {inst.status !== 'PAGO' && (
+                                          <button 
+                                            onClick={(e) => { e.stopPropagation(); setPartialPaymentModal({ loanId: loan.id, instId: inst.id }); }}
+                                            className="p-2 bg-[#BF953F]/10 text-[#BF953F] hover:bg-[#BF953F] hover:text-black rounded-lg transition-all border border-[#BF953F]/20"
+                                            title="Pagamento Parcial"
+                                          >
+                                            <TrendingUp size={14} />
+                                          </button>
+                                        )}
+                                        {isOverdue && (
+                                          <button 
+                                            onClick={() => window.open(generateWhatsAppURL(loan, inst), '_blank')}
+                                            className="p-2 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white rounded-lg transition-all border border-emerald-500/20" 
+                                          >
+                                            <MessageCircle size={14} />
+                                          </button>
+                                        )}
+                                        <button 
+                                          onClick={(e) => { e.stopPropagation(); toggleInstallmentStatus(loan.id, inst.id); }}
+                                          className={`text-[9px] font-black uppercase tracking-tighter px-4 py-2 rounded-lg transition-all ${
+                                            inst.status === 'PAGO' ? 'bg-zinc-800 text-zinc-600' : 'gold-gradient text-black'
+                                          }`}
+                                        >
+                                          {inst.status === 'PAGO' ? 'Estornar' : 'Liquidar'}
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {expandedInstHistory === inst.id && inst.paymentHistory && (
+                                    <tr className="bg-zinc-900/20 animate-in slide-in-from-top-1 duration-200">
+                                      <td colSpan={6} className="px-12 py-6">
+                                        <div className="space-y-4 border-l-2 border-[#BF953F]/30 ml-4 pl-8 py-2">
+                                          <div className="flex items-center gap-2 mb-4">
+                                            <History size={12} className="text-[#BF953F]" />
+                                            <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Rastreamento de Transações</p>
+                                          </div>
+                                          {inst.paymentHistory.map((record) => (
+                                            <div key={record.id} className="flex items-center justify-between gap-8 bg-black/20 p-3 rounded-xl border border-zinc-900/50">
+                                              <div className="flex items-center gap-4">
+                                                <div className="w-2 h-2 rounded-full bg-[#BF953F]/50 shadow-[0_0_10px_rgba(191,149,63,0.3)]"></div>
+                                                <div>
+                                                  <p className="text-[10px] font-black text-zinc-200 uppercase tracking-tight">{record.notes || 'Pagamento registrado'}</p>
+                                                  <p className="text-[8px] text-zinc-600 font-mono">{new Date(record.date).toLocaleString('pt-BR')}</p>
+                                                </div>
+                                              </div>
+                                              <div className="text-right">
+                                                <p className="text-[11px] font-black text-emerald-500">+{record.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+                                                {(record.penalty || record.interest) && (
+                                                  <p className="text-[8px] text-red-500/60 font-bold italic">
+                                                    Inclui {((record.penalty || 0) + (record.interest || 0)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} de encargos
+                                                  </p>
+                                                )}
+                                              </div>
+                                            </div>
+                                          ))}
                                         </div>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="px-8 py-4 text-right font-black text-red-500/80 text-xs italic">
-                                    {penalty > 0 ? `+ ${penalty.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` : '—'}
-                                  </td>
-                                  <td className="px-8 py-4 text-center">
-                                    <div className="flex items-center justify-center">
-                                      {inst.status === 'PAGO' ? (
-                                        <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[8px] font-black bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 uppercase">Liquidado</span>
-                                      ) : isOverdue ? (
-                                        <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[8px] font-black bg-red-500/10 text-red-500 border border-red-500/20 uppercase">Em Atraso</span>
-                                      ) : (
-                                        <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-[8px] font-black bg-zinc-800 text-zinc-500 border border-zinc-700 uppercase">Pendente</span>
-                                      )}
-                                    </div>
-                                  </td>
-                                  <td className="px-12 py-4 text-right">
-                                    <div className="flex justify-end gap-2">
-                                      {inst.status !== 'PAGO' && (
-                                        <button 
-                                          onClick={(e) => { e.stopPropagation(); setPartialPaymentModal({ loanId: loan.id, instId: inst.id }); }}
-                                          className="p-2 bg-[#BF953F]/10 text-[#BF953F] hover:bg-[#BF953F] hover:text-black rounded-lg transition-all border border-[#BF953F]/20"
-                                          title="Pagamento Parcial"
-                                        >
-                                          <TrendingUp size={14} />
-                                        </button>
-                                      )}
-                                      {isOverdue && (
-                                        <button 
-                                          onClick={() => window.open(generateWhatsAppURL(loan, inst), '_blank')}
-                                          className="p-2 bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-white rounded-lg transition-all border border-emerald-500/20" 
-                                        >
-                                          <MessageCircle size={14} />
-                                        </button>
-                                      )}
-                                      <button 
-                                        onClick={(e) => { e.stopPropagation(); toggleInstallmentStatus(loan.id, inst.id); }}
-                                        className={`text-[9px] font-black uppercase tracking-tighter px-4 py-2 rounded-lg transition-all ${
-                                          inst.status === 'PAGO' ? 'bg-zinc-800 text-zinc-600' : 'gold-gradient text-black'
-                                        }`}
-                                      >
-                                        {inst.status === 'PAGO' ? 'Estornar' : 'Liquidar'}
-                                      </button>
-                                    </div>
-                                  </td>
-                                </tr>
+                                      </td>
+                                    </tr>
+                                  )}
+                                </React.Fragment>
                               );
                             })}
                           </tbody>

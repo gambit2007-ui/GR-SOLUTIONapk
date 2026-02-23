@@ -113,23 +113,48 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
     window.open(`https://api.whatsapp.com/send?phone=${finalPhone}&text=${message}`, '_blank');
   };
 
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+
+  const handleExportAndSendWhatsApp = async () => {
+    if (!proposalRef.current || isGeneratingPDF) return;
+    
+    // Primeiro gera o PDF
+    await handleExportPDF();
+    
+    // Depois abre o WhatsApp
+    handleSendWhatsApp();
+  };
+
   const handleExportPDF = async () => {
-    if (!proposalRef.current) return;
+    if (!proposalRef.current || isGeneratingPDF) return;
+    
+    setIsGeneratingPDF(true);
     
     // Se não estiver na aba de proposta, muda para ela primeiro
     if (activeSubTab !== 'PROPOSAL') {
       setActiveSubTab('PROPOSAL');
-      // Pequeno delay para garantir que o DOM renderizou a aba de proposta
-      await new Promise(resolve => setTimeout(resolve, 300));
+      // Delay maior para garantir renderização completa
+      await new Promise(resolve => setTimeout(resolve, 800));
     }
 
     try {
       const element = proposalRef.current;
+      
+      // Forçar scroll para o topo do elemento para evitar cortes
+      element.scrollTop = 0;
+
       const dataUrl = await toPng(element, { 
         quality: 1, 
         backgroundColor: '#ffffff',
         skipFonts: true,
-        pixelRatio: 2 // Melhora a qualidade
+        cacheBust: true,
+        pixelRatio: 2,
+        width: element.scrollWidth,
+        height: element.scrollHeight,
+        style: {
+          transform: 'scale(1)',
+          transformOrigin: 'top left'
+        }
       });
       
       const pdf = new jsPDF('p', 'mm', 'a4');
@@ -137,11 +162,13 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
       
-      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`proposta-gr-solution-${clientName || 'cliente'}.pdf`);
+      pdf.addImage(dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      pdf.save(`proposta-gr-solution-${clientName.trim() || 'cliente'}.pdf`);
     } catch (err) {
       console.error('Erro ao exportar PDF:', err);
-      alert('Erro ao gerar PDF. Tente novamente.');
+      alert('Erro ao gerar PDF. Verifique se há imagens bloqueadas ou tente novamente.');
+    } finally {
+      setIsGeneratingPDF(false);
     }
   };
 
@@ -288,6 +315,21 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
             
             <div className="flex items-center gap-2">
               <button 
+                onClick={handleExportAndSendWhatsApp}
+                disabled={isGeneratingPDF}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl border border-[#BF953F]/30 bg-[#BF953F]/5 text-[#BF953F] hover:bg-[#BF953F] hover:text-black transition-all active:scale-95 ${isGeneratingPDF ? 'opacity-50 cursor-not-allowed' : ''}`}
+              >
+                {isGeneratingPDF ? (
+                  <div className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <Share2 size={14} />
+                )}
+                <span className="text-[9px] font-black uppercase tracking-widest">Gerar e Enviar</span>
+              </button>
+
+              <div className="w-px h-6 bg-zinc-900/50 mx-1"></div>
+
+              <button 
                 onClick={handleSendWhatsApp}
                 title="Compartilhar via WhatsApp"
                 className="w-10 h-10 flex items-center justify-center rounded-xl border border-zinc-800 hover:border-emerald-500/50 hover:bg-emerald-500/5 text-zinc-600 hover:text-emerald-500 transition-all active:scale-90"
@@ -297,10 +339,15 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
               
               <button 
                 onClick={handleExportPDF}
+                disabled={isGeneratingPDF}
                 title="Gerar Proposta em PDF"
-                className="w-10 h-10 flex items-center justify-center rounded-xl border border-zinc-800 hover:border-[#BF953F]/50 hover:bg-[#BF953F]/5 text-zinc-600 hover:text-[#BF953F] transition-all active:scale-90"
+                className={`w-10 h-10 flex items-center justify-center rounded-xl border border-zinc-800 transition-all active:scale-90 ${isGeneratingPDF ? 'opacity-50 cursor-not-allowed' : 'hover:border-[#BF953F]/50 hover:bg-[#BF953F]/5 text-zinc-600 hover:text-[#BF953F]'}`}
               >
-                <FileText size={18} />
+                {isGeneratingPDF ? (
+                  <div className="w-4 h-4 border-2 border-[#BF953F] border-t-transparent rounded-full animate-spin" />
+                ) : (
+                  <FileText size={18} />
+                )}
               </button>
             </div>
           </div>
@@ -311,9 +358,6 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers = [] }) => {
                 {/* Header Documento */}
                 <div className="flex justify-between items-start border-b border-gray-100 pb-10 mb-12">
                    <div className="flex items-center gap-4 lg:gap-8">
-                      <div className="w-14 h-14 lg:w-20 lg:h-20 rounded-2xl bg-black flex items-center justify-center overflow-hidden shrink-0 shadow-lg border border-gray-100">
-                         <img src="https://i.ibb.co/L6WvFhH/gr-logo.jpg" alt="Logo" className="w-full h-full object-cover scale-110" />
-                      </div>
                       <div>
                          <h1 className="text-2xl lg:text-4xl font-black tracking-tighter mb-1">GR SULUTION</h1>
                          <p className="text-[7px] lg:text-[9px] uppercase tracking-[0.4em] font-black text-gray-400">Wealth & Asset Management</p>

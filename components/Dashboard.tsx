@@ -214,10 +214,14 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers }) => {
   const exportToPDF = async () => {
     if (!dashboardRef.current) return;
     try {
-      const dataUrl = await toPng(dashboardRef.current, { 
+      const element = dashboardRef.current;
+      const dataUrl = await toPng(element, { 
         quality: 0.95, 
         backgroundColor: '#050505',
         skipFonts: true,
+        cacheBust: true,
+        width: element.offsetWidth,
+        height: element.offsetHeight,
         style: {
           borderRadius: '0'
         }
