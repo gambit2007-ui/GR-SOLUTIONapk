@@ -87,9 +87,10 @@ const App: React.FC = () => {
   };
 
   const deleteCustomer = (id: string) => {
-    if (window.confirm('Tem certeza que deseja excluir este cliente? Isso não removerá os contratos existentes.')) {
+    if (window.confirm('Tem certeza que deseja excluir este cliente? Todos os contratos vinculados a ele também serão removidos.')) {
       setCustomers(prev => prev.filter(c => c.id !== id));
-      showToast('Cliente removido da base.', 'info');
+      setLoans(prev => prev.filter(l => l.customerId !== id));
+      showToast('Cliente e seus contratos foram removidos.', 'info');
     }
   };
 
