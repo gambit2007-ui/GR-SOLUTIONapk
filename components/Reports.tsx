@@ -171,6 +171,27 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans, customers = [] 
 
   const toggleInstallmentStatus = (loanId: string, instId: string) => {
     if (!onUpdateLoans) return;
+    
+    const loan = loans.find(l => l.id === loanId);
+    const inst = loan?.installments.find(i => i.id === instId);
+    
+    if (loan && inst) {
+      const isPaying = inst.status !== 'PAGO';
+      const penalty = calculatePenalty(inst);
+      const amountPaid = isPaying ? (inst.value + penalty) : (inst.paidValue || 0);
+      
+      const newMovement: CashMovement = {
+        id: Math.random().toString(36).substr(2, 9),
+        type: isPaying ? 'RECEBIMENTO' : 'ESTORNO',
+        amount: amountPaid,
+        description: isPaying 
+          ? `Liquidação Parcela ${inst.number} - ${loan.customerName}`
+          : `Estorno Parcela ${inst.number} - ${loan.customerName}`,
+        date: Date.now()
+      };
+      setCashMovements(prev => [newMovement, ...prev]);
+    }
+
     const updatedLoans = loans.map(loan => {
       if (loan.id === loanId) {
         const updatedInstallments = loan.installments.map(inst => {
@@ -221,6 +242,15 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans, customers = [] 
 
     const updatedLoans = loans.map(loan => {
       if (loan.id === partialPaymentModal.loanId) {
+        const newMovement: CashMovement = {
+          id: Math.random().toString(36).substr(2, 9),
+          type: 'RECEBIMENTO',
+          amount: amount,
+          description: `Pagamento Parcial - ${loan.customerName} (Contrato #${loan.contractNumber})`,
+          date: Date.now()
+        };
+        setCashMovements(prev => [newMovement, ...prev]);
+
         const updatedInstallments = loan.installments.map(inst => {
           if (inst.id === partialPaymentModal.instId) {
             const currentPaid = inst.paidValue || 0;
@@ -389,8 +419,8 @@ const Reports: React.FC<ReportsProps> = ({ loans, onUpdateLoans, customers = [] 
                            <p className="text-[10px] font-black text-zinc-200 uppercase group-hover:text-[#BF953F] transition-colors">{m.description}</p>
                            <p className="text-[8px] text-zinc-600 font-mono">{new Date(m.date).toLocaleString('pt-BR')}</p>
                         </td>
-                        <td className={`px-8 py-4 text-right font-black text-[11px] ${m.type === 'APORTE' ? 'text-emerald-500' : 'text-red-500'}`}>
-                           {m.type === 'APORTE' ? '+' : '-'} {m.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                        <td className={`px-8 py-4 text-right font-black text-[11px] ${(m.type === 'APORTE' || m.type === 'RECEBIMENTO') ? 'text-emerald-500' : 'text-red-500'}`}>
+                           {(m.type === 'APORTE' || m.type === 'RECEBIMENTO') ? '+' : '-'} {m.amount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         </td>
                         <td className="px-8 py-4 text-right">
                            <div className="flex items-center justify-end gap-2">

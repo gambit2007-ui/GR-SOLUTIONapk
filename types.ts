@@ -2,7 +2,7 @@
 export type Frequency = 'DIARIO' | 'SEMANAL' | 'MENSAL';
 export type InterestType = 'SIMPLES' | 'PRICE';
 export type PaymentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO';
-export type CashMovementType = 'APORTE' | 'RETIRADA';
+export type CashMovementType = 'APORTE' | 'RETIRADA' | 'RECEBIMENTO' | 'ESTORNO';
 
 export interface AuthUser {
   id: string;
