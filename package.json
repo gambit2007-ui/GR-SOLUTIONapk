@@ -12,8 +12,8 @@
   "dependencies": {
     "@google/genai": "^1.42.0",
     "firebase": "^12.9.0",
-    "html-to-image": "^1.11.11",
-    "jspdf": "^2.5.1",
+    "html-to-image": "^1.11.13",
+    "jspdf": "^2.5.2",
     "lucide-react": "^0.564.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
