@@ -80,5 +80,4 @@ export interface Loan {
   notes?: string;
   installments: Installment[];
 }
-
 export type View = 'DASHBOARD' | 'CUSTOMERS' | 'LOANS' | 'SIMULATION' | 'REPORTS';
