@@ -643,3 +643,4 @@ const StatCard = ({ title, value, icon, border, description, trend, compact }: a
     )}
   </div>
 );
+export default Dashboard;

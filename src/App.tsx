@@ -17,7 +17,7 @@ import {
 import { Customer, Loan, View, AuthUser } from './types';
 
 // Componentes
-import { Dashboard } from './components/Dashboard'
+import Dashboard from './components/Dashboard';
 import CustomerSection from './components/CustomerSection';
 import LoanRegistration from './components/LoanRegistration';
 import SimulationTab from './components/SimulationTab';
