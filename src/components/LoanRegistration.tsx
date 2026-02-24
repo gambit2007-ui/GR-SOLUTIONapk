@@ -12,7 +12,7 @@ import {
   MessageSquare
 } from 'lucide-react';
 import { Customer, Loan, Frequency, InterestType, Installment } from '../types';
-import { generateContractPDF } from '../src/utils/contractGenerator';
+import { generateContractPDF } from '../utils/contractGenerator';
 
 interface LoanRegistrationProps {
   customers: Customer[];

@@ -1,4 +1,6 @@
 
+import { collection, addDoc } from "firebase/firestore";
+import { db } from "../firebase";
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   Search, 
@@ -32,8 +34,8 @@ import {
   FileDown
 } from 'lucide-react';
 import { Customer, CustomerDocument, Loan, PaymentStatus } from '../types';
-import { generateContractPDF } from '../src/utils/contractGenerator';
-import { validateCPF } from '../src/utils/validation';
+import { generateContractPDF } from '../utils/contractGenerator';
+import { validateCPF } from '../utils/validation';
 
 interface CustomerSectionProps {
   customers: Customer[];
@@ -178,7 +180,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     setDocuments(prev => prev.filter((_, i) => i !== index));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!validateCPF(formData.cpf)) {
@@ -206,12 +208,12 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         documents: documents
       });
     } else {
-      const newCustomer: Customer = {
-        ...finalData,
-        id: Math.random().toString(36).substr(2, 9),
-        documents: documents
-      };
-      onAddCustomer(newCustomer);
+    await addDoc(collection(db, "clientes"), {
+  ...finalData,
+  documents: documents
+});
+
+alert("Cliente salvo no banco de dados!");
     }
     closeForm();
   };

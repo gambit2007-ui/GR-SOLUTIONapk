@@ -26,7 +26,7 @@ import {
   Download
 } from 'lucide-react';
 import { Loan, PaymentStatus, Installment, CashMovement, Customer, PaymentRecord } from '../types';
-import { generateContractPDF } from '../src/utils/contractGenerator';
+import { generateContractPDF } from "../utils/contractGenerator";
 import { jsPDF } from 'jspdf';
 import { toPng } from 'html-to-image';
 

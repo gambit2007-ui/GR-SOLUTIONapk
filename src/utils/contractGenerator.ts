@@ -1,6 +1,6 @@
 
 import { jsPDF } from 'jspdf';
-import { Customer, Loan } from '../../types';
+import { Customer, Loan } from '../types';
 
 export const generateContractPDF = (customer: Customer, loan: Loan) => {
   const doc = new jsPDF();
