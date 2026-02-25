@@ -4,185 +4,194 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
 import { 
-  Users, Briefcase, AlertCircle, ShieldCheck, 
-  ArrowUpRight, ArrowDownRight, TrendingUp, CalendarDays,
-  Filter, FileDown, FileText, Wallet, ArrowRightLeft, Coins, Plus, Minus
+  Users, Briefcase, AlertCircle, ShieldCheck, ArrowUpRight, 
+  ArrowDownRight, TrendingUp, Wallet, Coins, Filter
 } from 'lucide-react';
-import { db } from "../firebase";
-import { collection, onSnapshot, query, addDoc } from "firebase/firestore";
-import { jsPDF } from 'jspdf';
-import { toPng } from 'html-to-image';
+import { db } from "../firebase"; // Certifique-se que o caminho está correto
+// Adicione 'serverTimestamp' dentro das chaves:
+import { 
+  collection, 
+  onSnapshot, 
+  query, 
+  doc, 
+  updateDoc, 
+  addDoc, 
+  orderBy, 
+  serverTimestamp // <--- Esta é a peça que está faltando!
+} from 'firebase/firestore';
 
-const Dashboard = ({ loans = [], customers = [] }: any) => {
-  const [isMounted, setIsMounted] = useState(false);
+const Dashboard = () => {
+  const [loans, setLoans] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [isMounted, setIsMounted] = useState(false);
   const [period, setPeriod] = useState('30D');
   const dashboardRef = useRef<HTMLDivElement>(null);
 
-  // ✅ Conexão com Firebase para pegar Aportes e Retiradas
+  const todayStr = new Date().toISOString().split('T')[0];
+// Exemplo de função para salvar aporte/retirada
+const registrarMovimentacao = async (valor, motivo, tipo) => {
+  const valorFinal = tipo === 'retirada' ? -Math.abs(valor) : Math.abs(valor);
+  
+  await addDoc(collection(db, "caixa"), {
+    valor: valorFinal,
+    motivo: motivo,
+    tipo: tipo,
+    data: serverTimestamp()
+  });
+  
+  // Aqui você deve atualizar o estado do saldo disponível
+};
+  // --- CONEXÃO FIREBASE EM TEMPO REAL ---
   useEffect(() => {
-    const q = query(collection(db, "movimentacoes"));
-    const unsub = onSnapshot(q, (snap) => {
+    setIsMounted(true);
+    
+    // Escutar Contratos
+    const unsubLoans = onSnapshot(collection(db, "contratos"), (snap) => {
+      setLoans(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    // Escutar Movimentações (Extrato)
+    const qMov = query(collection(db, "movimentacoes"), orderBy("date", "desc"));
+    const unsubMov = onSnapshot(qMov, (snap) => {
       setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     });
-    setIsMounted(true);
-    return () => unsub();
+
+    return () => { unsubLoans(); unsubMov(); };
   }, []);
 
-  // ✅ Cálculos Fundamentais (Unindo Contratos + Movimentações)
+  // --- LÓGICA DE CÁLCULO (O "CÉREBRO" DO DASHBOARD) ---
   const stats = useMemo(() => {
-    // 1. O que saiu em empréstimos
-    const totalBorrowed = loans.reduce((acc: number, l: any) => acc + (Number(l.amount) || 0), 0);
-    
-    // 2. O que já voltou das parcelas (Liquidado no Reports)
-    const totalReceived = loans.reduce((acc: number, l: any) => {
-      return acc + (l.installments?.reduce((sum: number, inst: any) => 
-        inst.status === 'PAID' ? sum + (Number(inst.value) || 0) : sum, 0) || 0);
-    }, 0);
+    // 1. Total que saiu do caixa (Aportes dos investidores)
+    const aportes = transactions
+      .filter(t => t.type === 'APORTE')
+      .reduce((acc, t) => acc + (Number(t.value) || 0), 0);
 
-    // 3. Aportes e Retiradas manuais
-    const totalAportes = transactions.filter(t => t.type === 'APORTE').reduce((acc, t) => acc + t.value, 0);
-    const totalRetiradas = transactions.filter(t => t.type === 'RETIRADA').reduce((acc, t) => acc + t.value, 0);
+    // 2. Total que saiu para empréstimos (O que está na rua)
+    const totalEmprestado = loans.reduce((acc, l) => acc + (Number(l.amount) || 0), 0);
 
-    // 4. Saldo Real (Fórmula Mestra)
-    const currentBalance = (totalAportes + totalReceived) - (totalBorrowed + totalRetiradas);
+    // 3. Total recebido de parcelas
+    const totalRecebido = transactions
+      .filter(t => t.type === 'RETORNO_PARCELA')
+      .reduce((acc, t) => acc + (Number(t.value) || 0), 0);
 
-    // 5. Inadimplência (Parcelas vencidas e não pagas)
-    const today = new Date().toISOString().split('T')[0];
-    const overdueContracts = loans.filter((l: any) => 
-      l.installments?.some((i: any) => i.status !== 'PAID' && i.dueDate < today)
+    // 4. Inadimplência (Parcelas vencidas e não pagas)
+    const overdueCount = loans.filter(l => 
+      l.installments?.some((inst: any) => 
+        inst.status !== 'PAID' && inst.dueDate < todayStr
+      )
     ).length;
 
-    return { totalBorrowed, totalReceived, currentBalance, overdueContracts, totalAportes };
-  }, [loans, transactions]);
+    // 5. Saldo Real (Aportes + Retornos - Saídas/Retiradas)
+    const retiradas = transactions
+      .filter(t => t.type === 'RETIRADA')
+      .reduce((acc, t) => acc + (Number(t.value) || 0), 0);
+    
+    const saldoEmCaixa = (aportes + totalRecebido) - (totalEmprestado + retiradas);
 
-  // ✅ Função de Aporte/Retirada Rápida
-  const handleQuickTransaction = async (type: 'APORTE' | 'RETIRADA') => {
-    const val = prompt(`Digite o valor do ${type}:`);
-    if (!val || isNaN(Number(val))) return;
-    await addDoc(collection(db, "movimentacoes"), {
-      type,
-      value: Number(val),
-      date: Date.now(),
-      description: `Operação via Dashboard`
-    });
-  };
+    return {
+      totalEmprestado,
+      totalRecebido,
+      saldoEmCaixa,
+      overdueCount,
+      customerCount: loans.length,
+      activeContracts: loans.filter(l => l.installments?.some((i:any) => i.status !== 'PAID')).length
+    };
+  }, [loans, transactions, todayStr]);
 
-  // ✅ Exportação PDF
-  const exportToPDF = async () => {
-    if (!dashboardRef.current) return;
-    const dataUrl = await toPng(dashboardRef.current, { backgroundColor: '#050505' });
-    const pdf = new jsPDF('p', 'mm', 'a4');
-    pdf.addImage(dataUrl, 'PNG', 0, 0, 210, 297 * (dashboardRef.current.offsetHeight / dashboardRef.current.offsetWidth));
-    pdf.save('relatorio-gr-solution.pdf');
-  };
+  // Dados para o Gráfico de Pizza
+  const statusData = [
+    { name: 'Em Dia', value: stats.activeContracts - stats.overdueCount, color: '#BF953F' },
+    { name: 'Atrasados', value: stats.overdueCount, color: '#EF4444' },
+    { name: 'Finalizados', value: loans.length - stats.activeContracts, color: '#10B981' }
+  ];
+
+  if (!isMounted) return null;
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-700">
+    <div className="p-8 space-y-8 bg-black min-h-screen text-white" ref={dashboardRef}>
       
-      {/* HEADER DE AÇÕES */}
-      <div className="flex flex-col md:flex-row justify-between items-center gap-4 bg-[#0a0a0a] p-4 rounded-3xl border border-zinc-900">
-        <div className="flex items-center gap-4">
-          <button onClick={() => setPeriod('30D')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${period === '30D' ? 'bg-[#BF953F] text-black' : 'text-zinc-500'}`}>30 Dias</button>
-          <button onClick={() => setPeriod('ALL')} className={`px-4 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest transition-all ${period === 'ALL' ? 'bg-[#BF953F] text-black' : 'text-zinc-500'}`}>Tudo</button>
+      {/* HEADER */}
+      <div className="flex justify-between items-center bg-[#0a0a0a] p-6 rounded-[2rem] border border-zinc-900 shadow-2xl">
+        <div>
+          <h2 className="text-2xl font-black italic tracking-tighter text-[#BF953F]">DASHBOARD OPERACIONAL</h2>
+          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.3em]">GR Solution • Gestão de Ativos</p>
         </div>
-        <div className="flex gap-2">
-          <button onClick={exportToPDF} className="flex items-center gap-2 px-6 py-2 bg-zinc-900 border border-zinc-800 rounded-xl text-[10px] font-black text-zinc-400 uppercase tracking-widest hover:text-white transition-all">
-            <FileDown size={14} /> PDF
-          </button>
+        <div className="flex gap-2 bg-black p-1 rounded-xl border border-zinc-800">
+          {['7D', '30D', '90D', 'TOTAL'].map(p => (
+            <button key={p} onClick={() => setPeriod(p)} className={`px-4 py-2 rounded-lg text-[9px] font-black transition-all ${period === p ? 'bg-[#BF953F] text-black' : 'text-zinc-500 hover:text-white'}`}>{p}</button>
+          ))}
         </div>
       </div>
 
-      <div ref={dashboardRef} className="space-y-8">
-        {/* GRID DE CARDS PRINCIPAIS */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-[#0a0a0a] p-10 rounded-[2.5rem] border border-zinc-900 relative overflow-hidden group min-h-[300px] flex flex-col justify-center shadow-2xl">
-            <div className="absolute top-0 right-0 p-10 opacity-5">
-              <Wallet size={200} className="text-[#BF953F]" />
+      {/* CARDS DE IMPACTO */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 relative overflow-hidden group">
+          <Briefcase className="absolute right-[-10px] top-[-10px] text-zinc-900/50 group-hover:text-[#BF953F]/10 transition-colors" size={120} />
+          <p className="text-[10px] font-black text-zinc-500 uppercase mb-2 italic">Capital na Rua</p>
+          <p className="text-4xl font-black text-white italic">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalEmprestado)}</p>
+        </div>
+
+        <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 relative overflow-hidden group">
+          <TrendingUp className="absolute right-[-10px] top-[-10px] text-zinc-900/50 group-hover:text-emerald-500/10 transition-colors" size={120} />
+          <p className="text-[10px] font-black text-zinc-500 uppercase mb-2 italic">Total Recuperado</p>
+          <p className="text-4xl font-black text-emerald-500 italic">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalRecebido)}</p>
+        </div>
+
+        <div className="bg-[#BF953F] p-8 rounded-[2.5rem] shadow-[0_20px_50px_rgba(191,149,63,0.2)]">
+          <Wallet className="mb-4 text-black/40" size={32} />
+          <p className="text-[10px] font-black text-black/60 uppercase mb-1 italic">Saldo Disponível em Caixa</p>
+          <p className="text-4xl font-black text-black italic">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.saldoEmCaixa)}</p>
+        </div>
+      </div>
+
+      {/* SEÇÃO DE ANÁLISE GRÁFICA */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        {/* Gráfico de Pizza - Status da Carteira */}
+        <div className="lg:col-span-5 bg-[#0a0a0a] p-8 rounded-[3rem] border border-zinc-900 h-[450px] flex flex-col">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="p-2 bg-[#BF953F]/10 rounded-lg"><ShieldCheck size={18} className="text-[#BF953F]"/></div>
+            <h4 className="text-[11px] font-black uppercase tracking-widest text-zinc-400">Saúde da Carteira</h4>
+          </div>
+          <div className="flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Pie data={statusData} innerRadius={80} outerRadius={110} paddingAngle={8} dataKey="value">
+                  {statusData.map((entry, index) => <Cell key={index} fill={entry.color} stroke="none" />)}
+                </Pie>
+                <Tooltip contentStyle={{backgroundColor: '#111', border: 'none', borderRadius: '10px', fontSize: '12px'}} />
+                <Legend iconType="circle" wrapperStyle={{paddingTop: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}} />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Resumo de Clientes e Inadimplência */}
+        <div className="lg:col-span-7 space-y-6">
+          <div className="grid grid-cols-2 gap-6">
+            <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 text-center">
+              <Users className="mx-auto mb-4 text-[#BF953F]" size={32} />
+              <p className="text-5xl font-black italic">{stats.customerCount}</p>
+              <p className="text-[10px] font-black text-zinc-600 uppercase mt-2">Clientes Totais</p>
             </div>
-            <div className="relative z-10">
-              <span className="text-[10px] font-black text-[#BF953F] uppercase tracking-[0.4em]">Saldo Real em Caixa</span>
-              <h2 className="text-6xl lg:text-7xl font-black mt-4 tracking-tighter text-white">
-                {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.currentBalance)}
-              </h2>
-              <div className="flex gap-4 mt-10">
-                <button onClick={() => handleQuickTransaction('APORTE')} className="flex items-center gap-3 px-8 py-4 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-500 rounded-2xl border border-emerald-500/20 transition-all font-black text-[10px] uppercase tracking-widest">
-                  <Plus size={18} /> Aporte
-                </button>
-                <button onClick={() => handleQuickTransaction('RETIRADA')} className="flex items-center gap-3 px-8 py-4 bg-red-500/10 hover:bg-red-500/20 text-red-500 rounded-2xl border border-red-500/20 transition-all font-black text-[10px] uppercase tracking-widest">
-                  <Minus size={18} /> Retirada
-                </button>
-              </div>
+            <div className={`p-8 rounded-[2.5rem] border text-center transition-all ${stats.overdueCount > 0 ? 'bg-red-500/5 border-red-500/30' : 'bg-zinc-900/20 border-zinc-800'}`}>
+              <AlertCircle className={`mx-auto mb-4 ${stats.overdueCount > 0 ? 'text-red-500' : 'text-zinc-700'}`} size={32} />
+              <p className={`text-5xl font-black italic ${stats.overdueCount > 0 ? 'text-red-500' : 'text-zinc-800'}`}>{stats.overdueCount}</p>
+              <p className="text-[10px] font-black text-zinc-600 uppercase mt-2">Contratos em Atraso</p>
             </div>
           </div>
 
-          <div className="bg-[#BF953F] p-10 rounded-[2.5rem] flex flex-col justify-between text-black shadow-[0_20px_50px_rgba(191,149,63,0.3)]">
-             <Users size={40} className="opacity-80" />
+          <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 flex items-center justify-between group hover:border-[#BF953F]/30 transition-all">
              <div>
-                <span className="text-[10px] font-black uppercase tracking-widest opacity-60">Clientes Base</span>
-                <h3 className="text-7xl font-black tracking-tighter mt-2">{customers.length}</h3>
+                <p className="text-[10px] font-black text-zinc-500 uppercase mb-1">Índice de Adimplência</p>
+                <p className="text-4xl font-black text-[#BF953F] italic">
+                  {stats.activeContracts > 0 ? Math.round(((stats.activeContracts - stats.overdueCount) / stats.activeContracts) * 100) : 100}%
+                </p>
              </div>
+             <div className="h-16 w-16 rounded-full border-4 border-zinc-900 border-t-[#BF953F] animate-spin-slow"></div>
           </div>
         </div>
 
-        {/* CARDS DE MÉTRICAS */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatMiniCard title="Capital Emprestado" value={stats.totalBorrowed} icon={<Briefcase size={16}/>} color="text-white" />
-          <StatMiniCard title="Total Recuperado" value={stats.totalReceived} icon={<ArrowUpRight size={16}/>} color="text-emerald-500" />
-          <StatMiniCard title="Inadimplência" value={stats.overdueContracts} icon={<AlertCircle size={16}/>} color="text-red-500" isCurrency={false} />
-          <StatMiniCard title="Contratos Ativos" value={loans.length} icon={<TrendingUp size={16}/>} color="text-[#BF953F]" isCurrency={false} />
-        </div>
-
-        {/* GRÁFICOS */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-8 bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 shadow-2xl">
-            <h3 className="text-xs font-black text-[#BF953F] uppercase tracking-[0.2em] mb-8">Fluxo de Caixa Operacional</h3>
-            <div className="h-[350px]">
-              {isMounted && (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={[
-                    { name: 'Saída (Empréstimo)', valor: stats.totalBorrowed },
-                    { name: 'Retorno (Parcelas)', valor: stats.totalReceived },
-                    { name: 'Aportes (Capital)', valor: stats.totalAportes }
-                  ]}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#18181b" vertical={false} />
-                    <XAxis dataKey="name" axisLine={false} tick={{fill: '#52525b', fontSize: 10}} />
-                    <YAxis axisLine={false} tick={{fill: '#52525b', fontSize: 10}} />
-                    <Tooltip cursor={{fill: '#111'}} contentStyle={{backgroundColor: '#000', borderRadius: '15px', border: '1px solid #333'}} />
-                    <Bar dataKey="valor" fill="#BF953F" radius={[10, 10, 0, 0]} barSize={50} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
-          </div>
-
-          <div className="lg:col-span-4 bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 shadow-2xl flex flex-col items-center justify-center">
-            <h3 className="text-xs font-black text-[#BF953F] uppercase tracking-[0.2em] mb-8">Saúde da Carteira</h3>
-            <div className="h-[250px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={[
-                      { name: 'Recuperado', value: stats.totalReceived },
-                      { name: 'Pendente', value: stats.totalBorrowed - stats.totalReceived }
-                    ]}
-                    innerRadius={60} outerRadius={80} paddingAngle={5} dataKey="value"
-                  >
-                    <Cell fill="#10B981" />
-                    <Cell fill="#333" />
-                  </Pie>
-                  <Tooltip />
-                </PieChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="text-center mt-4">
-               <p className="text-[10px] font-black text-zinc-500 uppercase">Eficiência de Retorno</p>
-               <p className="text-3xl font-black text-white">
-                {stats.totalBorrowed > 0 ? ((stats.totalReceived / stats.totalBorrowed) * 100).toFixed(1) : 0}%
-               </p>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
   );
