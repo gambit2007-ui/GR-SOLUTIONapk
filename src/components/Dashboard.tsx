@@ -46,7 +46,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
 
     const overdueContracts = loans.filter(l =>
       l.installments?.some(inst =>
-        (inst.status === 'PENDENTE' || inst.status === 'ATRASADO') &&
+        (inst.status?.toUpperCase() === 'PENDENTE' || inst.status?.toUpperCase() === 'ATRASADO') &&
         inst.dueDate < todayStr
       )
     ).length;
@@ -56,7 +56,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
     return { activeContracts, overdueContracts, activeCustomers: activeCustomersCount };
   }, [loans, customers, todayStr]);
 
-  // --- 2. LÓGICA DAS GAVETAS (CORRIGIDA) ---
+  // --- 2. LÓGICA DAS GAVETAS ---
   const monthlyHistory = useMemo(() => {
     const monthsFull = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     const data = [];
@@ -73,18 +73,23 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
         return d.getMonth() === mIdx && d.getFullYear() === yIdx;
       };
 
-      // Aportes manuais da tabela CashMovements
-      const aportes = cashMovements.filter(m => filterByMonth(m.date) && m.type?.toUpperCase() === 'APORTE');
+      // ENTRADAS MANUAIS (APORTES OU ENTRADAS)
+      const aportes = cashMovements.filter(m => 
+        filterByMonth(m.date) && 
+        (m.type?.toUpperCase() === 'APORTE' || m.type?.toUpperCase() === 'ENTRADA')
+      );
       
-      // Retiradas e Estornos
-      const retiradas = cashMovements.filter(m => filterByMonth(m.date) && (m.type?.toUpperCase() === 'RETIRADA' || m.type?.toUpperCase() === 'ESTORNO'));
+      // SAÍDAS MANUAIS (RETIRADAS OU ESTORNOS)
+      const retiradas = cashMovements.filter(m => 
+        filterByMonth(m.date) && 
+        (m.type?.toUpperCase() === 'RETIRADA' || m.type?.toUpperCase() === 'ESTORNO')
+      );
 
-      // 🔍 NOVIDADE: Buscar recebimentos dentro das parcelas de cada Loan
+      // BUSCAR RECEBIMENTOS DENTRO DOS EMPRÉSTIMOS (PARCELAS PAGAS)
       const recebimentosParcelas: any[] = [];
       loans.forEach(loan => {
         loan.installments?.forEach(inst => {
-          // Se a parcela está paga e o pagamento foi neste mês
-          if (inst.status === 'PAGO' && inst.paymentDate && filterByMonth(inst.paymentDate)) {
+          if (inst.status?.toUpperCase() === 'PAGO' && inst.paymentDate && filterByMonth(inst.paymentDate)) {
             recebimentosParcelas.push({
               id: `${loan.id}-${inst.number}`,
               description: `PARCELA: ${loan.customerName} (${inst.number}/${loan.installmentCount})`,
@@ -96,23 +101,32 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
         });
       });
 
+      // BUSCAR MOVIMENTAÇÕES MANUAIS DO TIPO PAGAMENTO
+      const recebimentosManuais = cashMovements.filter(m => 
+        filterByMonth(m.date) && m.type?.toUpperCase() === 'PAGAMENTO'
+      );
+
       const novosEmprestimos = loans.filter(l => filterByMonth(l.createdAt || l.startDate));
 
+      // CÁLCULO TOTAL DO MÊS
       const totalSaida = novosEmprestimos.reduce((acc, l) => acc + (Number(l.amount) || 0), 0) + 
                          retiradas.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
       
       const totalRetorno = aportes.reduce((acc, a) => acc + (Number(a.amount) || 0), 0) + 
-                           recebimentosParcelas.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+                           recebimentosParcelas.reduce((acc, r) => acc + (Number(r.amount) || 0), 0) +
+                           recebimentosManuais.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
 
-      if (aportes.length > 0 || retiradas.length > 0 || recebimentosParcelas.length > 0 || novosEmprestimos.length > 0 || (mIdx === today.getMonth() && yIdx === today.getFullYear())) {
+      const todasEntradas = [...aportes, ...recebimentosParcelas, ...recebimentosManuais];
+      const todasSaidas = [...novosEmprestimos, ...retiradas];
+
+      if (todasEntradas.length > 0 || todasSaidas.length > 0 || (mIdx === today.getMonth() && yIdx === today.getFullYear())) {
         data.push({
           id: `${yIdx}-${mIdx}`,
           name: monthsFull[mIdx],
           year: yIdx,
-          aportes,
-          retiradas,
+          entradas: todasEntradas,
+          saidas: retiradas,
           novosEmprestimos,
-          recebimentos: recebimentosParcelas,
           totalSaida,
           totalRetorno
         });
@@ -183,20 +197,20 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
             {expandedMonth === month.id && (
               <div className="px-6 pb-8 border-t border-white/5 pt-8 animate-in slide-in-from-top-4">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                  {/* ENTRADAS (REBIMENTOS + APORTES) */}
+                  {/* ENTRADAS */}
                   <div>
                     <h5 className="text-[9px] font-black text-emerald-500 uppercase mb-4 flex items-center gap-2 tracking-widest">
                       <ArrowUpRight size={14} /> Recebimentos e Aportes
                     </h5>
                     <div className="space-y-3">
-                      {[...month.aportes, ...month.recebimentos].sort((a,b) => parseDate(b.date).getTime() - parseDate(a.date).getTime()).map(m => (
-                        <ListItem key={m.id} m={m} color="emerald" />
+                      {month.entradas.sort((a,b) => parseDate(b.date).getTime() - parseDate(a.date).getTime()).map((m, idx) => (
+                        <ListItem key={m.id || idx} m={m} color="emerald" />
                       ))}
-                      {month.aportes.length + month.recebimentos.length === 0 && <Empty msg="Nenhuma entrada" />}
+                      {month.entradas.length === 0 && <Empty msg="Nenhuma entrada" />}
                     </div>
                   </div>
 
-                  {/* SAÍDAS (EMPRÉSTIMOS + RETIRADAS) */}
+                  {/* SAÍDAS */}
                   <div>
                     <h5 className="text-[9px] font-black text-red-500 uppercase mb-4 flex items-center gap-2 tracking-widest">
                       <ArrowDownRight size={14} /> Saídas e Empréstimos
@@ -208,14 +222,14 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
                             <div className="p-2 bg-red-500/10 rounded-xl text-red-500"><Users size={14} /></div>
                             <div>
                               <p className="text-[10px] font-black text-zinc-200 uppercase">{l.customerName || 'Cliente'}</p>
-                              <p className="text-[8px] text-zinc-600 font-bold uppercase">Novo Contrato: {l.contractNumber}</p>
+                              <p className="text-[8px] text-zinc-600 font-bold uppercase">Contrato: {l.contractNumber}</p>
                             </div>
                           </div>
                           <span className="text-xs font-black text-red-500">-{Number(l.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                         </div>
                       ))}
-                      {month.retiradas.map(m => <ListItem key={m.id} m={m} color="red" />)}
-                      {month.novosEmprestimos.length + month.retiradas.length === 0 && <Empty msg="Nenhuma saída" />}
+                      {month.saidas.map((m, idx) => <ListItem key={m.id || idx} m={m} color="red" />)}
+                      {month.novosEmprestimos.length + month.saidas.length === 0 && <Empty msg="Nenhuma saída" />}
                     </div>
                   </div>
                 </div>
@@ -249,7 +263,7 @@ const ListItem: React.FC<{ m: any, color: 'emerald' | 'red' }> = ({ m, color }) 
     <div className="bg-white/[0.02] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between hover:border-zinc-700 transition-all">
       <div className="flex items-center gap-3">
         <div className={`p-2 rounded-xl ${isPos ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
-          {m.type === 'APORTE' ? <PlusCircle size={14} /> : m.type === 'PAGAMENTO' ? <CheckCircle2 size={14} /> : <MinusCircle size={14} />}
+          {m.type?.toUpperCase() === 'APORTE' || m.type?.toUpperCase() === 'ENTRADA' ? <PlusCircle size={14} /> : m.type?.toUpperCase() === 'PAGAMENTO' ? <CheckCircle2 size={14} /> : <MinusCircle size={14} />}
         </div>
         <div>
           <p className="text-[10px] font-black text-zinc-200 uppercase tracking-tighter">{m.description || 'Movimentação'}</p>
