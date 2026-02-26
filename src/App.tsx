@@ -62,30 +62,34 @@ const App: React.FC = () => {
   const handleUpdateLoan = async (loanId: string, newData: Partial<Loan>) => {
     try {
       const loanRef = doc(db, 'loans', loanId);
-      await setDoc(loanRef, newData, { merge: true });
+      await updateDoc(loanRef, newData);
     } catch (error) {
       console.error("Erro ao atualizar contrato:", error);
       showToast("Erro ao atualizar contrato", "error");
     }
   };
 
-  const handleAddTransaction = async (type: 'APORTE' | 'RETIRADA' | 'PAGAMENTO', amount: number, description: string) => {
+  const handleAddTransaction = async (type: 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO', amount: number, description: string) => {
     try {
+      // Registrar movimento no histórico
       await addDoc(collection(db, 'cashMovement'), {
         type,
-        amount,
+        amount: Number(amount),
         description,
         date: new Date().toISOString()
       });
 
-      let novoSaldo = caixa;
-      if (type === 'APORTE' || type === 'PAGAMENTO') novoSaldo += amount;
-      else if (type === 'RETIRADA') novoSaldo -= amount;
+      // Calcular novo saldo baseado no estado atual
+      let novoSaldo = Number(caixa);
+      if (type === 'APORTE' || type === 'PAGAMENTO') novoSaldo += Number(amount);
+      else if (type === 'RETIRADA' || type === 'ESTORNO') novoSaldo -= Number(amount);
 
+      // Salvar saldo mestre nas configurações
       const caixaRef = doc(db, 'settings', 'caixa');
-      await setDoc(caixaRef, { value: novoSaldo });
+      await setDoc(caixaRef, { value: Number(novoSaldo.toFixed(2)) });
     } catch (error) {
       console.error("Erro na transação:", error);
+      showToast("Erro ao processar caixa", "error");
     }
   };
 
@@ -100,7 +104,7 @@ const App: React.FC = () => {
     });
 
     const unsubCaixa = onSnapshot(doc(db, 'settings', 'caixa'), (snap) => {
-      if (snap.exists()) setCaixa(snap.data().value || 0);
+      if (snap.exists()) setCaixa(Number(snap.data().value) || 0);
     });
 
     const unsubTrans = onSnapshot(query(collection(db, 'cashMovement'), orderBy('date', 'desc')), (snap) => {
@@ -143,9 +147,14 @@ const App: React.FC = () => {
   const handleAddLoan = async (loan: Loan) => {
     try {
       const { id, ...data } = loan; 
+      // Salva o contrato
       await setDoc(doc(db, "loans", loan.id), { ...data, createdAt: serverTimestamp() });
+      
+      // Debita automaticamente do caixa o valor que saiu para o cliente
+      await handleAddTransaction('RETIRADA', loan.amount, `EMPRÉSTIMO CONCEDIDO: ${loan.customerName}`);
+      
       setCurrentView('DASHBOARD'); 
-      showToast('Contrato efetivado!', 'success');
+      showToast('Contrato efetivado e caixa atualizado!', 'success');
     } catch (e) { showToast('Erro ao salvar contrato', 'error'); }
   };
 
@@ -161,7 +170,12 @@ const App: React.FC = () => {
     <div className="flex h-screen bg-black overflow-hidden text-white font-sans">
       <style>
         {`
-          .gold-text { background: linear-gradient(to right, #BF953F, #FCF6BA, #B38728); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+          .gold-text { 
+            background: linear-gradient(to right, #BF953F, #FCF6BA, #B38728); 
+            -webkit-background-clip: text; 
+            background-clip: text;
+            -webkit-text-fill-color: transparent; 
+          }
           .gold-gradient { background: linear-gradient(45deg, #BF953F, #FCF6BA, #B38728); }
           .custom-scrollbar::-webkit-scrollbar { width: 4px; }
           .custom-scrollbar::-webkit-scrollbar-thumb { background: #BF953F; border-radius: 10px; }
@@ -192,10 +206,7 @@ const App: React.FC = () => {
         </nav>
       </aside>
 
-      {/* CONTEÚDO PRINCIPAL */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        
-        {/* HEADER */}
         <header className="h-20 bg-[#020202] border-b border-zinc-900 flex items-center justify-between px-10 flex-shrink-0">
             <h2 className="text-xs font-black text-zinc-100 uppercase tracking-widest">
               {navItems.find(item => item.id === currentView)?.label}
@@ -206,47 +217,30 @@ const App: React.FC = () => {
             </div>
         </header>
 
-        {/* ÁREA DE CONTEÚDO DINÂMICO */}
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-black p-6">
-            
-            {/* DASHBOARD: Recebe transactions como cashMovements */}
             {currentView === 'DASHBOARD' && (
-              <Dashboard 
-                loans={loans || []} 
-                customers={customers || []} 
-                cashMovements={transactions || []} 
-              />
+              <Dashboard loans={loans} customers={customers} cashMovements={transactions} />
             )}
-            
             {currentView === 'CUSTOMERS' && (
               <CustomerSection 
-                customers={customers || []} 
-                loans={loans || []} 
+                customers={customers} 
+                loans={loans} 
                 onAddCustomer={handleAddCustomer} 
                 onUpdateCustomer={handleUpdateCustomer} 
                 onDeleteCustomer={handleDeleteCustomer} 
               />
             )}
-            
             {currentView === 'LOANS' && (
-              <LoanSection 
-                customers={customers || []} 
-                loans={loans || []} 
-                onAddLoan={handleAddLoan} 
-                showToast={showToast}
-              />
+              <LoanSection customers={customers} loans={loans} onAddLoan={handleAddLoan} showToast={showToast} />
             )}
-            
             {currentView === 'SIMULATION' && (
-              <SimulationTab customers={customers || []} />
+              <SimulationTab customers={customers} />
             )}
-            
-            {/* REPORTS: Recebe transactions como cashMovements */}
             {currentView === 'REPORTS' && (
               <Reports 
-                loans={loans || []} 
-                cashMovements={transactions || []} 
-                customers={customers || []} 
+                loans={loans} 
+                cashMovements={transactions} 
+                customers={customers} 
                 caixa={caixa} 
                 onAddTransaction={handleAddTransaction} 
                 onUpdateLoan={handleUpdateLoan} 
@@ -255,7 +249,7 @@ const App: React.FC = () => {
             )}
         </div>
 
-        {/* SISTEMA DE NOTIFICAÇÕES FLUTUANTE */}
+        {/* NOTIFICAÇÕES */}
         <div className="fixed top-6 right-6 z-[200] flex flex-col gap-3">
           {toasts.map(t => (
             <div key={t.id} className="flex items-center gap-4 px-6 py-4 rounded-2xl border bg-zinc-950 border-[#BF953F]/50 text-[#BF953F] shadow-2xl animate-in slide-in-from-right">
@@ -264,7 +258,6 @@ const App: React.FC = () => {
             </div>
           ))}
         </div>
-
       </main>
     </div>
   );
