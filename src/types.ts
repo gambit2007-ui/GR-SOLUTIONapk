@@ -1,8 +1,9 @@
-
-export type Frequency = 'DIARIO' | 'SEMANAL' | 'MENSAL';
+export type Frequency = 'DIARIO' | 'SEMANAL' | 'QUINZENAL' | 'MENSAL'; // Adicionei QUINZENAL que usamos no LoanSection
 export type InterestType = 'SIMPLES' | 'PRICE';
 export type PaymentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO';
-export type CashMovementType = 'APORTE' | 'RETIRADA' | 'RECEBIMENTO' | 'ESTORNO';
+
+// ✅ Padronizei os tipos de movimentação para bater com o que usamos nas funções
+export type CashMovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO';
 
 export interface AuthUser {
   id: string;
@@ -10,6 +11,16 @@ export interface AuthUser {
   email: string;
   password?: string;
   createdAt: number;
+}
+
+// ✅ Esta é a interface que o TypeScript não estava achando
+export interface CashMovement {
+  id?: string;
+  type: CashMovementType; // Usa o type acima
+  amout: number;
+  description: string;
+  date: string;
+  loanId?: string;
 }
 
 export interface CustomerDocument {
@@ -27,46 +38,21 @@ export interface Customer {
   phone: string;
   address: string;
   notes?: string;
-  avatar?: string; // base64 image string
+  avatar?: string;
   documents?: CustomerDocument[];
   createdAt: number;
 }
-// Adicione ou corrija no seu arquivo de types:
-export interface CashMovement {
-  id?: string;
-  type: 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO';
-  amount: number;
-  description: string;
-  date: string;
-  loanId?: string; // Para vincular ao empréstimo, se quiser
-}
-export interface PaymentRecord {
-  id: string;
-  date: number;
-  amount: number;
-  penalty?: number;
-  interest?: number;
-  notes?: string;
-}
-export interface Transaction {
-  id: string;
-  type: 'INCOME' | 'EXPENSE'; // INCOME = Entrada (Verde), EXPENSE = Saída (Laranja)
-  category: string;
-  amount: number;
-  date: string; // Formato ISO "2024-03-25"
-  description: string;
-  loanId?: string; // Opcional, caso a transação venha de um empréstimo específico
-}
+
 export interface Installment {
+  id?: string; // Adicionei ID para facilitar a busca no Firebase
   number: number;
-  value: number;
+  amout: number;
   dueDate: string;
   status: 'PENDENTE' | 'PAGO';
-  partialPaid?: number;    // Para o valor que foi abatido parcialmente
-  lastPaidValue?: number;  // Para o valor total que foi pago na última operação
+  partialPaid?: number;
+  lastPaidValue?: number;
+  originalValue?: number; // Para controle de juros/mora futuro
 }
-
-
 
 export interface Loan {
   id: string;
@@ -81,13 +67,13 @@ export interface Loan {
   interestType: InterestType;
   totalToReturn: number;
   installmentValue: number;
-  startDate: string; // ISO string
-  dueDate: string;   // Primeiro vencimento
+  startDate: string;
+  dueDate: string;
   createdAt: number;
   notes?: string;
   installments: Installment[];
-  status?: string;
-  paidAmount?: number;        // <--- ADICIONE ESTA LINHA (Opcional)
+  status: 'ATIVO' | 'QUITADO' | 'ATRASADO' | 'CANCELADO';
+  paidAmount: number;
 }
 
 export type View = 'DASHBOARD' | 'CUSTOMERS' | 'LOANS' | 'SIMULATION' | 'REPORTS';

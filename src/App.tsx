@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  LayoutDashboard, Users, FileText, PieChart, Calculator, 
+import {
+  LayoutDashboard, Users, FileText, PieChart, Calculator,
   Activity, X, Menu
 } from 'lucide-react';
 
@@ -10,17 +10,17 @@ import Dashboard from './components/Dashboard';
 import CustomerSection from './components/CustomerSection';
 import SimulationTab from './components/SimulationTab';
 import Reports from './components/Reports';
-import LoanSection from './components/LoanSection'; 
+import LoanSection from './components/LoanSection';
 
 // ✅ Firebase Imports
 import { db } from "./firebase";
-import { 
-  collection, 
-  onSnapshot, 
-  query, 
-  orderBy, 
-  addDoc, 
-  updateDoc, 
+import {
+  collection,
+  onSnapshot,
+  query,
+  orderBy,
+  addDoc,
+  updateDoc,
   doc,
   setDoc,
   writeBatch,
@@ -40,7 +40,7 @@ const App: React.FC = () => {
     email: 'admin@grsolution.com',
     createdAt: Date.now()
   });
-  
+
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
@@ -71,21 +71,30 @@ const App: React.FC = () => {
 
   const handleAddTransaction = async (type: 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO', amount: number, description: string) => {
     try {
-      // 1. Registrar movimento no histórico (Coleção ÚNICA de verdade financeira)
+      const valorNum = Number(amount);
+      if (isNaN(valorNum)) throw new Error("Valor inválido");
+
+      // 1. Registrar movimento com data padronizada e tipo em caixa alta
       await addDoc(collection(db, 'cashMovement'), {
-        type,
-        amount: Number(amount),
-        description,
-        date: new Date().toISOString()
+        type: type.toUpperCase(),
+        amount: valorNum,
+        description: description.toUpperCase(),
+        date: new Date().toISOString() 
       });
 
-      // 2. Calcular novo saldo baseado no estado atual para persistência
+      // 2. Calcular novo saldo com base no valor atual do estado (mais seguro)
       let novoSaldo = Number(caixa);
-      if (type === 'APORTE' || type === 'PAGAMENTO') novoSaldo += Number(amount);
-      else if (type === 'RETIRADA' || type === 'ESTORNO') novoSaldo -= Number(amount);
+      if (type === 'APORTE' || type === 'PAGAMENTO') novoSaldo += valorNum;
+      else if (type === 'RETIRADA' || type === 'ESTORNO') novoSaldo -= valorNum;
 
+      // 3. Salvar saldo mestre arredondado
       const caixaRef = doc(db, 'settings', 'caixa');
-      await setDoc(caixaRef, { value: Number(novoSaldo.toFixed(2)) }, { merge: true });
+      await setDoc(caixaRef, { 
+        value: Number(novoSaldo.toFixed(2)),
+        updatedAt: serverTimestamp()
+      });
+
+      showToast(`Transação de ${type} registrada!`, 'success');
     } catch (error) {
       console.error("Erro na transação:", error);
       showToast("Erro ao processar caixa", "error");
@@ -107,7 +116,20 @@ const App: React.FC = () => {
     });
 
     const unsubTrans = onSnapshot(query(collection(db, 'cashMovement'), orderBy('date', 'desc')), (snap) => {
-      setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      setTransactions(snap.docs.map(d => {
+        const rawData = d.data();
+        // Normalização de data para garantir que a Dashboard sempre consiga ler
+        let finalDate = rawData.date;
+        if (rawData.date && typeof rawData.date === 'object' && 'seconds' in rawData.date) {
+          finalDate = new Date(rawData.date.seconds * 1000).toISOString();
+        }
+        
+        return { 
+          id: d.id, 
+          ...rawData,
+          date: finalDate 
+        };
+      }));
     });
 
     return () => { unsubCust(); unsubLoans(); unsubCaixa(); unsubTrans(); };
@@ -116,7 +138,7 @@ const App: React.FC = () => {
   // --- CRUD CLIENTES E CONTRATOS ---
   const handleAddCustomer = async (customer: Customer) => {
     try {
-      const { id, ...data } = customer; 
+      const { id, ...data } = customer;
       await addDoc(collection(db, "clientes"), { ...data, createdAt: Date.now() });
       showToast('Cliente cadastrado!', 'success');
     } catch (e) { showToast('Erro ao salvar cliente', 'error'); }
@@ -143,27 +165,17 @@ const App: React.FC = () => {
     } catch (e) { showToast('Erro na exclusão', 'error'); }
   };
 
-  // ✅ FUNÇÃO CRÍTICA CORRIGIDA: Agora ela centraliza toda a lógica financeira do empréstimo
   const handleAddLoan = async (loan: Loan) => {
     try {
-      const { id, ...data } = loan; 
-      
-      // 1. Salva o contrato no Firestore com ID fixo gerado no formulário
+      const { id, ...data } = loan;
       await setDoc(doc(db, "loans", loan.id), { ...data, createdAt: serverTimestamp() });
       
-      // 2. Registra o débito no caixa (Isso já cria o cashMovement e abate do settings/caixa)
-      await handleAddTransaction(
-        'RETIRADA', 
-        loan.amount, 
-        `Empréstimo: ${loan.customerName} (Contrato #${loan.contractNumber})`
-      );
+      // Debita automaticamente do caixa o valor que saiu para o cliente
+      await handleAddTransaction('RETIRADA', loan.amount, `EMPRÉSTIMO: ${loan.customerName}`);
       
-      setCurrentView('DASHBOARD'); 
-      showToast('Contrato efetivado com sucesso!', 'success');
-    } catch (e) { 
-      console.error(e);
-      showToast('Erro ao salvar contrato', 'error'); 
-    }
+      setCurrentView('DASHBOARD');
+      showToast('Contrato efetivado!', 'success');
+    } catch (e) { showToast('Erro ao salvar contrato', 'error'); }
   };
 
   const navItems = [
@@ -178,11 +190,11 @@ const App: React.FC = () => {
     <div className="flex h-screen bg-black overflow-hidden text-white font-sans">
       <style>
         {`
-          .gold-text { 
-            background: linear-gradient(to right, #BF953F, #FCF6BA, #B38728); 
-            -webkit-background-clip: text; 
+          .gold-text {
+            background: linear-gradient(to right, #BF953F, #FCF6BA, #B38728);
+            -webkit-background-clip: text;
             background-clip: text;
-            -webkit-text-fill-color: transparent; 
+            -webkit-text-fill-color: transparent;
           }
           .gold-gradient { background: linear-gradient(45deg, #BF953F, #FCF6BA, #B38728); }
           .custom-scrollbar::-webkit-scrollbar { width: 4px; }
@@ -227,15 +239,15 @@ const App: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-black p-6">
             {currentView === 'DASHBOARD' && (
-              <Dashboard loans={loans} customers={customers}/>
+              <Dashboard loans={loans} customers={customers} cashMovements={transactions} />
             )}
             {currentView === 'CUSTOMERS' && (
-              <CustomerSection 
-                customers={customers} 
-                loans={loans} 
-                onAddCustomer={handleAddCustomer} 
-                onUpdateCustomer={handleUpdateCustomer} 
-                onDeleteCustomer={handleDeleteCustomer} 
+              <CustomerSection
+                customers={customers}
+                loans={loans}
+                onAddCustomer={handleAddCustomer}
+                onUpdateCustomer={handleUpdateCustomer}
+                onDeleteCustomer={handleDeleteCustomer}
               />
             )}
             {currentView === 'LOANS' && (
@@ -245,14 +257,14 @@ const App: React.FC = () => {
               <SimulationTab customers={customers} />
             )}
             {currentView === 'REPORTS' && (
-              <Reports 
-                loans={loans} 
-                cashMovements={transactions} 
-                customers={customers} 
-                caixa={caixa} 
-                onAddTransaction={handleAddTransaction} 
-                onUpdateLoan={handleUpdateLoan} 
-                showToast={showToast} 
+              <Reports
+                loans={loans}
+                cashMovements={transactions}
+                customers={customers}
+                caixa={caixa}
+                onAddTransaction={handleAddTransaction}
+                onUpdateLoan={handleUpdateLoan}
+                showToast={showToast}
               />
             )}
         </div>
