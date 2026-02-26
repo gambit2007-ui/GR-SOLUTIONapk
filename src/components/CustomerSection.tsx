@@ -239,7 +239,9 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             <div className="mt-6 pt-4 border-t border-zinc-900/50 flex justify-between items-center">
               <div className="flex flex-col">
                 <span className="text-[8px] text-zinc-600 font-black uppercase">Cadastrado em</span>
-                <span className="text-zinc-400 text-[10px] font-bold">{new Date(customer.createdAt).toLocaleDateString('pt-BR')}</span>
+                <span className="text-zinc-400 text-[10px] font-bold">
+                  {customer.createdAt ? new Date(customer.createdAt).toLocaleDateString('pt-BR') : '---'}
+                </span>
               </div>
               <Briefcase size={14} className="text-[#BF953F]/40" />
             </div>
@@ -299,11 +301,12 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                         {loans.filter(l => l.customerId === viewingCustomer.id).map(loan => (
                           <div key={loan.id} className="flex justify-between items-center bg-black/40 p-3 rounded-xl border border-zinc-800/50 text-white">
                             <div>
-                              <p className="text-xs font-bold">R$ {loan.amount.toLocaleString()}</p>
-                              <p className="text-[8px] text-zinc-500 uppercase">{loan.installments} parcelas</p>
+                              <p className="text-xs font-bold">R$ {loan.amount.toLocaleString('pt-BR')}</p>
+                              {/* ✅ CORREÇÃO AQUI: loan.installmentCount em vez do objeto de parcelas */}
+                              <p className="text-[8px] text-zinc-500 uppercase">{loan.installmentCount} parcelas</p>
                             </div>
-                            <span className={`px-2 py-1 rounded-md text-[8px] font-black uppercase ${loan.status === 'active' ? 'bg-blue-500/10 text-blue-500' : 'bg-green-500/10 text-green-500'}`}>
-                              {loan.status === 'active' ? 'Em curso' : 'Quitado'}
+                            <span className={`px-2 py-1 rounded-md text-[8px] font-black uppercase ${loan.status === 'active' || loan.status === 'ATIVO' ? 'bg-blue-500/10 text-blue-500' : 'bg-green-500/10 text-green-500'}`}>
+                              {loan.status === 'active' || loan.status === 'ATIVO' ? 'Em curso' : 'Quitado'}
                             </span>
                           </div>
                         ))}
