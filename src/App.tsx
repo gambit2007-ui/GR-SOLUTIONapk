@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   LayoutDashboard, Users, FileText, PieChart, Calculator, 
-  Activity, X
+  Activity, X, Menu
 } from 'lucide-react';
 
 // Tipos e Componentes
@@ -59,7 +59,6 @@ const App: React.FC = () => {
   const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
 
   // --- FUNÇÕES DE OPERAÇÃO (FIREBASE) ---
-
   const handleUpdateLoan = async (loanId: string, newData: Partial<Loan>) => {
     try {
       const loanRef = doc(db, 'loans', loanId);
@@ -72,7 +71,6 @@ const App: React.FC = () => {
 
   const handleAddTransaction = async (type: 'APORTE' | 'RETIRADA' | 'PAGAMENTO', amount: number, description: string) => {
     try {
-      // 1. Salva no extrato
       await addDoc(collection(db, 'cashMovement'), {
         type,
         amount,
@@ -80,14 +78,12 @@ const App: React.FC = () => {
         date: new Date().toISOString()
       });
 
-      // 2. Atualiza saldo
       let novoSaldo = caixa;
       if (type === 'APORTE' || type === 'PAGAMENTO') novoSaldo += amount;
       else if (type === 'RETIRADA') novoSaldo -= amount;
 
       const caixaRef = doc(db, 'settings', 'caixa');
       await setDoc(caixaRef, { value: novoSaldo });
-      setCaixa(novoSaldo);
     } catch (error) {
       console.error("Erro na transação:", error);
     }
@@ -147,8 +143,8 @@ const App: React.FC = () => {
   const handleAddLoan = async (loan: Loan) => {
     try {
       const { id, ...data } = loan; 
-      await addDoc(collection(db, "loans"), { ...data, createdAt: serverTimestamp() });
-      setCurrentView('REPORTS'); 
+      await setDoc(doc(db, "loans", loan.id), { ...data, createdAt: serverTimestamp() });
+      setCurrentView('DASHBOARD'); 
       showToast('Contrato efetivado!', 'success');
     } catch (e) { showToast('Erro ao salvar contrato', 'error'); }
   };
@@ -172,9 +168,13 @@ const App: React.FC = () => {
         `}
       </style>
 
+      {/* SIDEBAR */}
       <aside className={`flex flex-col z-[70] ${isSidebarOpen ? 'w-72' : 'w-24'} bg-[#050505] border-r border-zinc-900 transition-all duration-300`}>
-        <div className="h-24 flex items-center px-6 border-b border-zinc-900">
-           <span className="font-black text-lg gold-text tracking-tighter">GR SOLUTION</span>
+        <div className="h-24 flex items-center justify-between px-6 border-b border-zinc-900">
+           {isSidebarOpen && <span className="font-black text-lg gold-text tracking-tighter">GR SOLUTION</span>}
+           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-zinc-900 rounded-xl transition-colors">
+              <Menu size={20} className="text-[#BF953F]" />
+           </button>
         </div>
         <nav className="flex-1 py-8 px-4 space-y-2">
           {navItems.map((item) => (
@@ -186,14 +186,17 @@ const App: React.FC = () => {
               }`}
             >
               <item.icon size={22} />
-              {isSidebarOpen && <span className="text-xs font-bold uppercase tracking-widest">{item.label}</span>}
+              {isSidebarOpen && <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>}
             </button>
           ))}
         </nav>
       </aside>
 
+      {/* CONTEÚDO PRINCIPAL */}
       <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-20 bg-[#020202] border-b border-zinc-900 flex items-center justify-between px-10">
+        
+        {/* HEADER */}
+        <header className="h-20 bg-[#020202] border-b border-zinc-900 flex items-center justify-between px-10 flex-shrink-0">
             <h2 className="text-xs font-black text-zinc-100 uppercase tracking-widest">
               {navItems.find(item => item.id === currentView)?.label}
             </h2>
@@ -203,22 +206,65 @@ const App: React.FC = () => {
             </div>
         </header>
 
+        {/* ÁREA DE CONTEÚDO DINÂMICO */}
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-black p-6">
-            {currentView === 'DASHBOARD' && <Dashboard loans={loans} customers={customers} />}
-            {currentView === 'CUSTOMERS' && <CustomerSection customers={customers} loans={loans} onAddCustomer={handleAddCustomer} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer} />}
-            {currentView === 'LOANS' && <LoanSection customers={customers} loans={loans} onAddLoan={handleAddLoan} />}
-            {currentView === 'SIMULATION' && <SimulationTab customers={customers} />}
-            {currentView === 'REPORTS' && <Reports loans={loans} customers={customers} transactions={transactions} caixa={caixa} onAddTransaction={handleAddTransaction} onUpdateLoan={handleUpdateLoan} />}
+            
+            {/* DASHBOARD: Recebe transactions como cashMovements */}
+            {currentView === 'DASHBOARD' && (
+              <Dashboard 
+                loans={loans || []} 
+                customers={customers || []} 
+                cashMovements={transactions || []} 
+              />
+            )}
+            
+            {currentView === 'CUSTOMERS' && (
+              <CustomerSection 
+                customers={customers || []} 
+                loans={loans || []} 
+                onAddCustomer={handleAddCustomer} 
+                onUpdateCustomer={handleUpdateCustomer} 
+                onDeleteCustomer={handleDeleteCustomer} 
+              />
+            )}
+            
+            {currentView === 'LOANS' && (
+              <LoanSection 
+                customers={customers || []} 
+                loans={loans || []} 
+                onAddLoan={handleAddLoan} 
+                showToast={showToast}
+              />
+            )}
+            
+            {currentView === 'SIMULATION' && (
+              <SimulationTab customers={customers || []} />
+            )}
+            
+            {/* REPORTS: Recebe transactions como cashMovements */}
+            {currentView === 'REPORTS' && (
+              <Reports 
+                loans={loans || []} 
+                cashMovements={transactions || []} 
+                customers={customers || []} 
+                caixa={caixa} 
+                onAddTransaction={handleAddTransaction} 
+                onUpdateLoan={handleUpdateLoan} 
+                showToast={showToast} 
+              />
+            )}
         </div>
 
+        {/* SISTEMA DE NOTIFICAÇÕES FLUTUANTE */}
         <div className="fixed top-6 right-6 z-[200] flex flex-col gap-3">
           {toasts.map(t => (
             <div key={t.id} className="flex items-center gap-4 px-6 py-4 rounded-2xl border bg-zinc-950 border-[#BF953F]/50 text-[#BF953F] shadow-2xl animate-in slide-in-from-right">
               <span className="text-[10px] font-black uppercase tracking-widest">{t.message}</span>
-              <X size={14} className="cursor-pointer" onClick={() => removeToast(t.id)} />
+              <X size={14} className="cursor-pointer hover:text-white" onClick={() => removeToast(t.id)} />
             </div>
           ))}
         </div>
+
       </main>
     </div>
   );

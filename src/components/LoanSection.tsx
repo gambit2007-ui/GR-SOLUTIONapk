@@ -1,210 +1,273 @@
 import React, { useState, useMemo } from 'react';
-import { Calendar, FileText, AlertCircle } from 'lucide-react';
-import { Customer, Loan, InterestType, Frequency } from '../types';
+import { 
+  FileText, 
+  ShieldCheck, 
+  Save,
+  CalendarDays
+} from 'lucide-react';
+import { collection, addDoc, doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from '../firebase'; 
+import { Customer, Loan, Installment } from '../types';
+import { generateContractPDF } from '../utils/contractGenerator';
 
 interface LoanSectionProps {
   customers: Customer[];
   loans: Loan[];
   onAddLoan: (loan: Loan) => void;
+  showToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
-const LoanSection: React.FC<LoanSectionProps> = ({ customers, loans, onAddLoan }) => {
-  // --- ESTADOS DO FORMULÁRIO ---
+const LoanSection: React.FC<LoanSectionProps> = ({ 
+  customers = [], 
+  loans = [], 
+  onAddLoan, 
+  showToast 
+}) => {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [amount, setAmount] = useState('');
   const [interestRate, setInterestRate] = useState('10');
   const [installmentsCount, setInstallmentsCount] = useState('1');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [interestType, setInterestType] = useState<'FIXO' | 'PRICE'>('FIXO');
+  const [interestType, setInterestType] = useState<'SIMPLES' | 'PRICE'>('SIMPLES');
+  
+  // ✅ Novo: Estado para Frequência
+  const [frequency, setFrequency] = useState<'MENSAL' | 'QUINZENAL' | 'SEMANAL' | 'DIARIO'>('MENSAL');
+  
+  const [isSuccess, setIsSuccess] = useState(false);
+  const [lastCreated, setLastCreated] = useState<{customer: Customer, loan: Loan} | null>(null);
 
-  // --- LÓGICA DE CÁLCULO (SISTEMA PRICE E SIMPLES) ---
+  const getNextContractNumber = () => {
+    const base = 2026001;
+    if (!loans || loans.length === 0) return base.toString();
+    const numbers = loans.map(l => l?.contractNumber ? parseInt(l.contractNumber) : 0).filter(n => !isNaN(n));
+    const max = numbers.length > 0 ? Math.max(...numbers) : base;
+    return (max + 1).toString();
+  };
+
   const calculation = useMemo(() => {
-    const principal = parseFloat(amount) || 0;
-    const rate = (parseFloat(interestRate) || 0) / 100;
-    const count = parseInt(installmentsCount) || 1;
+  const principal = parseFloat(amount) || 0;
+  const rate = (parseFloat(interestRate) || 0) / 100;
+  const count = parseInt(installmentsCount) || 1;
 
-    if (principal === 0) return { totalReturn: 0, installmentValue: 0, totalInterest: 0 };
+  if (principal === 0) return { totalReturn: 0, installmentValue: 0, totalInterest: 0, schedule: [] };
 
-    if (interestType === 'PRICE') {
-      // Fórmula Price: PMT = PV * [i * (1+i)^n] / [(1+i)^n - 1]
-      const factor = Math.pow(1 + rate, count);
-      const installmentValue = principal * (rate * factor) / (factor - 1);
-      const totalReturn = installmentValue * count;
-      const totalInterest = totalReturn - principal;
+  let totalReturn = 0;
+  let installmentValue = 0;
+  
+  if (interestType === 'PRICE') {
+    const factor = Math.pow(1 + rate, count);
+    installmentValue = principal * (rate * factor) / (factor - 1);
+    totalReturn = installmentValue * count;
+  } else {
+    // Juros Simples Fixo (Adiciona a % uma única vez no total)
+    const totalInterest = principal * rate; 
+    totalReturn = principal + totalInterest;
+    installmentValue = totalReturn / count;
+  }
 
-      return { totalReturn, installmentValue, totalInterest };
-    } else {
-      // Cálculo Simples (Taxa fixa sobre o capital)
-      const totalInterest = principal * rate;
-      const totalReturn = principal + totalInterest;
-      const installmentValue = totalReturn / count;
+  const schedule = [];
+  
+  // ✅ CORREÇÃO DAS DATAS:
+  for (let i = 1; i <= count; i++) {
+    // Criamos uma nova data baseada na startDate para cada iteração
+    // Usamos o split e o map para garantir que o fuso horário local não interfira
+    const [year, month, day] = startDate.split('-').map(Number);
+    const d = new Date(year, month - 1, day); // month é 0-indexed no JS
 
-      return { totalReturn, installmentValue, totalInterest };
+    if (frequency === 'MENSAL') {
+      d.setMonth(d.getMonth() + i);
+    } else if (frequency === 'QUINZENAL') {
+      d.setDate(d.getDate() + (i * 15));
+    } else if (frequency === 'SEMANAL') {
+      d.setDate(d.getDate() + (i * 7));
+    } else if (frequency === 'DIARIO') {
+      d.setDate(d.getDate() + i);
     }
-  }, [amount, interestRate, installmentsCount, interestType]);
 
-  // --- FUNÇÃO DE SUBMISSÃO ---
-  const handleSubmit = (e: React.FormEvent) => {
+    schedule.push({
+      number: i,
+      date: d.toISOString().split('T')[0], // Retorna YYYY-MM-DD
+      value: Number(installmentValue.toFixed(2))
+    });
+  }
+
+  return { 
+    totalReturn: Number(totalReturn.toFixed(2)), 
+    installmentValue: Number(installmentValue.toFixed(2)), 
+    totalInterest: Number((totalReturn - principal).toFixed(2)),
+    schedule
+  };
+}, [amount, interestRate, installmentsCount, interestType, startDate, frequency]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Aqui usamos o 'customers', resolvendo o erro do TypeScript
     const customer = customers.find(c => c.id === selectedCustomerId);
     
-    if (!customer || !amount) {
-      alert("Selecione um cliente e preencha o valor.");
+    // Proteção contra valores vazios ou zerados
+    if (!customer || !amount || parseFloat(amount) <= 0) {
+      showToast?.("Selecione o cliente e um valor válido.", "error");
       return;
     }
 
-    const loanData: any = {
+    const contractNumber = getNextContractNumber();
+    const loanId = Math.random().toString(36).substr(2, 9);
+
+    const newLoan: Loan = {
+      id: loanId,
+      contractNumber: contractNumber,
       customerId: selectedCustomerId,
-      customerName: customer.name,
+      customerName: customer.name || 'Não informado',
+      customerPhone: customer.phone || '',
       amount: parseFloat(amount),
       interestRate: parseFloat(interestRate),
       installmentCount: parseInt(installmentsCount),
       totalToReturn: calculation.totalReturn,
       installmentValue: calculation.installmentValue,
-      startDate,
-      dueDate: startDate,
-      status: 'active',
+      paidAmount: 0,
+      startDate: startDate, // Data que o dinheiro saiu
+      // O vencimento principal é a data da primeira parcela
+      dueDate: calculation.schedule[0]?.date || startDate, 
+      status: 'ATIVO',
       interestType: interestType,
-      frequency: 'MENSAL',
-      installments: []
+      frequency: frequency, 
+      createdAt: Date.now(),
+      // ✅ MAPEAMENTO DAS PARCELAS PARA CONFERÊNCIA DE MULTA
+      installments: calculation.schedule.map(s => ({
+        id: Math.random().toString(36).substr(2, 9),
+        number: s.number,
+        dueDate: s.date, // Formato YYYY-MM-DD para cálculo de dias de atraso
+        value: Number(s.value.toFixed(2)),
+        status: 'PENDENTE',
+        originalValue: Number(s.value.toFixed(2)) // Guardamos o valor original sem multa
+      }))
     };
 
-    onAddLoan(loanData);
-    
-    // Reset
-    setAmount('');
-    setSelectedCustomerId('');
-  };
+    try {
+      // 1. Atualiza o saldo do caixa (Settings)
+      const caixaRef = doc(db, 'settings', 'caixa');
+      const caixaSnap = await getDoc(caixaRef);
+      const saldoAtual = caixaSnap.exists() ? (caixaSnap.data().value || 0) : 0;
+      await setDoc(caixaRef, { value: saldoAtual - parseFloat(amount) }, { merge: true });
+
+      // 2. Registra a saída no movimento de caixa
+      await addDoc(collection(db, 'cashMovement'), {
+        type: 'RETIRADA',
+        amount: -Math.abs(parseFloat(amount)),
+        description: `Empréstimo: ${customer.name} (Contrato #${contractNumber})`,
+        date: new Date().toISOString(),
+        loanId: loanId
+      });
+
+      // 3. Salva o empréstimo no Firestore (via App.tsx)
+      await onAddLoan(newLoan);
+
+      // 4. Gera o PDF do contrato
+      if (generateContractPDF) {
+        generateContractPDF(customer, newLoan);
+      }
+
+      setLastCreated({ customer, loan: newLoan });
+      setIsSuccess(true);
+      showToast?.("Contrato gerado com sucesso!", "success");
+
+    } catch (error) {
+      console.error("Erro ao efetivar:", error);
+      showToast?.("Erro técnico ao salvar no banco de dados.", "error");
+    }
+};
+  // ... (Parte do Sucesso permanece igual)
 
   return (
-    <div className="w-full bg-black min-h-screen p-6 lg:p-10">
-      <div className="max-w-[1400px] mx-auto">
-        
-        <div className="flex items-center gap-3 mb-10">
-          <div className="w-[2px] h-5 bg-[#BF953F] shadow-[0_0_10px_#BF953F]" />
-          <h2 className="text-[11px] font-black text-white uppercase tracking-[0.5em]">Contratos</h2>
+    <div className="max-w-7xl mx-auto animate-in fade-in">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 text-left">
+        <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-white/5">
+          <h2 className="text-xl font-black text-white uppercase tracking-widest mb-8 flex items-center gap-3">
+            <FileText size={20} className="text-[#BF953F]" /> Novo Registro
+          </h2>
+          
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Cliente</label>
+              <select value={selectedCustomerId} onChange={(e) => setSelectedCustomerId(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-zinc-200 text-sm">
+                <option value="">Selecione...</option>
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+               <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor (R$)</label>
+                  <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
+               </div>
+               <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Juros Mensal (%)</label>
+                  <input type="number" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
+               </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+               <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Parcelas</label>
+                  <input type="number" value={installmentsCount} onChange={(e) => setInstallmentsCount(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
+               </div>
+               <div className="space-y-2">
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Início</label>
+                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
+               </div>
+            </div>
+
+            {/* ✅ NOVO: SELETOR DE FREQUÊNCIA */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Frequência de Pagamento</label>
+              <div className="flex flex-wrap bg-black p-1 rounded-2xl border border-zinc-800 w-fit gap-1">
+                {['MENSAL', 'QUINZENAL', 'SEMANAL', 'DIARIO'].map((f) => (
+                  <button 
+                    key={f}
+                    type="button" 
+                    onClick={() => setFrequency(f as any)} 
+                    className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${frequency === f ? 'bg-[#BF953F] text-black' : 'text-zinc-600 hover:text-zinc-400'}`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Sistema</label>
+              <div className="flex bg-black p-1 rounded-2xl border border-zinc-800 w-fit">
+                <button type="button" onClick={() => setInterestType('SIMPLES')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${interestType === 'SIMPLES' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>Simples</button>
+                <button type="button" onClick={() => setInterestType('PRICE')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${interestType === 'PRICE' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>Price</button>
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
-          
-          {/* LADO ESQUERDO: FORMULÁRIO */}
-          <div className="xl:col-span-7 bg-[#0a0a0a] border border-white/5 p-8 rounded-[2rem] shadow-2xl">
-            <div className="flex items-center gap-3 mb-10 text-[#BF953F]">
-              <FileText size={20} />
-              <h3 className="text-sm font-black uppercase tracking-[0.2em]">Registro Manual</h3>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-6 text-left">
+        <div className="flex flex-col gap-6">
+          <div className="bg-[#050505] p-8 rounded-[2.5rem] border border-[#BF953F]/30 shadow-2xl flex flex-col justify-between h-full">
+            <div className="space-y-8">
+              <h3 className="text-[10px] font-black text-[#BF953F] uppercase tracking-[0.3em] flex items-center gap-2">
+                <CalendarDays size={14}/> Resumo Financeiro
+              </h3>
               
-              <div className="space-y-2">
-                <label className="text-[9px] text-zinc-500 font-black uppercase tracking-widest ml-1">Cliente / Devedor</label>
-                <select 
-                  required
-                  value={selectedCustomerId} 
-                  onChange={(e) => setSelectedCustomerId(e.target.value)} 
-                  className="w-full bg-black border border-zinc-800/50 p-4 rounded-xl text-white text-xs outline-none focus:border-[#BF953F] appearance-none"
-                >
-                  <option value="">Selecione...</option>
-                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[9px] text-zinc-500 font-black uppercase tracking-widest ml-1">Capital (R$)</label>
-                  <input required type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full bg-black border border-zinc-800/50 p-4 rounded-xl text-white text-xs outline-none focus:border-[#BF953F]" />
+              <div className="space-y-6">
+                <div className="flex justify-between items-center border-b border-zinc-900 pb-4">
+                  <span className="text-[10px] text-zinc-500 font-black uppercase">Total Final</span>
+                  <span className="text-2xl font-black text-[#BF953F]">R$ {calculation.totalReturn.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
                 </div>
-                <div className="space-y-2">
-                  <label className="text-[9px] text-zinc-500 font-black uppercase tracking-widest ml-1">Taxa de Juros (%)</label>
-                  <input required type="number" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} className="w-full bg-black border border-zinc-800/50 p-4 rounded-xl text-white text-xs outline-none focus:border-[#BF953F]" />
+                <div className="flex justify-between items-center border-b border-zinc-900 pb-4">
+                  <span className="text-[10px] text-zinc-500 font-black uppercase">Valor {frequency}</span>
+                  <span className="text-lg font-bold text-white">R$ {calculation.installmentValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
                 </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <label className="text-[9px] text-zinc-500 font-black uppercase tracking-widest ml-1">Nº Parcelas</label>
-                  <input required type="number" value={installmentsCount} onChange={(e) => setInstallmentsCount(e.target.value)} className="w-full bg-black border border-zinc-800/50 p-4 rounded-xl text-white text-xs outline-none focus:border-[#BF953F]" />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-[9px] text-zinc-500 font-black uppercase tracking-widest ml-1 flex items-center gap-2">
-                    <Calendar size={12}/> Data de Emissão
-                  </label>
-                  <input required type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full bg-black border border-zinc-800/50 p-4 rounded-xl text-white text-xs outline-none focus:border-[#BF953F]" />
-                </div>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-[9px] text-zinc-500 font-black uppercase tracking-widest ml-1 block">Modelo de Cálculo</label>
-                <div className="flex p-1 bg-black border border-zinc-800/50 rounded-xl max-w-[200px]">
-                  <button 
-                    type="button"
-                    onClick={() => setInterestType('FIXO')}
-                    className={`flex-1 text-[9px] font-black rounded-lg py-2 uppercase transition-all ${interestType === 'FIXO' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}
-                  >
-                    Simples
-                  </button>
-                  <button 
-                    type="button"
-                    onClick={() => setInterestType('PRICE')}
-                    className={`flex-1 text-[9px] font-black rounded-lg py-2 uppercase transition-all ${interestType === 'PRICE' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}
-                  >
-                    Price
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-4 bg-[#BF953F]/5 border border-[#BF953F]/10 rounded-xl flex items-center gap-3">
-                <AlertCircle size={14} className="text-[#BF953F]" />
-                <p className="text-[9px] text-[#BF953F]/70 font-bold uppercase tracking-widest">Cálculo automático baseado no sistema {interestType}.</p>
-              </div>
-            </form>
-          </div>
-
-          {/* LADO DIREITO: RESUMO */}
-          <div className="xl:col-span-5 border border-[#BF953F]/30 bg-[#050505] rounded-[2rem] p-8 flex flex-col justify-between min-h-[500px]">
-            <div>
-              <div className="flex items-center gap-2 mb-10">
-                <div className="w-4 h-4 rounded-full border border-[#BF953F] flex items-center justify-center">
-                  <div className="w-1 h-1 bg-[#BF953F] rounded-full" />
-                </div>
-                <h3 className="text-[10px] font-black text-[#BF953F] uppercase tracking-[0.3em]">Resumo Operacional</h3>
-              </div>
-              
-              <div className="space-y-8">
-                <div className="flex justify-between items-center border-b border-zinc-900 pb-6">
-                  <span className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Total a Receber</span>
-                  <span className="text-2xl font-black text-[#BF953F]">
-                    R$ {calculation.totalReturn.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center border-b border-zinc-900 pb-6">
-                  <span className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Parcelas</span>
-                  <span className="text-base font-bold text-white">
-                    {installmentsCount}x R$ {calculation.installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center border-b border-zinc-900 pb-6">
-                  <span className="text-[10px] text-zinc-500 font-black uppercase tracking-widest">Juros Acumulados</span>
-                  <span className="text-base font-bold text-white">
-                    R$ {calculation.totalInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </span>
+                <div className="flex justify-between items-center">
+                  <span className="text-[10px] text-zinc-500 font-black uppercase">Lucro Bruto</span>
+                  <span className="text-lg font-bold text-emerald-500">R$ {calculation.totalInterest.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
                 </div>
               </div>
             </div>
 
-            <button 
-              onClick={handleSubmit} 
-              disabled={!selectedCustomerId || !amount} 
-              className={`w-full py-5 rounded-2xl text-[10px] font-black uppercase tracking-[0.3em] transition-all flex items-center justify-center gap-3 ${
-                (!selectedCustomerId || !amount) 
-                ? 'bg-zinc-900/50 text-zinc-700 cursor-not-allowed' 
-                : 'bg-[#BF953F] text-black hover:scale-[1.02] shadow-[0_10px_20px_rgba(191,149,63,0.2)]'
-              }`}
-            >
-              <FileText size={16} />
-              Efetivar Contrato
+            <button onClick={handleSubmit} disabled={!selectedCustomerId || !amount} className={`w-full mt-10 py-5 rounded-2xl flex items-center justify-center gap-3 text-[10px] font-black uppercase tracking-widest transition-all ${(selectedCustomerId && amount) ? 'gold-gradient text-black shadow-xl' : 'bg-zinc-900 text-zinc-700 cursor-not-allowed'}`}>
+              <Save size={18} /> Efetivar Contrato
             </button>
           </div>
         </div>

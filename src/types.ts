@@ -40,17 +40,22 @@ export interface PaymentRecord {
   interest?: number;
   notes?: string;
 }
-
-export interface Installment {
+export interface Transaction {
   id: string;
+  type: 'INCOME' | 'EXPENSE'; // INCOME = Entrada (Verde), EXPENSE = Saída (Laranja)
+  category: string;
+  amount: number;
+  date: string; // Formato ISO "2024-03-25"
+  description: string;
+  loanId?: string; // Opcional, caso a transação venha de um empréstimo específico
+}
+export interface Installment {
   number: number;
+  value: number;
   dueDate: string;
-  value: number; // Valor original
-  status: PaymentStatus;
-  paidAt?: number;
-  paidValue?: number; // Valor total já pago (incluindo pagamentos parciais)
-  penaltyApplied?: number; // Valor da multa acumulada
-  paymentHistory?: PaymentRecord[];
+  status: 'PENDENTE' | 'PAGO';
+  partialPaid?: number;    // Para o valor que foi abatido parcialmente
+  lastPaidValue?: number;  // Para o valor total que foi pago na última operação
 }
 
 export interface CashMovement {
@@ -80,6 +85,7 @@ export interface Loan {
   notes?: string;
   installments: Installment[];
   status?: string;
+  paidAmount?: number;        // <--- ADICIONE ESTA LINHA (Opcional)
 }
 
 export type View = 'DASHBOARD' | 'CUSTOMERS' | 'LOANS' | 'SIMULATION' | 'REPORTS';

@@ -1,212 +1,251 @@
-import React, { useMemo, useState, useEffect, useRef } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { 
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid
-} from 'recharts';
-import { 
-  Users, Briefcase, AlertCircle, ShieldCheck, ArrowUpRight, 
-  ArrowDownRight, TrendingUp, Wallet, Coins, Filter
+  Users, 
+  Briefcase, 
+  AlertCircle, 
+  ChevronDown, 
+  PlusCircle, 
+  MinusCircle, 
+  ArrowUpRight, 
+  ArrowDownRight, 
+  History 
 } from 'lucide-react';
-import { db } from "../firebase"; // Certifique-se que o caminho está correto
-// Adicione 'serverTimestamp' dentro das chaves:
-import { 
-  collection, 
-  onSnapshot, 
-  query, 
-  doc, 
-  updateDoc, 
-  addDoc, 
-  orderBy, 
-  serverTimestamp // <--- Esta é a peça que está faltando!
-} from 'firebase/firestore';
+import { Loan, Customer, CashMovement } from '../types';
 
-const Dashboard = () => {
-  const [loans, setLoans] = useState<any[]>([]);
-  const [transactions, setTransactions] = useState<any[]>([]);
+interface DashboardProps {
+  loans: Loan[];
+  customers: Customer[];
+  cashMovements: CashMovement[];
+}
+
+const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashMovements = [] }) => {
   const [isMounted, setIsMounted] = useState(false);
-  const [period, setPeriod] = useState('30D');
-  const dashboardRef = useRef<HTMLDivElement>(null);
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
 
-  const todayStr = new Date().toISOString().split('T')[0];
-// Exemplo de função para salvar aporte/retirada
-const registrarMovimentacao = async (valor, motivo, tipo) => {
-  const valorFinal = tipo === 'retirada' ? -Math.abs(valor) : Math.abs(valor);
-  
-  await addDoc(collection(db, "caixa"), {
-    valor: valorFinal,
-    motivo: motivo,
-    tipo: tipo,
-    data: serverTimestamp()
-  });
-  
-  // Aqui você deve atualizar o estado do saldo disponível
-};
-  // --- CONEXÃO FIREBASE EM TEMPO REAL ---
   useEffect(() => {
     setIsMounted(true);
-    
-    // Escutar Contratos
-    const unsubLoans = onSnapshot(collection(db, "contratos"), (snap) => {
-      setLoans(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-
-    // Escutar Movimentações (Extrato)
-    const qMov = query(collection(db, "movimentacoes"), orderBy("date", "desc"));
-    const unsubMov = onSnapshot(qMov, (snap) => {
-      setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-
-    return () => { unsubLoans(); unsubMov(); };
+    const now = new Date();
+    setExpandedMonth(`${now.getFullYear()}-${now.getMonth()}`);
   }, []);
 
-  // --- LÓGICA DE CÁLCULO (O "CÉREBRO" DO DASHBOARD) ---
+  const todayStr = new Date().toISOString().split('T')[0];
+
+  // --- 1. MÉTRICAS GERAIS CORRIGIDAS ---
   const stats = useMemo(() => {
-    // 1. Total que saiu do caixa (Aportes dos investidores)
-    const aportes = transactions
-      .filter(t => t.type === 'APORTE')
-      .reduce((acc, t) => acc + (Number(t.value) || 0), 0);
+    // CONTRATOS ATIVOS: Qualquer um que não esteja 'QUITADO' ou 'CANCELADO'
+    const activeContracts = loans.filter(l => {
+      const status = l.status?.toUpperCase();
+      return status !== 'QUITADO' && status !== 'CANCELADO';
+    }).length;
 
-    // 2. Total que saiu para empréstimos (O que está na rua)
-    const totalEmprestado = loans.reduce((acc, l) => acc + (Number(l.amount) || 0), 0);
-
-    // 3. Total recebido de parcelas
-    const totalRecebido = transactions
-      .filter(t => t.type === 'RETORNO_PARCELA')
-      .reduce((acc, t) => acc + (Number(t.value) || 0), 0);
-
-    // 4. Inadimplência (Parcelas vencidas e não pagas)
-    const overdueCount = loans.filter(l => 
-      l.installments?.some((inst: any) => 
-        inst.status !== 'PAID' && inst.dueDate < todayStr
+    // INADIMPLÊNCIA: Parcelas PENDENTES com data anterior a hoje
+    const overdueContracts = loans.filter(l => 
+      l.installments?.some(inst => 
+        (inst.status === 'PENDENTE' || inst.status === 'ATRASADO') && 
+        inst.dueDate < todayStr
       )
     ).length;
 
-    // 5. Saldo Real (Aportes + Retornos - Saídas/Retiradas)
-    const retiradas = transactions
-      .filter(t => t.type === 'RETIRADA')
-      .reduce((acc, t) => acc + (Number(t.value) || 0), 0);
+    // CLIENTES NA BASE: Prioriza a lista oficial de clientes do Firebase
+    const activeCustomersCount = customers.length > 0 
+      ? customers.length 
+      : new Set(loans.map(l => l.customerId)).size;
+
+    return { activeContracts, overdueContracts, activeCustomers: activeCustomersCount };
+  }, [loans, customers, todayStr]);
+
+  // --- 2. LÓGICA DAS GAVETAS ---
+  const monthlyHistory = useMemo(() => {
+    const monthsFull = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const data = [];
     
-    const saldoEmCaixa = (aportes + totalRecebido) - (totalEmprestado + retiradas);
+    const startDate = new Date(2026, 0, 1); 
+    const today = new Date();
+    let tempDate = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
 
-    return {
-      totalEmprestado,
-      totalRecebido,
-      saldoEmCaixa,
-      overdueCount,
-      customerCount: loans.length,
-      activeContracts: loans.filter(l => l.installments?.some((i:any) => i.status !== 'PAID')).length
+    const parseDate = (d: any) => {
+      if (!d) return new Date();
+      return d?.seconds ? new Date(d.seconds * 1000) : new Date(d);
     };
-  }, [loans, transactions, todayStr]);
 
-  // Dados para o Gráfico de Pizza
-  const statusData = [
-    { name: 'Em Dia', value: stats.activeContracts - stats.overdueCount, color: '#BF953F' },
-    { name: 'Atrasados', value: stats.overdueCount, color: '#EF4444' },
-    { name: 'Finalizados', value: loans.length - stats.activeContracts, color: '#10B981' }
-  ];
+    while (tempDate <= today) {
+      const mIdx = tempDate.getMonth();
+      const yIdx = tempDate.getFullYear();
+
+      const filterByMonth = (dateField: any) => {
+        const d = parseDate(dateField);
+        return d.getMonth() === mIdx && d.getFullYear() === yIdx;
+      };
+
+      const aportes = cashMovements.filter(m => filterByMonth(m.date) && m.type?.toUpperCase() === 'APORTE');
+      const retiradas = cashMovements.filter(m => filterByMonth(m.date) && (m.type?.toUpperCase() === 'RETIRADA' || m.type?.toUpperCase() === 'ESTORNO'));
+      const recebimentos = cashMovements.filter(m => filterByMonth(m.date) && m.type?.toUpperCase() === 'PAGAMENTO');
+      const novosEmprestimos = loans.filter(l => filterByMonth(l.createdAt || l.date || l.startDate));
+
+      const totalSaida = novosEmprestimos.reduce((acc, l) => acc + (Number(l.amount) || 0), 0);
+      const totalRetorno = recebimentos.reduce((acc, r) => acc + (Number(r.amount) || 0), 0);
+
+      if (aportes.length > 0 || retiradas.length > 0 || recebimentos.length > 0 || novosEmprestimos.length > 0 || (mIdx === today.getMonth() && yIdx === today.getFullYear())) {
+        data.push({
+          id: `${yIdx}-${mIdx}`,
+          name: monthsFull[mIdx],
+          year: yIdx,
+          aportes,
+          retiradas,
+          novosEmprestimos,
+          recebimentos,
+          totalSaida,
+          totalRetorno
+        });
+      }
+      tempDate.setMonth(tempDate.getMonth() + 1);
+    }
+    return data.reverse(); // Mostra o mês atual primeiro
+  }, [loans, cashMovements]);
 
   if (!isMounted) return null;
 
   return (
-    <div className="p-8 space-y-8 bg-black min-h-screen text-white" ref={dashboardRef}>
+    <div className="space-y-10 animate-in fade-in duration-700 pb-10 px-2">
       
-      {/* HEADER */}
-      <div className="flex justify-between items-center bg-[#0a0a0a] p-6 rounded-[2rem] border border-zinc-900 shadow-2xl">
-        <div>
-          <h2 className="text-2xl font-black italic tracking-tighter text-[#BF953F]">DASHBOARD OPERACIONAL</h2>
-          <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.3em]">GR Solution • Gestão de Ativos</p>
-        </div>
-        <div className="flex gap-2 bg-black p-1 rounded-xl border border-zinc-800">
-          {['7D', '30D', '90D', 'TOTAL'].map(p => (
-            <button key={p} onClick={() => setPeriod(p)} className={`px-4 py-2 rounded-lg text-[9px] font-black transition-all ${period === p ? 'bg-[#BF953F] text-black' : 'text-zinc-500 hover:text-white'}`}>{p}</button>
-          ))}
-        </div>
-      </div>
-
-      {/* CARDS DE IMPACTO */}
+      {/* SEÇÃO DE CARDS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 relative overflow-hidden group">
-          <Briefcase className="absolute right-[-10px] top-[-10px] text-zinc-900/50 group-hover:text-[#BF953F]/10 transition-colors" size={120} />
-          <p className="text-[10px] font-black text-zinc-500 uppercase mb-2 italic">Capital na Rua</p>
-          <p className="text-4xl font-black text-white italic">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalEmprestado)}</p>
-        </div>
-
-        <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 relative overflow-hidden group">
-          <TrendingUp className="absolute right-[-10px] top-[-10px] text-zinc-900/50 group-hover:text-emerald-500/10 transition-colors" size={120} />
-          <p className="text-[10px] font-black text-zinc-500 uppercase mb-2 italic">Total Recuperado</p>
-          <p className="text-4xl font-black text-emerald-500 italic">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.totalRecebido)}</p>
-        </div>
-
-        <div className="bg-[#BF953F] p-8 rounded-[2.5rem] shadow-[0_20px_50px_rgba(191,149,63,0.2)]">
-          <Wallet className="mb-4 text-black/40" size={32} />
-          <p className="text-[10px] font-black text-black/60 uppercase mb-1 italic">Saldo Disponível em Caixa</p>
-          <p className="text-4xl font-black text-black italic">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(stats.saldoEmCaixa)}</p>
-        </div>
+        <StatCard 
+          title="Contratos Ativos" 
+          value={stats.activeContracts.toString()} 
+          icon={<Briefcase size={20} className="text-[#BF953F]" />} 
+          description="Em andamento" 
+        />
+        <StatCard 
+          title="Clientes na Base" 
+          value={stats.activeCustomers.toString()} 
+          icon={<Users size={20} className="text-blue-500" />} 
+          description="Cadastrados no sistema" 
+        />
+        <StatCard 
+          title="Inadimplência" 
+          value={stats.overdueContracts.toString()} 
+          icon={<AlertCircle size={20} className={stats.overdueContracts > 0 ? "text-red-500" : "text-zinc-600"} />} 
+          description="Contratos com atraso" 
+          border={stats.overdueContracts > 0 ? "border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.1)]" : "border-zinc-900"} 
+        />
       </div>
 
-      {/* SEÇÃO DE ANÁLISE GRÁFICA */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        
-        {/* Gráfico de Pizza - Status da Carteira */}
-        <div className="lg:col-span-5 bg-[#0a0a0a] p-8 rounded-[3rem] border border-zinc-900 h-[450px] flex flex-col">
-          <div className="flex items-center gap-3 mb-8">
-            <div className="p-2 bg-[#BF953F]/10 rounded-lg"><ShieldCheck size={18} className="text-[#BF953F]"/></div>
-            <h4 className="text-[11px] font-black uppercase tracking-widest text-zinc-400">Saúde da Carteira</h4>
-          </div>
-          <div className="flex-1">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={statusData} innerRadius={80} outerRadius={110} paddingAngle={8} dataKey="value">
-                  {statusData.map((entry, index) => <Cell key={index} fill={entry.color} stroke="none" />)}
-                </Pie>
-                <Tooltip contentStyle={{backgroundColor: '#111', border: 'none', borderRadius: '10px', fontSize: '12px'}} />
-                <Legend iconType="circle" wrapperStyle={{paddingTop: '20px', fontSize: '10px', fontWeight: 'bold', textTransform: 'uppercase'}} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+      {/* HISTÓRICO MENSAL */}
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 mb-6 opacity-50">
+          <History size={16} className="text-[#BF953F]" />
+          <h3 className="text-[10px] font-black uppercase tracking-[0.3em] text-white">Fluxo de Caixa por Período</h3>
         </div>
 
-        {/* Resumo de Clientes e Inadimplência */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="grid grid-cols-2 gap-6">
-            <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 text-center">
-              <Users className="mx-auto mb-4 text-[#BF953F]" size={32} />
-              <p className="text-5xl font-black italic">{stats.customerCount}</p>
-              <p className="text-[10px] font-black text-zinc-600 uppercase mt-2">Clientes Totais</p>
-            </div>
-            <div className={`p-8 rounded-[2.5rem] border text-center transition-all ${stats.overdueCount > 0 ? 'bg-red-500/5 border-red-500/30' : 'bg-zinc-900/20 border-zinc-800'}`}>
-              <AlertCircle className={`mx-auto mb-4 ${stats.overdueCount > 0 ? 'text-red-500' : 'text-zinc-700'}`} size={32} />
-              <p className={`text-5xl font-black italic ${stats.overdueCount > 0 ? 'text-red-500' : 'text-zinc-800'}`}>{stats.overdueCount}</p>
-              <p className="text-[10px] font-black text-zinc-600 uppercase mt-2">Contratos em Atraso</p>
-            </div>
-          </div>
+        {monthlyHistory.map((month) => (
+          <div key={month.id} className={`bg-[#0a0a0a] rounded-[2.5rem] border transition-all duration-300 ${expandedMonth === month.id ? 'border-[#BF953F]/40 shadow-2xl' : 'border-zinc-900'}`}>
+            <button 
+              onClick={() => setExpandedMonth(expandedMonth === month.id ? null : month.id)} 
+              className="w-full px-6 py-6 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-4">
+                <div className={`w-12 h-12 rounded-2xl flex items-center justify-center border font-black text-[10px] transition-colors ${expandedMonth === month.id ? 'bg-[#BF953F] text-black border-[#BF953F]' : 'bg-black text-zinc-500 border-zinc-800'}`}>
+                  {month.name.slice(0, 3).toUpperCase()}
+                </div>
+                <div className="text-left">
+                  <h4 className="text-lg font-black text-white uppercase tracking-tighter">
+                    {month.name} <span className="text-zinc-700 ml-1">{month.year}</span>
+                  </h4>
+                  <div className="flex gap-3 mt-0.5">
+                    <span className="text-[8px] font-black text-emerald-500 uppercase tracking-widest">In: {month.totalRetorno.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    <span className="text-[8px] font-black text-red-500 uppercase tracking-widest">Out: {month.totalSaida.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                  </div>
+                </div>
+              </div>
+              <ChevronDown className={`transition-transform duration-300 ${expandedMonth === month.id ? 'rotate-180 text-[#BF953F]' : 'text-zinc-700'}`} />
+            </button>
 
-          <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-zinc-900 flex items-center justify-between group hover:border-[#BF953F]/30 transition-all">
-             <div>
-                <p className="text-[10px] font-black text-zinc-500 uppercase mb-1">Índice de Adimplência</p>
-                <p className="text-4xl font-black text-[#BF953F] italic">
-                  {stats.activeContracts > 0 ? Math.round(((stats.activeContracts - stats.overdueCount) / stats.activeContracts) * 100) : 100}%
-                </p>
-             </div>
-             <div className="h-16 w-16 rounded-full border-4 border-zinc-900 border-t-[#BF953F] animate-spin-slow"></div>
-          </div>
-        </div>
+            {expandedMonth === month.id && (
+              <div className="px-6 pb-8 border-t border-white/5 pt-8 animate-in slide-in-from-top-4">
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  {/* ENTRADAS */}
+                  <div>
+                    <h5 className="text-[9px] font-black text-emerald-500 uppercase mb-4 flex items-center gap-2 tracking-widest">
+                      <ArrowUpRight size={14} /> Recebimentos e Aportes
+                    </h5>
+                    <div className="space-y-3">
+                      {[...month.aportes, ...month.recebimentos].map(m => (
+                        <ListItem key={m.id} m={m} color="emerald" />
+                      ))}
+                      {month.aportes.length + month.recebimentos.length === 0 && <Empty msg="Nenhuma entrada" />}
+                    </div>
+                  </div>
 
+                  {/* SAÍDAS */}
+                  <div>
+                    <h5 className="text-[9px] font-black text-red-500 uppercase mb-4 flex items-center gap-2 tracking-widest">
+                      <ArrowDownRight size={14} /> Saídas e Empréstimos
+                    </h5>
+                    <div className="space-y-3">
+                      {month.novosEmprestimos.map(l => (
+                        <div key={l.id} className="bg-white/[0.02] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-red-500/10 rounded-xl text-red-500"><Users size={14} /></div>
+                            <div>
+                              <p className="text-[10px] font-black text-zinc-200 uppercase">{l.customerName || 'Cliente'}</p>
+                              <p className="text-[8px] text-zinc-600 font-bold uppercase">Novo Empréstimo</p>
+                            </div>
+                          </div>
+                          <span className="text-xs font-black text-red-500">-{Number(l.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                        </div>
+                      ))}
+                      {month.retiradas.map(m => <ListItem key={m.id} m={m} color="red" />)}
+                      {month.novosEmprestimos.length + month.retiradas.length === 0 && <Empty msg="Nenhuma saída" />}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
       </div>
     </div>
   );
 };
 
-// Componente auxiliar para os cards pequenos
-const StatMiniCard = ({ title, value, icon, color, isCurrency = true }: any) => (
-  <div className="bg-[#0a0a0a] p-6 rounded-3xl border border-zinc-900 group hover:border-[#BF953F]/30 transition-all">
-    <div className="flex justify-between items-center mb-4">
-      <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest">{title}</span>
-      <div className="p-2 bg-black rounded-lg border border-zinc-800 text-zinc-500">{icon}</div>
+// --- AUXILIARES ---
+
+const StatCard: React.FC<{ title: string, value: string, icon: React.ReactNode, border?: string, description: string }> = ({ title, value, icon, border, description }) => (
+  <div className={`bg-[#0a0a0a] p-8 rounded-[2.5rem] border ${border || 'border-zinc-900'} shadow-xl flex flex-col justify-between hover:border-zinc-800 transition-all`}>
+    <div className="flex items-center justify-between mb-4">
+      <span className="text-[9px] font-black uppercase text-zinc-600 tracking-[0.2em]">{title}</span>
+      <div className="p-3 bg-black rounded-2xl border border-zinc-800">{icon}</div>
     </div>
-    <p className={`text-xl font-black ${color}`}>
-      {isCurrency ? new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(value) : value}
-    </p>
+    <p className="text-4xl font-black text-white tracking-tighter mb-1">{value}</p>
+    <p className="text-[9px] text-zinc-600 font-bold uppercase tracking-widest">{description}</p>
+  </div>
+);
+
+const ListItem: React.FC<{ m: CashMovement, color: 'emerald' | 'red' }> = ({ m, color }) => {
+  const isPos = color === 'emerald';
+  const parseDate = (d: any) => (d?.seconds ? new Date(d.seconds * 1000) : new Date(d));
+  return (
+    <div className="bg-white/[0.02] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between hover:border-zinc-700 transition-all">
+      <div className="flex items-center gap-3">
+        <div className={`p-2 rounded-xl ${isPos ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+          {m.type === 'APORTE' ? <PlusCircle size={14} /> : m.type === 'PAGAMENTO' ? <ArrowUpRight size={14} /> : <MinusCircle size={14} />}
+        </div>
+        <div>
+          <p className="text-[10px] font-black text-zinc-200 uppercase tracking-tighter">{m.description || 'Movimentação'}</p>
+          <p className="text-[8px] text-zinc-600 font-bold uppercase">{parseDate(m.date).toLocaleDateString('pt-BR')}</p>
+        </div>
+      </div>
+      <span className={`text-xs font-black ${isPos ? 'text-emerald-500' : 'text-red-500'}`}>
+        {isPos ? '+' : '-'}{Number(m.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+      </span>
+    </div>
+  );
+};
+
+const Empty: React.FC<{ msg: string }> = ({ msg }) => (
+  <div className="py-6 text-center border border-dashed border-zinc-900 rounded-[2rem] opacity-30">
+    <p className="text-[8px] font-black uppercase tracking-widest text-zinc-500">{msg}</p>
   </div>
 );
 
