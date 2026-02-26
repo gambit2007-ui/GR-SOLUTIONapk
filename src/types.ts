@@ -31,7 +31,15 @@ export interface Customer {
   documents?: CustomerDocument[];
   createdAt: number;
 }
-
+// Adicione ou corrija no seu arquivo de types:
+export interface CashMovement {
+  id?: string;
+  type: 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO';
+  amount: number;
+  description: string;
+  date: string;
+  loanId?: string; // Para vincular ao empréstimo, se quiser
+}
 export interface PaymentRecord {
   id: string;
   date: number;
@@ -58,13 +66,7 @@ export interface Installment {
   lastPaidValue?: number;  // Para o valor total que foi pago na última operação
 }
 
-export interface CashMovement {
-  id: string;
-  type: CashMovementType;
-  amount: number;
-  description: string;
-  date: number;
-}
+
 
 export interface Loan {
   id: string;

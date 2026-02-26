@@ -71,7 +71,7 @@ const App: React.FC = () => {
 
   const handleAddTransaction = async (type: 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO', amount: number, description: string) => {
     try {
-      // Registrar movimento no histórico
+      // 1. Registrar movimento no histórico (Coleção ÚNICA de verdade financeira)
       await addDoc(collection(db, 'cashMovement'), {
         type,
         amount: Number(amount),
@@ -79,14 +79,13 @@ const App: React.FC = () => {
         date: new Date().toISOString()
       });
 
-      // Calcular novo saldo baseado no estado atual
+      // 2. Calcular novo saldo baseado no estado atual para persistência
       let novoSaldo = Number(caixa);
       if (type === 'APORTE' || type === 'PAGAMENTO') novoSaldo += Number(amount);
       else if (type === 'RETIRADA' || type === 'ESTORNO') novoSaldo -= Number(amount);
 
-      // Salvar saldo mestre nas configurações
       const caixaRef = doc(db, 'settings', 'caixa');
-      await setDoc(caixaRef, { value: Number(novoSaldo.toFixed(2)) });
+      await setDoc(caixaRef, { value: Number(novoSaldo.toFixed(2)) }, { merge: true });
     } catch (error) {
       console.error("Erro na transação:", error);
       showToast("Erro ao processar caixa", "error");
@@ -144,18 +143,27 @@ const App: React.FC = () => {
     } catch (e) { showToast('Erro na exclusão', 'error'); }
   };
 
+  // ✅ FUNÇÃO CRÍTICA CORRIGIDA: Agora ela centraliza toda a lógica financeira do empréstimo
   const handleAddLoan = async (loan: Loan) => {
     try {
       const { id, ...data } = loan; 
-      // Salva o contrato
+      
+      // 1. Salva o contrato no Firestore com ID fixo gerado no formulário
       await setDoc(doc(db, "loans", loan.id), { ...data, createdAt: serverTimestamp() });
       
-      // Debita automaticamente do caixa o valor que saiu para o cliente
-      await handleAddTransaction('RETIRADA', loan.amount, `EMPRÉSTIMO CONCEDIDO: ${loan.customerName}`);
+      // 2. Registra o débito no caixa (Isso já cria o cashMovement e abate do settings/caixa)
+      await handleAddTransaction(
+        'RETIRADA', 
+        loan.amount, 
+        `Empréstimo: ${loan.customerName} (Contrato #${loan.contractNumber})`
+      );
       
       setCurrentView('DASHBOARD'); 
-      showToast('Contrato efetivado e caixa atualizado!', 'success');
-    } catch (e) { showToast('Erro ao salvar contrato', 'error'); }
+      showToast('Contrato efetivado com sucesso!', 'success');
+    } catch (e) { 
+      console.error(e);
+      showToast('Erro ao salvar contrato', 'error'); 
+    }
   };
 
   const navItems = [
@@ -219,7 +227,7 @@ const App: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-black p-6">
             {currentView === 'DASHBOARD' && (
-              <Dashboard loans={loans} customers={customers} cashMovements={transactions} />
+              <Dashboard loans={loans} customers={customers}/>
             )}
             {currentView === 'CUSTOMERS' && (
               <CustomerSection 

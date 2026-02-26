@@ -1,13 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { 
   FileText, 
-  ShieldCheck, 
   Save,
   CalendarDays
 } from 'lucide-react';
-import { collection, addDoc, doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../firebase'; 
-import { Customer, Loan, Installment } from '../types';
+import { Customer, Loan } from '../types';
 import { generateContractPDF } from '../utils/contractGenerator';
 
 interface LoanSectionProps {
@@ -29,8 +26,6 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [installmentsCount, setInstallmentsCount] = useState('1');
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [interestType, setInterestType] = useState<'SIMPLES' | 'PRICE'>('SIMPLES');
-  
-  // ✅ Novo: Estado para Frequência
   const [frequency, setFrequency] = useState<'MENSAL' | 'QUINZENAL' | 'SEMANAL' | 'DIARIO'>('MENSAL');
   
   const [isSuccess, setIsSuccess] = useState(false);
@@ -45,65 +40,54 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   };
 
   const calculation = useMemo(() => {
-  const principal = parseFloat(amount) || 0;
-  const rate = (parseFloat(interestRate) || 0) / 100;
-  const count = parseInt(installmentsCount) || 1;
+    const principal = parseFloat(amount) || 0;
+    const rate = (parseFloat(interestRate) || 0) / 100;
+    const count = parseInt(installmentsCount) || 1;
 
-  if (principal === 0) return { totalReturn: 0, installmentValue: 0, totalInterest: 0, schedule: [] };
+    if (principal === 0) return { totalReturn: 0, installmentValue: 0, totalInterest: 0, schedule: [] };
 
-  let totalReturn = 0;
-  let installmentValue = 0;
-  
-  if (interestType === 'PRICE') {
-    const factor = Math.pow(1 + rate, count);
-    installmentValue = principal * (rate * factor) / (factor - 1);
-    totalReturn = installmentValue * count;
-  } else {
-    // Juros Simples Fixo (Adiciona a % uma única vez no total)
-    const totalInterest = principal * rate; 
-    totalReturn = principal + totalInterest;
-    installmentValue = totalReturn / count;
-  }
-
-  const schedule = [];
-  
-  // ✅ CORREÇÃO DAS DATAS:
-  for (let i = 1; i <= count; i++) {
-    // Criamos uma nova data baseada na startDate para cada iteração
-    // Usamos o split e o map para garantir que o fuso horário local não interfira
-    const [year, month, day] = startDate.split('-').map(Number);
-    const d = new Date(year, month - 1, day); // month é 0-indexed no JS
-
-    if (frequency === 'MENSAL') {
-      d.setMonth(d.getMonth() + i);
-    } else if (frequency === 'QUINZENAL') {
-      d.setDate(d.getDate() + (i * 15));
-    } else if (frequency === 'SEMANAL') {
-      d.setDate(d.getDate() + (i * 7));
-    } else if (frequency === 'DIARIO') {
-      d.setDate(d.getDate() + i);
+    let totalReturn = 0;
+    let installmentValue = 0;
+    
+    if (interestType === 'PRICE') {
+      const factor = Math.pow(1 + rate, count);
+      installmentValue = principal * (rate * factor) / (factor - 1);
+      totalReturn = installmentValue * count;
+    } else {
+      const totalInterest = principal * rate; 
+      totalReturn = principal + totalInterest;
+      installmentValue = totalReturn / count;
     }
 
-    schedule.push({
-      number: i,
-      date: d.toISOString().split('T')[0], // Retorna YYYY-MM-DD
-      value: Number(installmentValue.toFixed(2))
-    });
-  }
+    const schedule = [];
+    for (let i = 1; i <= count; i++) {
+      const [year, month, day] = startDate.split('-').map(Number);
+      const d = new Date(year, month - 1, day);
 
-  return { 
-    totalReturn: Number(totalReturn.toFixed(2)), 
-    installmentValue: Number(installmentValue.toFixed(2)), 
-    totalInterest: Number((totalReturn - principal).toFixed(2)),
-    schedule
-  };
-}, [amount, interestRate, installmentsCount, interestType, startDate, frequency]);
+      if (frequency === 'MENSAL') d.setMonth(d.getMonth() + i);
+      else if (frequency === 'QUINZENAL') d.setDate(d.getDate() + (i * 15));
+      else if (frequency === 'SEMANAL') d.setDate(d.getDate() + (i * 7));
+      else if (frequency === 'DIARIO') d.setDate(d.getDate() + i);
+
+      schedule.push({
+        number: i,
+        date: d.toISOString().split('T')[0],
+        value: Number(installmentValue.toFixed(2))
+      });
+    }
+
+    return { 
+      totalReturn: Number(totalReturn.toFixed(2)), 
+      installmentValue: Number(installmentValue.toFixed(2)), 
+      totalInterest: Number((totalReturn - principal).toFixed(2)),
+      schedule
+    };
+  }, [amount, interestRate, installmentsCount, interestType, startDate, frequency]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const customer = customers.find(c => c.id === selectedCustomerId);
     
-    // Proteção contra valores vazios ou zerados
     if (!customer || !amount || parseFloat(amount) <= 0) {
       showToast?.("Selecione o cliente e um valor válido.", "error");
       return;
@@ -124,44 +108,28 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       totalToReturn: calculation.totalReturn,
       installmentValue: calculation.installmentValue,
       paidAmount: 0,
-      startDate: startDate, // Data que o dinheiro saiu
-      // O vencimento principal é a data da primeira parcela
+      startDate: startDate, 
       dueDate: calculation.schedule[0]?.date || startDate, 
       status: 'ATIVO',
       interestType: interestType,
       frequency: frequency, 
       createdAt: Date.now(),
-      // ✅ MAPEAMENTO DAS PARCELAS PARA CONFERÊNCIA DE MULTA
       installments: calculation.schedule.map(s => ({
         id: Math.random().toString(36).substr(2, 9),
         number: s.number,
-        dueDate: s.date, // Formato YYYY-MM-DD para cálculo de dias de atraso
+        dueDate: s.date,
         value: Number(s.value.toFixed(2)),
         status: 'PENDENTE',
-        originalValue: Number(s.value.toFixed(2)) // Guardamos o valor original sem multa
+        originalValue: Number(s.value.toFixed(2))
       }))
     };
 
     try {
-      // 1. Atualiza o saldo do caixa (Settings)
-      const caixaRef = doc(db, 'settings', 'caixa');
-      const caixaSnap = await getDoc(caixaRef);
-      const saldoAtual = caixaSnap.exists() ? (caixaSnap.data().value || 0) : 0;
-      await setDoc(caixaRef, { value: saldoAtual - parseFloat(amount) }, { merge: true });
-
-      // 2. Registra a saída no movimento de caixa
-      await addDoc(collection(db, 'cashMovement'), {
-        type: 'RETIRADA',
-        amount: -Math.abs(parseFloat(amount)),
-        description: `Empréstimo: ${customer.name} (Contrato #${contractNumber})`,
-        date: new Date().toISOString(),
-        loanId: loanId
-      });
-
-      // 3. Salva o empréstimo no Firestore (via App.tsx)
+      // ✅ ÚNICA CHAMADA: Delegamos toda a gravação e financeiro para o App.tsx
+      // Isso evita registros duplicados no cashMovement e erros de saldo.
       await onAddLoan(newLoan);
 
-      // 4. Gera o PDF do contrato
+      // Gera o PDF
       if (generateContractPDF) {
         generateContractPDF(customer, newLoan);
       }
@@ -172,10 +140,28 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
     } catch (error) {
       console.error("Erro ao efetivar:", error);
-      showToast?.("Erro técnico ao salvar no banco de dados.", "error");
+      showToast?.("Erro técnico ao salvar.", "error");
     }
-};
-  // ... (Parte do Sucesso permanece igual)
+  };
+
+  // Se o contrato foi criado com sucesso, exibe tela de confirmação
+  if (isSuccess && lastCreated) {
+    return (
+      <div className="max-w-2xl mx-auto py-20 text-center animate-in zoom-in-95 duration-500">
+        <div className="w-24 h-24 bg-emerald-500/10 text-emerald-500 rounded-full flex items-center justify-center mx-auto mb-8 border border-emerald-500/20 shadow-[0_0_50px_rgba(16,185,129,0.1)]">
+          <Save size={40} />
+        </div>
+        <h2 className="text-4xl font-black text-white uppercase tracking-tighter mb-4">Contrato Efetivado!</h2>
+        <p className="text-zinc-500 mb-10 font-medium">O contrato nº {lastCreated.loan.contractNumber} de {lastCreated.customer.name} foi registrado e o PDF gerado.</p>
+        <button 
+          onClick={() => { setIsSuccess(false); setSelectedCustomerId(''); setAmount(''); }} 
+          className="px-10 py-4 gold-gradient text-black font-black rounded-2xl uppercase text-[10px] tracking-[0.2em] shadow-2xl hover:scale-105 transition-transform"
+        >
+          Novo Empréstimo
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto animate-in fade-in">
@@ -216,9 +202,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                </div>
             </div>
 
-            {/* ✅ NOVO: SELETOR DE FREQUÊNCIA */}
             <div className="space-y-2">
-              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Frequência de Pagamento</label>
+              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Frequência</label>
               <div className="flex flex-wrap bg-black p-1 rounded-2xl border border-zinc-800 w-fit gap-1">
                 {['MENSAL', 'QUINZENAL', 'SEMANAL', 'DIARIO'].map((f) => (
                   <button 
