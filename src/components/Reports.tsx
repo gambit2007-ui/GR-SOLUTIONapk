@@ -29,12 +29,10 @@ const Reports: React.FC<ReportsProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [transFilter, setTransFilter] = useState('TODOS');
   const [expandedLoan, setExpandedLoan] = useState<string | null>(null);
-  const [isAddingMovement, setIsAddingMovement] = useState(false);
-  const [movementForm, setMovementForm] = useState({ type: 'APORTE' as 'APORTE' | 'RETIRADA', amount: '', description: '' });
 
   // --- 1. FUNÇÃO DE JUROS (1,5% AO DIA SOBRE O SALDO DEVEDOR DA PARCELA) ---
   const calcularJurosAtraso = (dueDate: string, currentAmount: number) => {
-    if (!dueDate) return { valorTotal: currentAmount, diasAtraso: 0, juros: 0 };
+    if (!dueDate || currentAmount <= 0) return { valorTotal: currentAmount, diasAtraso: 0, juros: 0 };
     
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
@@ -55,18 +53,7 @@ const Reports: React.FC<ReportsProps> = ({
     return { valorTotal, diasAtraso, juros };
   };
 
-  // --- 2. EXTRATO UNIFICADO ---
-  const filteredTransactions = useMemo(() => {
-    const list = Array.isArray(cashMovements) ? cashMovements : [];
-    const sorted = [...list].sort((a, b) => {
-      const dateA = a.date ? new Date(a.date).getTime() : 0;
-      const dateB = b.date ? new Date(b.date).getTime() : 0;
-      return dateB - dateA;
-    });
-    return transFilter === 'TODOS' ? sorted : sorted.filter(t => t.type === transFilter);
-  }, [cashMovements, transFilter]);
-
-  // --- 3. FILTRO DE CONTRATOS ---
+  // --- 2. FILTRO DE CONTRATOS ---
   const filteredLoans = useMemo(() => {
     return loans.filter(l => {
       const isLiq = (l.paidAmount || 0) >= (l.totalToReturn - 0.1);
@@ -76,7 +63,7 @@ const Reports: React.FC<ReportsProps> = ({
     });
   }, [loans, filterStatus, searchTerm]);
 
-  // --- 4. CÁLCULOS FINANCEIROS ---
+  // --- 3. CÁLCULOS FINANCEIROS ---
   const stats = useMemo(() => {
     return loans.reduce((acc, l) => {
       acc.totalEmprestado += (l.amount || 0);
@@ -88,22 +75,21 @@ const Reports: React.FC<ReportsProps> = ({
     }, { valorEmRua: 0, totalRecebido: 0, totalAReceber: 0, totalEmprestado: 0 });
   }, [loans]);
 
-  // --- 5. AÇÕES FINANCEIRAS REFORÇADAS ---
+  // --- 4. AÇÕES FINANCEIRAS (TOTAL, PARCIAL E ESTORNO) ---
   const handleAction = async (loan: Loan, type: 'TOTAL' | 'PARCIAL' | 'ESTORNO', idx?: number) => {
     let installments = JSON.parse(JSON.stringify(loan.installments || [])); 
     
+    // --- QUITAR PARCELA INDIVIDUAL ---
     if (type === 'TOTAL' && idx !== undefined) {
       const baseVal = Number(installments[idx].amount || installments[idx].value || 0);
       const { valorTotal, diasAtraso } = calcularJurosAtraso(installments[idx].dueDate, baseVal);
       
-      const confirmMsg = diasAtraso > 0 
-        ? `Atraso: ${diasAtraso} dias. Valor Total (c/ juros 1,5%): R$ ${valorTotal.toFixed(2)}. Confirmar?`
-        : `Confirmar recebimento de R$ ${valorTotal.toFixed(2)}?`;
-
-      if(!window.confirm(confirmMsg)) return;
+      if(!window.confirm(`Confirmar recebimento de R$ ${valorTotal.toFixed(2)}${diasAtraso > 0 ? ' (incluindo juros)' : ''}?`)) return;
 
       installments[idx].status = 'PAGO';
       installments[idx].lastPaidValue = (installments[idx].lastPaidValue || 0) + valorTotal;
+      installments[idx].amount = 0;
+      installments[idx].value = 0;
       
       const newPaidAmount = Number(((loan.paidAmount || 0) + valorTotal).toFixed(2));
       await onUpdateLoan(loan.id, { installments, paidAmount: newPaidAmount });
@@ -111,8 +97,9 @@ const Reports: React.FC<ReportsProps> = ({
       showToast("Pagamento recebido!", "success");
     } 
 
+    // --- ABATIMENTO PARCIAL (DEDUZIR DO SALDO DEVEDOR) ---
     else if (type === 'PARCIAL') {
-      const valInput = prompt("Valor do Abatimento:");
+      const valInput = prompt("Valor pago pelo cliente para abatimento:");
       if (!valInput) return;
       const valTotalPago = parseFloat(valInput.replace(',', '.'));
       if (isNaN(valTotalPago) || valTotalPago <= 0) return showToast("Valor inválido", "error");
@@ -123,17 +110,16 @@ const Reports: React.FC<ReportsProps> = ({
         
         const valorDevidoNaParcela = Number(installments[i].amount || installments[i].value || 0);
         
-        if (saldoRestante >= valorDevidoNaParcela - 0.01) {
+        if (saldoRestante >= valorDevidoNaParcela) {
           saldoRestante -= valorDevidoNaParcela;
-          installments[i].status = 'PAGO';
           installments[i].lastPaidValue = (installments[i].lastPaidValue || 0) + valorDevidoNaParcela;
+          installments[i].status = 'PAGO';
           installments[i].amount = 0;
           installments[i].value = 0;
         } else {
-          const novoValor = Number((valorDevidoNaParcela - saldoRestante).toFixed(2));
-          installments[i].amount = novoValor;
-          installments[i].value = novoValor;
           installments[i].lastPaidValue = (installments[i].lastPaidValue || 0) + saldoRestante;
+          installments[i].amount = Number((valorDevidoNaParcela - saldoRestante).toFixed(2));
+          installments[i].value = installments[i].amount;
           saldoRestante = 0;
         }
       }
@@ -141,61 +127,75 @@ const Reports: React.FC<ReportsProps> = ({
       const newPaidAmount = Number(((loan.paidAmount || 0) + valTotalPago).toFixed(2));
       await onUpdateLoan(loan.id, { installments, paidAmount: newPaidAmount });
       onAddTransaction('PAGAMENTO', valTotalPago, `ABATIMENTO: ${loan.customerName}`);
-      showToast(`R$ ${valTotalPago} abatidos!`, "success");
+      showToast(`R$ ${valTotalPago} abatidos com sucesso!`, "success");
     }
 
+    // --- ESTORNO (DESFAZER ÚLTIMA AÇÃO) ---
     else if (type === 'ESTORNO') {
-      // Lógica de estorno original mantida
-      showToast("Função de estorno acionada", "info");
-    }
-  };
+      const lastPaidIdx = installments.slice().reverse().findIndex((inst: any) => 
+        inst.status === 'PAGO' || (inst.lastPaidValue > 0)
+      );
+      
+      const actualIdx = lastPaidIdx !== -1 ? (installments.length - 1 - lastPaidIdx) : -1;
+      if (actualIdx === -1) return showToast("Nenhum pagamento encontrado para estornar.", "info");
+      
+      const valorEstorno = installments[actualIdx].lastPaidValue || 0;
+      if (!window.confirm(`Estornar R$ ${valorEstorno.toFixed(2)}? O valor sairá do caixa e voltará para a dívida.`)) return;
+      
+      installments[actualIdx].status = 'PENDENTE';
+      installments[actualIdx].amount = (installments[actualIdx].amount || 0) + valorEstorno;
+      installments[actualIdx].value = installments[actualIdx].amount;
+      installments[actualIdx].lastPaidValue = 0;
 
-  const handleSaveMovement = () => {
-    const amt = parseFloat(movementForm.amount.replace(',', '.'));
-    if (isNaN(amt) || amt <= 0) return showToast("Valor inválido", "error");
-    onAddTransaction(movementForm.type, amt, movementForm.description.toUpperCase() || `${movementForm.type} MANUAL`);
-    setIsAddingMovement(false);
-    setMovementForm({ type: 'APORTE', amount: '', description: '' });
+      const newPaidAmount = Number(((loan.paidAmount || 0) - valorEstorno).toFixed(2));
+      await onUpdateLoan(loan.id, { installments, paidAmount: newPaidAmount });
+      onAddTransaction('ESTORNO', valorEstorno, `ESTORNO: ${loan.customerName}`);
+      showToast("Estorno concluído!", "info");
+    }
   };
 
   return (
-    <div className="space-y-8 pb-20 animate-in fade-in duration-500">
+    <div className="space-y-8 pb-20">
+      {/* StatCards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         <StatCard title="Caixa Geral" value={caixa} color="text-emerald-500" icon={<Wallet/>}/>
         <StatCard title="Valor em Rua" value={stats.valorEmRua} color="text-[#BF953F]" icon={<TrendingUp/>}/>
         <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle/>}/>
         <StatCard title="Total a Receber" value={stats.totalAReceber} color="text-red-500" icon={<History/>}/>
         <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-500" icon={<HandCoins/>}/>
-        <StatCard title="Lucro Estimado" value={stats.totalRecebido + stats.totalAReceber - stats.totalEmprestado} color="text-emerald-400" icon={<ArrowUpRight/>}/>
+        <StatCard title="Lucro Bruto" value={stats.totalRecebido + stats.totalAReceber - stats.totalEmprestado} color="text-emerald-400" icon={<ArrowUpRight/>}/>
       </div>
 
       <div className="bg-[#0a0a0a] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl">
         <div className="flex flex-col xl:flex-row justify-between items-center mb-10 gap-6">
           <div className="flex items-center gap-6 w-full xl:w-auto">
-            <h3 className="text-sm font-black uppercase tracking-[0.2em]">Controle de Contratos</h3>
+            <h3 className="text-sm font-black uppercase tracking-widest">Contratos</h3>
             <div className="flex-1 xl:w-64 bg-black border border-white/10 rounded-full px-5 py-2.5 flex items-center gap-3">
               <Search size={14} className="text-zinc-600"/>
-              <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="PROCURAR CLIENTE..." className="bg-transparent border-none text-[10px] font-bold text-white w-full uppercase outline-none"/>
+              <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="BUSCAR..." className="bg-transparent border-none text-[10px] font-bold text-white w-full outline-none"/>
             </div>
           </div>
           <div className="flex bg-black p-1.5 rounded-2xl border border-white/5">
-            <button onClick={() => setFilterStatus('ATIVOS')} className={`px-8 py-2.5 rounded-xl text-[9px] font-black uppercase transition-all ${filterStatus === 'ATIVOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>EM ABERTO</button>
-            <button onClick={() => setFilterStatus('FINALIZADOS')} className={`px-8 py-2.5 rounded-xl text-[9px] font-black uppercase transition-all ${filterStatus === 'FINALIZADOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>LIQUIDADOS</button>
+            <button onClick={() => setFilterStatus('ATIVOS')} className={`px-8 py-2.5 rounded-xl text-[9px] font-black uppercase transition-all ${filterStatus === 'ATIVOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>ATIVOS</button>
+            <button onClick={() => setFilterStatus('FINALIZADOS')} className={`px-8 py-2.5 rounded-xl text-[9px] font-black uppercase transition-all ${filterStatus === 'FINALIZADOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>PAGOS</button>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4">
-          {filteredLoans.length > 0 ? filteredLoans.map(loan => (
-            <div key={loan.id} className={`group border transition-all duration-300 rounded-[2rem] overflow-hidden ${expandedLoan === loan.id ? 'bg-[#050505] border-[#BF953F]/40' : 'bg-black/40 border-white/5 hover:border-white/10'}`}>
+          {filteredLoans.map(loan => (
+            <div key={loan.id} className={`group border rounded-[2rem] overflow-hidden ${expandedLoan === loan.id ? 'bg-[#050505] border-[#BF953F]/40' : 'bg-black/40 border-white/5'}`}>
               <div className="p-6 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-4 w-full md:w-auto">
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center ${expandedLoan === loan.id ? 'bg-[#BF953F] text-black' : 'bg-white/5 text-[#BF953F]'}`}><Calendar size={20}/></div>
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-[#BF953F]"><Calendar size={20}/></div>
                   <div>
                     <h4 className="text-sm font-black uppercase text-white">{loan.customerName}</h4>
-                    <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">Saldo: R$ {Math.max(0, (loan.totalToReturn || 0) - (loan.paidAmount || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">
+                      Falta: R$ {Math.max(0, (loan.totalToReturn || 0) - (loan.paidAmount || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
                   </div>
                 </div>
                 <div className="flex gap-2">
+                  <button onClick={() => handleAction(loan, 'ESTORNO')} title="Estornar último pagamento" className="p-3 bg-red-500/10 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"><RotateCcw size={18}/></button>
                   <button onClick={() => setExpandedLoan(expandedLoan === loan.id ? null : loan.id)} className="p-3 bg-[#BF953F]/10 text-[#BF953F] rounded-2xl"><ChevronDown size={20} className={expandedLoan === loan.id ? 'rotate-180' : ''}/></button>
                 </div>
               </div>
@@ -203,16 +203,16 @@ const Reports: React.FC<ReportsProps> = ({
               {expandedLoan === loan.id && (
                 <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-black/40 border-t border-white/5">
                   {(loan.installments || []).map((inst: any, idx: number) => {
-                    const originalVal = Number(inst.amount || inst.value || 0);
+                    const currentVal = Number(inst.amount || inst.value || 0);
                     const abatido = Number(inst.lastPaidValue || 0);
                     const { valorTotal, diasAtraso } = inst.status !== 'PAGO' 
-                      ? calcularJurosAtraso(inst.dueDate, originalVal)
+                      ? calcularJurosAtraso(inst.dueDate, currentVal)
                       : { valorTotal: abatido, diasAtraso: 0 };
 
                     return (
                       <div key={idx} className={`p-5 rounded-[1.5rem] border ${inst.status === 'PAGO' ? 'opacity-40 bg-emerald-500/5 border-emerald-500/20' : 'bg-zinc-900/40 border-white/5'}`}>
                         <div className="flex justify-between text-[9px] font-black text-zinc-600 uppercase mb-4">
-                          <span>P {inst.number}</span>
+                          <span>PARCELA {inst.number}</span>
                           <span className={diasAtraso > 0 && inst.status !== 'PAGO' ? 'text-red-500' : ''}>{inst.dueDate?.split('-').reverse().join('/')}</span>
                         </div>
                         
@@ -222,8 +222,8 @@ const Reports: React.FC<ReportsProps> = ({
 
                         {abatido > 0 && (
                           <div className="mt-2 text-[8px] font-bold uppercase">
-                            <span className="text-emerald-500">✓ Abatido: R$ {abatido.toFixed(2)}</span>
-                            {inst.status !== 'PAGO' && <span className="text-zinc-500 block">Falta: R$ {originalVal.toFixed(2)}</span>}
+                            <span className="text-emerald-500 block">✓ Abatido: R$ {abatido.toFixed(2)}</span>
+                            {inst.status !== 'PAGO' && <span className="text-zinc-500 block">Restante: R$ {currentVal.toFixed(2)}</span>}
                           </div>
                         )}
 
@@ -240,6 +240,7 @@ const Reports: React.FC<ReportsProps> = ({
                               <button onClick={() => handleAction(loan, 'PARCIAL')} className="px-2 py-2 bg-white/5 text-white text-[9px] font-black uppercase rounded-lg">Parcial</button>
                             </>
                           )}
+                          {inst.status === 'PAGO' && <span className="text-[9px] font-black text-emerald-500 uppercase w-full text-center">Paga</span>}
                         </div>
                       </div>
                     );
@@ -247,7 +248,7 @@ const Reports: React.FC<ReportsProps> = ({
                 </div>
               )}
             </div>
-          )) : <div className="text-center py-20 text-zinc-600">Nenhum contrato encontrado</div>}
+          ))}
         </div>
       </div>
     </div>
@@ -262,5 +263,4 @@ const StatCard = ({ title, value, color, icon }: any) => (
   </div>
 );
 
-// --- ESTA LINHA É OBRIGATÓRIA PARA O DEPLOY FUNCIONAR ---
 export default Reports;
