@@ -3,7 +3,7 @@ import {
   Wallet, TrendingUp, CheckCircle, 
   History, HandCoins, ArrowUpRight, 
   Receipt, ChevronDown, RotateCcw, 
-  Calendar, Search, MessageCircle
+  Calendar, Search, Plus, Minus, ArrowDownLeft
 } from 'lucide-react';
 import { Loan, Customer, Installment } from '../types';
 
@@ -29,31 +29,33 @@ const Reports: React.FC<ReportsProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [transFilter, setTransFilter] = useState('TODOS');
   const [expandedLoan, setExpandedLoan] = useState<string | null>(null);
+  const [isAddingMovement, setIsAddingMovement] = useState(false);
+  const [movementForm, setMovementForm] = useState({ type: 'APORTE' as 'APORTE' | 'RETIRADA', amount: '', description: '' });
 
-  // --- 1. FUNÇÃO DE JUROS (1,5% AO DIA SOBRE O SALDO DEVEDOR DA PARCELA) ---
+  // --- 1. FUNÇÃO DE JUROS (1,5% AO DIA) ---
   const calcularJurosAtraso = (dueDate: string, currentAmount: number) => {
     if (!dueDate || currentAmount <= 0) return { valorTotal: currentAmount, diasAtraso: 0, juros: 0 };
-    
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
-    
     const partes = dueDate.includes('/') ? dueDate.split('/') : dueDate.split('-');
     const vencimento = dueDate.includes('/') 
       ? new Date(Number(partes[2]), Number(partes[1]) - 1, Number(partes[0]))
       : new Date(dueDate + "T00:00:00");
-
     if (hoje <= vencimento) return { valorTotal: currentAmount, diasAtraso: 0, juros: 0 };
-
     const diffMs = hoje.getTime() - vencimento.getTime();
     const diasAtraso = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
     const juros = currentAmount * 0.015 * diasAtraso;
-    const valorTotal = currentAmount + juros;
-
-    return { valorTotal, diasAtraso, juros };
+    return { valorTotal: currentAmount + juros, diasAtraso, juros };
   };
 
-  // --- 2. FILTRO DE CONTRATOS ---
+  // --- 2. EXTRATO UNIFICADO (RESTAURADO) ---
+  const filteredTransactions = useMemo(() => {
+    const list = Array.isArray(cashMovements) ? cashMovements : [];
+    const sorted = [...list].sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+    return transFilter === 'TODOS' ? sorted : sorted.filter(t => t.type === transFilter);
+  }, [cashMovements, transFilter]);
+
+  // --- 3. FILTRO DE CONTRATOS ---
   const filteredLoans = useMemo(() => {
     return loans.filter(l => {
       const isLiq = (l.paidAmount || 0) >= (l.totalToReturn - 0.1);
@@ -63,7 +65,7 @@ const Reports: React.FC<ReportsProps> = ({
     });
   }, [loans, filterStatus, searchTerm]);
 
-  // --- 3. CÁLCULOS FINANCEIROS ---
+  // --- 4. CÁLCULOS DE STATS ---
   const stats = useMemo(() => {
     return loans.reduce((acc, l) => {
       acc.totalEmprestado += (l.amount || 0);
@@ -75,173 +77,101 @@ const Reports: React.FC<ReportsProps> = ({
     }, { valorEmRua: 0, totalRecebido: 0, totalAReceber: 0, totalEmprestado: 0 });
   }, [loans]);
 
-  // --- 4. AÇÕES FINANCEIRAS (TOTAL, PARCIAL E ESTORNO) ---
   const handleAction = async (loan: Loan, type: 'TOTAL' | 'PARCIAL' | 'ESTORNO', idx?: number) => {
     let installments = JSON.parse(JSON.stringify(loan.installments || [])); 
-    
-    // --- QUITAR PARCELA INDIVIDUAL ---
     if (type === 'TOTAL' && idx !== undefined) {
-      const baseVal = Number(installments[idx].amount || installments[idx].value || 0);
-      const { valorTotal, diasAtraso } = calcularJurosAtraso(installments[idx].dueDate, baseVal);
-      
-      if(!window.confirm(`Confirmar recebimento de R$ ${valorTotal.toFixed(2)}${diasAtraso > 0 ? ' (incluindo juros)' : ''}?`)) return;
-
-      installments[idx].status = 'PAGO';
-      installments[idx].lastPaidValue = (installments[idx].lastPaidValue || 0) + valorTotal;
-      installments[idx].amount = 0;
-      installments[idx].value = 0;
-      
-      const newPaidAmount = Number(((loan.paidAmount || 0) + valorTotal).toFixed(2));
-      await onUpdateLoan(loan.id, { installments, paidAmount: newPaidAmount });
-      onAddTransaction('PAGAMENTO', valorTotal, `PAG: ${loan.customerName} (P${installments[idx].number})`);
-      showToast("Pagamento recebido!", "success");
-    } 
-
-    // --- ABATIMENTO PARCIAL (DEDUZIR DO SALDO DEVEDOR) ---
-    else if (type === 'PARCIAL') {
-      const valInput = prompt("Valor pago pelo cliente para abatimento:");
-      if (!valInput) return;
-      const valTotalPago = parseFloat(valInput.replace(',', '.'));
-      if (isNaN(valTotalPago) || valTotalPago <= 0) return showToast("Valor inválido", "error");
-      
-      let saldoRestante = valTotalPago;
-      for (let i = 0; i < installments.length; i++) {
-        if (saldoRestante <= 0 || installments[i].status === 'PAGO') continue;
-        
-        const valorDevidoNaParcela = Number(installments[i].amount || installments[i].value || 0);
-        
-        if (saldoRestante >= valorDevidoNaParcela) {
-          saldoRestante -= valorDevidoNaParcela;
-          installments[i].lastPaidValue = (installments[i].lastPaidValue || 0) + valorDevidoNaParcela;
-          installments[i].status = 'PAGO';
-          installments[i].amount = 0;
-          installments[i].value = 0;
-        } else {
-          installments[i].lastPaidValue = (installments[i].lastPaidValue || 0) + saldoRestante;
-          installments[i].amount = Number((valorDevidoNaParcela - saldoRestante).toFixed(2));
-          installments[i].value = installments[i].amount;
-          saldoRestante = 0;
-        }
-      }
-
-      const newPaidAmount = Number(((loan.paidAmount || 0) + valTotalPago).toFixed(2));
-      await onUpdateLoan(loan.id, { installments, paidAmount: newPaidAmount });
-      onAddTransaction('PAGAMENTO', valTotalPago, `ABATIMENTO: ${loan.customerName}`);
-      showToast(`R$ ${valTotalPago} abatidos com sucesso!`, "success");
-    }
-
-    // --- ESTORNO (DESFAZER ÚLTIMA AÇÃO) ---
-    else if (type === 'ESTORNO') {
-      const lastPaidIdx = installments.slice().reverse().findIndex((inst: any) => 
-        inst.status === 'PAGO' || (inst.lastPaidValue > 0)
-      );
-      
-      const actualIdx = lastPaidIdx !== -1 ? (installments.length - 1 - lastPaidIdx) : -1;
-      if (actualIdx === -1) return showToast("Nenhum pagamento encontrado para estornar.", "info");
-      
-      const valorEstorno = installments[actualIdx].lastPaidValue || 0;
-      if (!window.confirm(`Estornar R$ ${valorEstorno.toFixed(2)}? O valor sairá do caixa e voltará para a dívida.`)) return;
-      
-      installments[actualIdx].status = 'PENDENTE';
-      installments[actualIdx].amount = (installments[actualIdx].amount || 0) + valorEstorno;
-      installments[actualIdx].value = installments[actualIdx].amount;
-      installments[actualIdx].lastPaidValue = 0;
-
-      const newPaidAmount = Number(((loan.paidAmount || 0) - valorEstorno).toFixed(2));
-      await onUpdateLoan(loan.id, { installments, paidAmount: newPaidAmount });
-      onAddTransaction('ESTORNO', valorEstorno, `ESTORNO: ${loan.customerName}`);
-      showToast("Estorno concluído!", "info");
+        const baseVal = Number(installments[idx].amount || installments[idx].value || 0);
+        const { valorTotal } = calcularJurosAtraso(installments[idx].dueDate, baseVal);
+        if(!confirm(`Receber R$ ${valorTotal.toFixed(2)}?`)) return;
+        installments[idx].status = 'PAGO';
+        installments[idx].lastPaidValue = valorTotal;
+        installments[idx].amount = 0; installments[idx].value = 0;
+        await onUpdateLoan(loan.id, { installments, paidAmount: Number(((loan.paidAmount || 0) + valorTotal).toFixed(2)) });
+        onAddTransaction('PAGAMENTO', valorTotal, `PAG: ${loan.customerName} (P${installments[idx].number})`);
+        showToast("Pago!", "success");
+    } else if (type === 'ESTORNO') {
+        const lastIdx = installments.slice().reverse().findIndex((i: any) => i.status === 'PAGO' || i.lastPaidValue > 0);
+        const actualIdx = lastIdx !== -1 ? (installments.length - 1 - lastIdx) : -1;
+        if (actualIdx === -1) return;
+        const valor = installments[actualIdx].lastPaidValue;
+        if (!confirm(`Estornar R$ ${valor.toFixed(2)}?`)) return;
+        installments[actualIdx].status = 'PENDENTE';
+        installments[actualIdx].amount = valor; installments[actualIdx].value = valor; installments[actualIdx].lastPaidValue = 0;
+        await onUpdateLoan(loan.id, { installments, paidAmount: Number(((loan.paidAmount || 0) - valor).toFixed(2)) });
+        onAddTransaction('ESTORNO', valor, `ESTORNO: ${loan.customerName}`);
+        showToast("Estornado!", "info");
     }
   };
 
   return (
     <div className="space-y-8 pb-20">
-      {/* StatCards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-        <StatCard title="Caixa Geral" value={caixa} color="text-emerald-500" icon={<Wallet/>}/>
-        <StatCard title="Valor em Rua" value={stats.valorEmRua} color="text-[#BF953F]" icon={<TrendingUp/>}/>
-        <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle/>}/>
-        <StatCard title="Total a Receber" value={stats.totalAReceber} color="text-red-500" icon={<History/>}/>
-        <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-500" icon={<HandCoins/>}/>
+        <StatCard title="Caixa" value={caixa} color="text-emerald-500" icon={<Wallet/>}/>
+        <StatCard title="Em Rua" value={stats.valorEmRua} color="text-[#BF953F]" icon={<TrendingUp/>}/>
+        <StatCard title="Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle/>}/>
+        <StatCard title="A Receber" value={stats.totalAReceber} color="text-red-500" icon={<History/>}/>
+        <StatCard title="Emprestado" value={stats.totalEmprestado} color="text-zinc-500" icon={<HandCoins/>}/>
         <StatCard title="Lucro Bruto" value={stats.totalRecebido + stats.totalAReceber - stats.totalEmprestado} color="text-emerald-400" icon={<ArrowUpRight/>}/>
       </div>
 
+      {/* GESTÃO DE CAIXA */}
       <div className="bg-[#0a0a0a] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl">
-        <div className="flex flex-col xl:flex-row justify-between items-center mb-10 gap-6">
-          <div className="flex items-center gap-6 w-full xl:w-auto">
-            <h3 className="text-sm font-black uppercase tracking-widest">Contratos</h3>
-            <div className="flex-1 xl:w-64 bg-black border border-white/10 rounded-full px-5 py-2.5 flex items-center gap-3">
-              <Search size={14} className="text-zinc-600"/>
-              <input value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="BUSCAR..." className="bg-transparent border-none text-[10px] font-bold text-white w-full outline-none"/>
-            </div>
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-sm font-black uppercase tracking-widest text-white">Gestão de Caixa</h3>
+          <button onClick={() => setIsAddingMovement(!isAddingMovement)} className="px-6 py-2 bg-white/5 border border-white/10 rounded-full text-[10px] font-black text-[#BF953F]">
+            {isAddingMovement ? 'FECHAR' : 'NOVO MOVIMENTO'}
+          </button>
+        </div>
+
+        {isAddingMovement && (
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8 p-6 bg-black/40 rounded-3xl border border-[#BF953F]/20">
+            <select value={movementForm.type} onChange={e => setMovementForm({...movementForm, type: e.target.value as any})} className="bg-black border border-white/10 rounded-xl px-4 py-3 text-[10px] text-white outline-none">
+              <option value="APORTE">APORTE (ENTRADA)</option>
+              <option value="RETIRADA">RETIRADA (SAÍDA)</option>
+            </select>
+            <input placeholder="VALOR" value={movementForm.amount} onChange={e => setMovementForm({...movementForm, amount: e.target.value})} className="bg-black border border-white/10 rounded-xl px-4 py-3 text-[10px] text-white outline-none"/>
+            <input placeholder="MOTIVO" value={movementForm.description} onChange={e => setMovementForm({...movementForm, description: e.target.value})} className="bg-black border border-white/10 rounded-xl px-4 py-3 text-[10px] text-white outline-none"/>
+            <button onClick={() => {
+                const amt = parseFloat(movementForm.amount.replace(',', '.'));
+                onAddTransaction(movementForm.type, amt, movementForm.description.toUpperCase());
+                setIsAddingMovement(false); setMovementForm({type: 'APORTE', amount: '', description: ''});
+            }} className="bg-[#BF953F] text-black rounded-xl text-[10px] font-black">CONFIRMAR</button>
           </div>
-          <div className="flex bg-black p-1.5 rounded-2xl border border-white/5">
-            <button onClick={() => setFilterStatus('ATIVOS')} className={`px-8 py-2.5 rounded-xl text-[9px] font-black uppercase transition-all ${filterStatus === 'ATIVOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>ATIVOS</button>
-            <button onClick={() => setFilterStatus('FINALIZADOS')} className={`px-8 py-2.5 rounded-xl text-[9px] font-black uppercase transition-all ${filterStatus === 'FINALIZADOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>PAGOS</button>
+        )}
+
+        <div className="flex flex-col xl:flex-row justify-between mt-10 mb-6 gap-6">
+          <div className="flex-1 bg-black border border-white/10 rounded-full px-5 py-2.5 flex items-center gap-3">
+            <Search size={14} className="text-zinc-600"/><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="PROCURAR CONTRATO..." className="bg-transparent border-none text-[10px] text-white w-full outline-none uppercase"/>
+          </div>
+          <div className="flex bg-black p-1 rounded-2xl border border-white/5">
+            <button onClick={() => setFilterStatus('ATIVOS')} className={`px-8 py-2 rounded-xl text-[9px] font-black ${filterStatus === 'ATIVOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>ATIVOS</button>
+            <button onClick={() => setFilterStatus('FINALIZADOS')} className={`px-8 py-2 rounded-xl text-[9px] font-black ${filterStatus === 'FINALIZADOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>PAGOS</button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4">
+        <div className="space-y-4">
           {filteredLoans.map(loan => (
-            <div key={loan.id} className={`group border rounded-[2rem] overflow-hidden ${expandedLoan === loan.id ? 'bg-[#050505] border-[#BF953F]/40' : 'bg-black/40 border-white/5'}`}>
-              <div className="p-6 flex flex-col md:flex-row items-center justify-between gap-4">
+            <div key={loan.id} className="border border-white/5 rounded-[2rem] bg-black/20">
+              <div className="p-6 flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-[#BF953F]"><Calendar size={20}/></div>
-                  <div>
-                    <h4 className="text-sm font-black uppercase text-white">{loan.customerName}</h4>
-                    <p className="text-[10px] text-zinc-500 font-bold uppercase mt-1">
-                      Falta: R$ {Math.max(0, (loan.totalToReturn || 0) - (loan.paidAmount || 0)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                    </p>
-                  </div>
+                  <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-[#BF953F]"><Calendar size={18}/></div>
+                  <div><h4 className="text-sm font-black text-white uppercase">{loan.customerName}</h4><p className="text-[9px] text-zinc-500 font-bold">FALTA: R$ {((loan.totalToReturn || 0) - (loan.paidAmount || 0)).toFixed(2)}</p></div>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={() => handleAction(loan, 'ESTORNO')} title="Estornar último pagamento" className="p-3 bg-red-500/10 text-red-500 rounded-2xl hover:bg-red-500 hover:text-white transition-all"><RotateCcw size={18}/></button>
-                  <button onClick={() => setExpandedLoan(expandedLoan === loan.id ? null : loan.id)} className="p-3 bg-[#BF953F]/10 text-[#BF953F] rounded-2xl"><ChevronDown size={20} className={expandedLoan === loan.id ? 'rotate-180' : ''}/></button>
+                  <button onClick={() => handleAction(loan, 'ESTORNO')} className="p-2.5 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all"><RotateCcw size={16}/></button>
+                  <button onClick={() => setExpandedLoan(expandedLoan === loan.id ? null : loan.id)} className="p-2.5 bg-[#BF953F]/10 text-[#BF953F] rounded-xl"><ChevronDown size={16} className={expandedLoan === loan.id ? 'rotate-180' : ''}/></button>
                 </div>
               </div>
-
               {expandedLoan === loan.id && (
-                <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 bg-black/40 border-t border-white/5">
-                  {(loan.installments || []).map((inst: any, idx: number) => {
-                    const currentVal = Number(inst.amount || inst.value || 0);
-                    const abatido = Number(inst.lastPaidValue || 0);
-                    const { valorTotal, diasAtraso } = inst.status !== 'PAGO' 
-                      ? calcularJurosAtraso(inst.dueDate, currentVal)
-                      : { valorTotal: abatido, diasAtraso: 0 };
-
+                <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-t border-white/5 bg-black/40">
+                  {loan.installments?.map((inst: any, idx: number) => {
+                    const { valorTotal, diasAtraso } = inst.status !== 'PAGO' ? calcularJurosAtraso(inst.dueDate, inst.amount) : { valorTotal: inst.lastPaidValue, diasAtraso: 0 };
                     return (
-                      <div key={idx} className={`p-5 rounded-[1.5rem] border ${inst.status === 'PAGO' ? 'opacity-40 bg-emerald-500/5 border-emerald-500/20' : 'bg-zinc-900/40 border-white/5'}`}>
-                        <div className="flex justify-between text-[9px] font-black text-zinc-600 uppercase mb-4">
-                          <span>PARCELA {inst.number}</span>
-                          <span className={diasAtraso > 0 && inst.status !== 'PAGO' ? 'text-red-500' : ''}>{inst.dueDate?.split('-').reverse().join('/')}</span>
-                        </div>
-                        
-                        <p className={`text-lg font-black ${diasAtraso > 0 && inst.status !== 'PAGO' ? 'text-red-500' : 'text-white'}`}>
-                          R$ {valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </p>
-
-                        {abatido > 0 && (
-                          <div className="mt-2 text-[8px] font-bold uppercase">
-                            <span className="text-emerald-500 block">✓ Abatido: R$ {abatido.toFixed(2)}</span>
-                            {inst.status !== 'PAGO' && <span className="text-zinc-500 block">Restante: R$ {currentVal.toFixed(2)}</span>}
-                          </div>
-                        )}
-
-                        {diasAtraso > 0 && inst.status !== 'PAGO' && (
-                          <div className="text-[8px] font-black text-red-500 uppercase mt-2 flex items-center gap-1">
-                            <History size={10}/> {diasAtraso} DIAS DE ATRASO (+1,5%/DIA)
-                          </div>
-                        )}
-
-                        <div className="mt-4 flex gap-2">
-                          {inst.status !== 'PAGO' && (
-                            <>
-                              <button onClick={() => handleAction(loan, 'TOTAL', idx)} className="flex-1 py-2 bg-[#BF953F] text-black text-[9px] font-black uppercase rounded-lg">Quitar</button>
-                              <button onClick={() => handleAction(loan, 'PARCIAL')} className="px-2 py-2 bg-white/5 text-white text-[9px] font-black uppercase rounded-lg">Parcial</button>
-                            </>
-                          )}
-                          {inst.status === 'PAGO' && <span className="text-[9px] font-black text-emerald-500 uppercase w-full text-center">Paga</span>}
-                        </div>
+                      <div key={idx} className={`p-4 rounded-2xl border ${inst.status === 'PAGO' ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-white/5 border-white/5'}`}>
+                        <div className="flex justify-between text-[8px] font-black text-zinc-500 mb-2"><span>P {inst.number}</span><span>{inst.dueDate?.split('-').reverse().join('/')}</span></div>
+                        <p className={`text-base font-black ${diasAtraso > 0 && inst.status !== 'PAGO' ? 'text-red-500' : 'text-white'}`}>R$ {valorTotal.toFixed(2)}</p>
+                        {diasAtraso > 0 && inst.status !== 'PAGO' && <p className="text-[7px] text-red-500 font-black mt-1 uppercase">{diasAtraso} DIAS ATRASO (+1.5%)</p>}
+                        {inst.status !== 'PAGO' && <button onClick={() => handleAction(loan, 'TOTAL', idx)} className="w-full mt-3 py-2 bg-[#BF953F] text-black text-[9px] font-black uppercase rounded-lg">Quitar</button>}
                       </div>
                     );
                   })}
@@ -251,15 +181,52 @@ const Reports: React.FC<ReportsProps> = ({
           ))}
         </div>
       </div>
+
+      {/* EXTRATO DE MOVIMENTAÇÃO (RESTAURADO) */}
+      <div className="bg-[#0a0a0a] border border-white/5 rounded-[2.5rem] p-8 shadow-2xl">
+        <div className="flex justify-between items-center mb-8">
+          <h3 className="text-sm font-black uppercase tracking-widest text-white">Extrato de Movimentação</h3>
+          <div className="flex bg-black p-1 rounded-xl border border-white/5">
+            {['TODOS', 'PAGAMENTO', 'APORTE', 'RETIRADA', 'ESTORNO'].map(f => (
+              <button key={f} onClick={() => setTransFilter(f)} className={`px-4 py-1.5 rounded-lg text-[8px] font-black transition-all ${transFilter === f ? 'bg-white/10 text-white' : 'text-zinc-600'}`}>{f}</button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-2 overflow-y-auto max-h-[400px] pr-2 custom-scrollbar">
+          {filteredTransactions.map((t, i) => (
+            <div key={i} className="flex items-center justify-between p-4 bg-white/[0.02] border border-white/5 rounded-2xl hover:bg-white/[0.04] transition-all">
+              <div className="flex items-center gap-4">
+                <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                  t.type === 'PAGAMENTO' || t.type === 'APORTE' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'
+                }`}>
+                  {t.type === 'PAGAMENTO' || t.type === 'APORTE' ? <ArrowDownLeft size={18}/> : <ArrowUpRight size={18}/>}
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-white uppercase tracking-wider">{t.description}</p>
+                  <p className="text-[8px] font-bold text-zinc-500 uppercase">{new Date(t.date).toLocaleString('pt-BR')}</p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className={`text-xs font-black ${t.type === 'PAGAMENTO' || t.type === 'APORTE' ? 'text-emerald-500' : 'text-red-500'}`}>
+                  {t.type === 'PAGAMENTO' || t.type === 'APORTE' ? '+' : '-'} R$ {Number(t.amount).toFixed(2)}
+                </p>
+                <p className="text-[7px] font-black text-zinc-600 uppercase tracking-tighter">{t.type}</p>
+              </div>
+            </div>
+          ))}
+          {filteredTransactions.length === 0 && <div className="text-center py-10 text-[10px] font-bold text-zinc-600 uppercase">Nenhuma movimentação encontrada</div>}
+        </div>
+      </div>
     </div>
   );
 };
 
 const StatCard = ({ title, value, color, icon }: any) => (
-  <div className="p-5 rounded-3xl bg-[#0a0a0a] border border-white/5">
+  <div className="p-5 rounded-3xl bg-[#0a0a0a] border border-white/5 hover:border-white/10 transition-all">
     <div className={`p-2.5 w-fit rounded-xl bg-white/5 mb-4 ${color}`}>{icon}</div>
-    <p className="text-[9px] font-bold text-zinc-500 uppercase">{title}</p>
-    <h3 className="text-xl font-black text-white mt-1">R$ {Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
+    <p className="text-[9px] font-bold text-zinc-500 uppercase tracking-tighter">{title}</p>
+    <h3 className="text-xl font-black text-white mt-1 leading-none">R$ {Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
   </div>
 );
 
