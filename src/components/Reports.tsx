@@ -11,14 +11,21 @@ import {
   ArrowDownLeft,
   ArrowUpRight as ArrowUpRightIcon
 } from 'lucide-react';
-import { Loan, Installment, CashMovement } from '../types';
+import { Loan, Installment } from '../types';
 
 type MovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO';
 
+type CashMovement = {
+  type: MovementType;
+  amount: number;
+  description: string;
+  date: string; // ISO
+};
+
 type InstallmentUI = Installment & {
-  baseValue?: number;
-  lastPaidValue?: number;
-  paidAt?: string;
+  baseValue?: number;      // valor original (recomendado manter)
+  lastPaidValue?: number;  // quanto foi pago (com juros)
+  paidAt?: string;         // data de pagamento
 };
 
 interface ReportsProps {
@@ -30,13 +37,19 @@ interface ReportsProps {
   showToast: (message: string, type: 'success' | 'info' | 'error') => void;
 }
 
-const JUROS_DIA = 0.015; // 1,5% ao dia
+const JUROS_DIA = 0.015; // 1,5% ao dia (mantive seu padrão)
 
 const parseISODate = (iso?: string) => {
   if (!iso) return null;
-  const parts = iso.split('-');
-  if (parts.length !== 3) return null;
-  const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+
+  const dt = new Date(y, mo, d);
+  if (Number.isNaN(dt.getTime())) return null;
   dt.setHours(0, 0, 0, 0);
   return dt;
 };
@@ -53,14 +66,23 @@ const Reports: React.FC<ReportsProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [transFilter, setTransFilter] = useState<'TODOS' | MovementType>('TODOS');
   const [expandedLoan, setExpandedLoan] = useState<string | null>(null);
+
   const [isAddingMovement, setIsAddingMovement] = useState(false);
-  const [movementForm, setMovementForm] = useState({ type: 'APORTE' as 'APORTE' | 'RETIRADA', amount: '', description: '' });
+  const [movementForm, setMovementForm] = useState({
+    type: 'APORTE' as 'APORTE' | 'RETIRADA',
+    amount: '',
+    description: '',
+  });
+
+  // trava anti “cliquei 2x e bagunçou o caixa”
   const [actionLock, setActionLock] = useState<string | null>(null);
 
-  const calcularJurosAtraso = useCallback((dueDate: string, amount: any) => {
+  const calcularJurosAtraso = useCallback((dueDate: string, amount: unknown) => {
     const valorBase = Number(amount) || 0;
+    if (valorBase <= 0) return { valorTotal: 0, diasAtraso: 0 };
+
     const vencimento = parseISODate(dueDate);
-    if (!vencimento || valorBase <= 0) return { valorTotal: valorBase, diasAtraso: 0 };
+    if (!vencimento) return { valorTotal: valorBase, diasAtraso: 0 };
 
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
@@ -70,211 +92,377 @@ const Reports: React.FC<ReportsProps> = ({
     const diasAtraso = Math.floor((hoje.getTime() - vencimento.getTime()) / 86400000);
     const juros = valorBase * JUROS_DIA * diasAtraso;
 
-    return { valorTotal: Number((valorBase + juros).toFixed(2)), diasAtraso };
+    return { valorTotal: valorBase + juros, diasAtraso };
   }, []);
 
   const isLoanLate = useCallback((loan: Loan) => {
-    const pago = Number(loan.paidAmount || 0);
-    const total = Number(loan.totalToReturn || 0);
-    if (pago >= (total - 0.5)) return false; // Quitado não atrasa
-
+    const installments = (loan.installments || []) as any[];
     const hoje = new Date();
     hoje.setHours(0, 0, 0, 0);
 
-    return (loan.installments || []).some((inst) => {
+    return installments.some((inst) => {
       if (inst.status === 'PAGO') return false;
       const venc = parseISODate(inst.dueDate);
-      return venc ? venc < hoje : false;
+      if (!venc) return false;
+      return venc < hoje;
     });
   }, []);
 
+  const isLiquidated = (loan: Loan) =>
+    (loan.paidAmount || 0) >= ((loan.totalToReturn || 0) - 0.1);
+
   const filteredLoans = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
+
     return (loans || []).filter(l => {
-      const saldo = Number(l.totalToReturn || 0) - Number(l.paidAmount || 0);
-      const liq = saldo <= 0.5;
-      const matchesSearch = !term || l.customerName.toLowerCase().includes(term);
+      const liq = isLiquidated(l);
+      const matchesSearch = !term || (l.customerName || '').toLowerCase().includes(term);
+
       if (!matchesSearch) return false;
 
       if (filterStatus === 'FINALIZADOS') return liq;
       if (filterStatus === 'ATRASADOS') return !liq && isLoanLate(l);
-      return !liq; // ATIVOS
+
+      // ATIVOS
+      return !liq;
     });
   }, [loans, filterStatus, searchTerm, isLoanLate]);
 
   const stats = useMemo(() => {
     return (loans || []).reduce((acc, l) => {
-      acc.totalEmprestado += Number(l.amount || 0);
-      acc.totalRecebido += Number(l.paidAmount || 0);
-      acc.totalAReceber += Math.max(0, Number(l.totalToReturn || 0) - Number(l.paidAmount || 0));
+      acc.totalEmprestado += (l.amount || 0);
+      acc.totalRecebido += (l.paidAmount || 0);
+      acc.totalAReceber += Math.max(0, (l.totalToReturn || 0) - (l.paidAmount || 0));
       return acc;
     }, { totalRecebido: 0, totalAReceber: 0, totalEmprestado: 0 });
   }, [loans]);
 
-  const handlePayInstallment = async (loan: Loan, idx: number) => {
-    if (actionLock) return;
+  const filteredMovements = useMemo(() => {
+    const list = cashMovements || [];
+    if (transFilter === 'TODOS') return list;
+    return list.filter(m => m.type === transFilter);
+  }, [cashMovements, transFilter]);
+
+  const isInflow = (t: CashMovement) => t.type === 'PAGAMENTO' || t.type === 'APORTE';
+
+  const handlePayInstallment = useCallback(async (loan: Loan, idx: number) => {
     const key = `${loan.id}:PAY:${idx}`;
+    if (actionLock) return;
     setActionLock(key);
 
     try {
       const installments: InstallmentUI[] = JSON.parse(JSON.stringify(loan.installments || []));
       const inst = installments[idx];
+      if (!inst) return;
+
+      if (inst.status === 'PAGO') {
+        showToast('Essa parcela já está paga.', 'info');
+        return;
+      }
+
+      // Base real da parcela (sem depender de amount que pode ser mexido)
       const baseAmount = Number(inst.baseValue ?? inst.value ?? inst.amount ?? 0);
-      const { valorTotal } = calcularJurosAtraso(inst.dueDate, baseAmount);
+      const { valorTotal } = calcularJurosAtraso(inst.dueDate as any, baseAmount);
 
-      if (!window.confirm(`Receber R$ ${valorTotal.toFixed(2)}?`)) return;
+      const ok = window.confirm(`Receber R$ ${Number(valorTotal).toFixed(2)}?`);
+      if (!ok) return;
 
-      installments[idx] = { 
-        ...inst, 
-        status: 'PAGO', 
-        lastPaidValue: valorTotal, 
-        paidAt: new Date().toISOString() 
+      installments[idx] = {
+        ...inst,
+        status: 'PAGO',
+        lastPaidValue: Number(valorTotal.toFixed(2)),
+        paidAt: new Date().toISOString(),
       };
 
       const novoPago = Number(((loan.paidAmount || 0) + valorTotal).toFixed(2));
 
       await onUpdateLoan(loan.id, { installments, paidAmount: novoPago });
-      onAddTransaction('PAGAMENTO', valorTotal, `PAG: ${loan.customerName} (P${inst.number})`.toUpperCase());
-      showToast('Pagamento recebido!', 'success');
+      onAddTransaction('PAGAMENTO', Number(valorTotal.toFixed(2)), `PAG: ${loan.customerName || 'CLIENTE'}`.toUpperCase());
+      showToast('Recebido!', 'success');
     } catch (e) {
-      showToast('Erro ao processar pagamento.', 'error');
+      console.error(e);
+      showToast('Falha ao receber parcela.', 'error');
     } finally {
       setActionLock(null);
     }
-  };
+  }, [actionLock, calcularJurosAtraso, onAddTransaction, onUpdateLoan, showToast]);
 
   const handleEstorno = useCallback(async (loan: Loan) => {
+    const key = `${loan.id}:ESTORNO`;
     if (actionLock) return;
-    setActionLock(`${loan.id}:ESTORNO`);
+    setActionLock(key);
 
     try {
       const installments: InstallmentUI[] = JSON.parse(JSON.stringify(loan.installments || []));
-      let lastPaidIdx = -1;
-      for (let i = installments.length - 1; i >= 0; i--) {
-        if (String(installments[i].status).toUpperCase() === 'PAGO') {
-          lastPaidIdx = i;
-          break;
-        }
+      const lastPaidIndexFromEnd = installments.slice().reverse().findIndex(i => i.status === 'PAGO');
+      const idx = lastPaidIndexFromEnd !== -1 ? (installments.length - 1 - lastPaidIndexFromEnd) : -1;
+
+      if (idx === -1) {
+        showToast('Sem parcelas pagas para estornar.', 'info');
+        return;
       }
 
-      if (lastPaidIdx === -1) return showToast('Sem parcelas pagas.', 'info');
+      const inst = installments[idx];
+      const valor = Number(inst.lastPaidValue || 0);
 
-      const inst = installments[lastPaidIdx];
-      const valorEstorno = Number(inst.lastPaidValue || 0);
+      if (valor <= 0) {
+        showToast('Valor de estorno inválido.', 'error');
+        return;
+      }
 
-      if (!window.confirm(`Estornar R$ ${valorEstorno.toFixed(2)}?`)) return;
+      const ok = window.confirm(`Estornar R$ ${valor.toFixed(2)}?`);
+      if (!ok) return;
 
-      installments[lastPaidIdx] = {
+      const base = Number(inst.baseValue ?? inst.value ?? inst.amount ?? 0);
+
+      installments[idx] = {
         ...inst,
         status: 'PENDENTE',
         lastPaidValue: 0,
         paidAt: undefined,
-        amount: Number(inst.baseValue ?? inst.value ?? inst.amount ?? 0)
+        amount: base > 0 ? base : inst.amount,
       };
 
-      const novoPago = Math.max(0, Number((loan.paidAmount || 0) - valorEstorno));
+      const novoPago = Number(((loan.paidAmount || 0) - valor).toFixed(2));
 
-      await onUpdateLoan(loan.id, { installments, paidAmount: Number(novoPago.toFixed(2)) });
-      onAddTransaction('ESTORNO', valorEstorno, `ESTORNO: ${loan.customerName}`.toUpperCase());
-      showToast('Estornado com sucesso!', 'success');
+      await onUpdateLoan(loan.id, { installments, paidAmount: novoPago });
+      onAddTransaction('ESTORNO', valor, `ESTORNO: ${loan.customerName || 'CLIENTE'}`.toUpperCase());
+      showToast('Estornado!', 'info');
     } catch (e) {
-      showToast('Falha no estorno.', 'error');
+      console.error(e);
+      showToast('Falha ao estornar.', 'error');
     } finally {
       setActionLock(null);
     }
   }, [actionLock, onAddTransaction, onUpdateLoan, showToast]);
 
-  const handleSaveMovement = () => {
-    const amt = Number(movementForm.amount.replace(',', '.'));
-    if (!amt || amt <= 0 || !movementForm.description) return showToast('Dados inválidos.', 'error');
-    if (movementForm.type === 'RETIRADA' && amt > caixa) return showToast('Saldo insuficiente.', 'error');
+  const handleSaveMovement = useCallback(() => {
+    const amt = Number(String(movementForm.amount).replace(',', '.'));
+    const desc = movementForm.description.trim();
 
-    onAddTransaction(movementForm.type, amt, movementForm.description.toUpperCase());
+    if (!amt || amt <= 0) return showToast('Informe um valor válido.', 'error');
+    if (!desc) return showToast('Informe uma descrição.', 'error');
+
+    if (movementForm.type === 'RETIRADA' && amt > caixa) {
+      return showToast('Retirada maior que o caixa atual.', 'error');
+    }
+
+    onAddTransaction(movementForm.type, Number(amt.toFixed(2)), desc.toUpperCase());
     setMovementForm({ type: 'APORTE', amount: '', description: '' });
     setIsAddingMovement(false);
-    showToast('Movimentação salva!', 'success');
-  };
+    showToast('Movimento salvo.', 'success');
+  }, [movementForm, caixa, onAddTransaction, showToast]);
 
   return (
     <div className="space-y-6 pb-20">
-      {/* Cards de Resumo */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <StatCard title="Caixa Atual" value={caixa} color="text-emerald-500" icon={<Wallet size={18}/>} />
-        <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle size={18}/>} />
-        <StatCard title="Saldo Devedor" value={stats.totalAReceber} color="text-red-500" icon={<History size={18}/>} />
-        <StatCard title="Previsão Lucro" value={stats.totalRecebido + stats.totalAReceber - stats.totalEmprestado} color="text-[#BF953F]" icon={<ArrowUpRight size={18}/>} />
+      {/* Resumo */}
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4">
+        <StatCard title="Caixa" value={caixa} color="text-emerald-500" icon={<Wallet />} />
+        <StatCard title="Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle />} />
+        <StatCard title="A Receber" value={stats.totalAReceber} color="text-red-500" icon={<History />} />
+        <StatCard
+          title="Lucro Bruto"
+          value={stats.totalRecebido + stats.totalAReceber - stats.totalEmprestado}
+          color="text-emerald-400"
+          icon={<ArrowUpRight />}
+        />
       </div>
 
+      {/* Gestão de Caixa */}
       <div className="bg-[#0a0a0a] border border-white/5 rounded-[2rem] p-6 shadow-2xl">
         <div className="flex justify-between items-center mb-6">
-          <h3 className="text-[10px] font-black uppercase text-zinc-500 tracking-[0.2em]">Gestão de Contratos</h3>
-          <button onClick={() => setIsAddingMovement(!isAddingMovement)} className="px-4 py-2 bg-white/5 border border-white/10 rounded-full text-[9px] font-black text-[#BF953F] hover:bg-[#BF953F] hover:text-black transition-all">
-            {isAddingMovement ? 'CANCELAR' : 'NOVA MOVIMENTAÇÃO'}
+          <h3 className="text-xs font-black uppercase text-white tracking-widest">Financeiro</h3>
+          <button
+            onClick={() => setIsAddingMovement(v => !v)}
+            className="px-4 py-2 bg-white/5 border border-white/10 rounded-full text-[9px] font-black text-[#BF953F]"
+          >
+            {isAddingMovement ? 'FECHAR' : 'NOVO MOVIMENTO'}
           </button>
         </div>
 
         {isAddingMovement && (
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6 p-4 bg-black/40 rounded-2xl border border-[#BF953F]/20 animate-in slide-in-from-top-2">
-            <select value={movementForm.type} onChange={e => setMovementForm({...movementForm, type: e.target.value as any})} className="bg-black border border-white/10 rounded-xl px-4 py-3 text-[10px] text-white">
-              <option value="APORTE">APORTE (ENTRADA)</option>
-              <option value="RETIRADA">RETIRADA (SAÍDA)</option>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-6 p-4 bg-black/40 rounded-2xl border border-[#BF953F]/20">
+            <select
+              value={movementForm.type}
+              onChange={e => setMovementForm({ ...movementForm, type: e.target.value as any })}
+              className="bg-black border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+            >
+              <option value="APORTE">APORTE</option>
+              <option value="RETIRADA">RETIRADA</option>
             </select>
-            <input placeholder="VALOR (R$)" value={movementForm.amount} onChange={e => setMovementForm({...movementForm, amount: e.target.value})} className="bg-black border border-white/10 rounded-xl px-4 py-3 text-[10px] text-white outline-none focus:border-[#BF953F]/50" />
-            <input placeholder="DESCRIÇÃO" value={movementForm.description} onChange={e => setMovementForm({...movementForm, description: e.target.value})} className="bg-black border border-white/10 rounded-xl px-4 py-3 text-[10px] text-white outline-none focus:border-[#BF953F]/50" />
-            <button onClick={handleSaveMovement} className="bg-[#BF953F] text-black rounded-xl text-[10px] font-black hover:scale-[1.02] active:scale-95 transition-all">CONFIRMAR</button>
+
+            <input
+              placeholder="VALOR"
+              value={movementForm.amount}
+              onChange={e => setMovementForm({ ...movementForm, amount: e.target.value })}
+              className="bg-black border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+            />
+
+            <input
+              placeholder="DESCRIÇÃO"
+              value={movementForm.description}
+              onChange={e => setMovementForm({ ...movementForm, description: e.target.value })}
+              className="bg-black border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+            />
+
+            <button
+              onClick={handleSaveMovement}
+              className="bg-[#BF953F] text-black rounded-lg text-[10px] font-black"
+            >
+              SALVAR
+            </button>
           </div>
         )}
 
         <div className="flex flex-col md:flex-row gap-4 mb-6">
-          <div className="flex-1 bg-black border border-white/10 rounded-full px-5 py-3 flex items-center gap-3">
+          <div className="flex-1 bg-black border border-white/10 rounded-full px-4 py-2 flex items-center gap-2">
             <Search size={14} className="text-zinc-600" />
-            <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="BUSCAR CLIENTE..." className="bg-transparent border-none text-[10px] text-white w-full outline-none uppercase font-bold" />
+            <input
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              placeholder="PESQUISAR CLIENTE..."
+              className="bg-transparent border-none text-[10px] text-white w-full outline-none uppercase"
+            />
           </div>
-          <div className="flex bg-black p-1 rounded-2xl border border-white/5">
-            {(['ATIVOS', 'ATRASADOS', 'FINALIZADOS'] as const).map(s => (
-              <button key={s} onClick={() => setFilterStatus(s)} className={`px-6 py-2 rounded-xl text-[9px] font-black transition-all ${filterStatus === s ? (s === 'ATRASADOS' ? 'bg-red-500 text-white' : 'bg-[#BF953F] text-black') : 'text-zinc-600 hover:text-zinc-400'}`}>
-                {s === 'FINALIZADOS' ? 'QUITADOS' : s}
-              </button>
-            ))}
+
+          {/* Filtros ATIVOS / ATRASADOS / PAGOS */}
+          <div className="flex bg-black p-1 rounded-xl border border-white/5">
+            <button
+              onClick={() => setFilterStatus('ATIVOS')}
+              className={`px-6 py-1.5 rounded-lg text-[9px] font-black ${
+                filterStatus === 'ATIVOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'
+              }`}
+            >
+              ATIVOS
+            </button>
+
+            <button
+              onClick={() => setFilterStatus('ATRASADOS')}
+              className={`px-6 py-1.5 rounded-lg text-[9px] font-black ${
+                filterStatus === 'ATRASADOS' ? 'bg-red-500 text-white' : 'text-zinc-600'
+              }`}
+            >
+              ATRASADOS
+            </button>
+
+            <button
+              onClick={() => setFilterStatus('FINALIZADOS')}
+              className={`px-6 py-1.5 rounded-lg text-[9px] font-black ${
+                filterStatus === 'FINALIZADOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'
+              }`}
+            >
+              PAGOS
+            </button>
           </div>
         </div>
 
         <div className="space-y-3">
           {filteredLoans.map(loan => {
-            const saldo = Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0);
-            const late = !isLiquidated(loan) && isLoanLate(loan);
+            const saldo = ((loan.totalToReturn || 0) - (loan.paidAmount || 0));
+            const liq = isLiquidated(loan);
+            const late = !liq && isLoanLate(loan);
+
             return (
-              <div key={loan.id} className="border border-white/5 rounded-[1.8rem] bg-black/20 overflow-hidden hover:border-white/10 transition-all">
-                <div className="p-5 flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-[#BF953F] border border-white/5"><Calendar size={20} /></div>
+              <div key={loan.id} className="border border-white/5 rounded-[1.5rem] bg-black/20 overflow-hidden">
+                <div className="p-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-[#BF953F]">
+                      <Calendar size={18} />
+                    </div>
                     <div>
-                      <h4 className="text-xs font-black text-white uppercase flex items-center gap-2">
+                      <h4 className="text-xs font-black text-white uppercase flex items-center">
                         {loan.customerName}
-                        {late && <span className="px-2 py-0.5 rounded-full bg-red-500/20 text-red-500 text-[7px] font-black uppercase border border-red-500/20">Atraso</span>}
+                        {late && (
+                          <span className="ml-2 px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[8px] font-black uppercase">
+                            Atrasado
+                          </span>
+                        )}
                       </h4>
-                      <p className="text-[9px] text-zinc-500 font-bold mt-1 uppercase tracking-tighter">Saldo Devedor: <span className="text-zinc-300">R$ {Math.max(0, saldo).toFixed(2)}</span></p>
+                      <p className="text-[9px] text-zinc-500">
+                        SALDO: R$ {Number(saldo).toFixed(2)}
+                      </p>
                     </div>
                   </div>
+
                   <div className="flex gap-2">
-                    <button onClick={() => handleEstorno(loan)} className="p-3 bg-red-500/5 text-red-500 rounded-xl hover:bg-red-500 hover:text-white transition-all" title="Estornar último pagamento"><RotateCcw size={16} /></button>
-                    <button onClick={() => setExpandedLoan(expandedLoan === loan.id ? null : loan.id)} className="p-3 bg-white/5 text-zinc-400 rounded-xl hover:text-white transition-all"><ChevronDown size={16} className={expandedLoan === loan.id ? 'rotate-180' : ''} /></button>
+                    <button
+                      onClick={() => handleEstorno(loan)}
+                      disabled={actionLock?.startsWith(`${loan.id}:`)}
+                      className={`p-2 rounded-lg transition-all ${
+                        actionLock?.startsWith(`${loan.id}:`)
+                          ? 'bg-white/5 text-zinc-600 cursor-not-allowed'
+                          : 'bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white'
+                      }`}
+                      title="Estornar última parcela paga"
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+
+                    <button
+                      onClick={() => setExpandedLoan(expandedLoan === loan.id ? null : loan.id)}
+                      className="p-2 bg-[#BF953F]/10 text-[#BF953F] rounded-lg"
+                      title="Ver parcelas"
+                    >
+                      <ChevronDown size={14} className={expandedLoan === loan.id ? 'rotate-180' : ''} />
+                    </button>
                   </div>
                 </div>
 
                 {expandedLoan === loan.id && (
-                  <div className="p-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 border-t border-white/5 bg-black/40 animate-in fade-in zoom-in-95 duration-300">
-                    {(loan.installments as InstallmentUI[]).map((inst, idx) => {
-                      const { valorTotal, diasAtraso } = inst.status !== 'PAGO' ? calcularJurosAtraso(inst.dueDate, inst.baseValue || inst.amount) : { valorTotal: inst.lastPaidValue || 0, diasAtraso: 0 };
-                      const isLate = diasAtraso > 0 && inst.status !== 'PAGO';
+                  <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 border-t border-white/5 bg-black/40">
+                    {(loan.installments as InstallmentUI[] | undefined)?.map((inst, idx) => {
+                      const baseAmount = Number(inst.baseValue ?? inst.value ?? inst.amount ?? 0);
+
+                      const calc =
+                        inst.status !== 'PAGO'
+                          ? calcularJurosAtraso(inst.dueDate as any, baseAmount)
+                          : { valorTotal: Number(inst.lastPaidValue || baseAmount), diasAtraso: 0 };
+
+                      const valorTotal = Number(calc.valorTotal || 0);
+                      const diasAtraso = calc.diasAtraso || 0;
+
+                      const locked = actionLock === `${loan.id}:PAY:${idx}`;
+
                       return (
-                        <div key={idx} className={`p-4 rounded-2xl border transition-all ${inst.status === 'PAGO' ? 'bg-emerald-500/5 border-emerald-500/20 opacity-60' : isLate ? 'bg-red-500/5 border-red-500/20' : 'bg-white/5 border-white/5'}`}>
-                          <div className="flex justify-between text-[7px] font-black text-zinc-500 mb-2 uppercase"><span>Parc {inst.number}</span><span>{inst.dueDate.split('-').reverse().join('/')}</span></div>
-                          <p className={`text-sm font-black ${isLate ? 'text-red-500' : inst.status === 'PAGO' ? 'text-emerald-500' : 'text-white'}`}>R$ {valorTotal.toFixed(2)}</p>
-                          {inst.status !== 'PAGO' ? (
-                            <button onClick={() => handlePayInstallment(loan, idx)} className="w-full mt-3 py-2 bg-[#BF953F] text-black text-[9px] font-black rounded-lg hover:scale-[1.02] active:scale-95 transition-all">RECEBER</button>
-                          ) : (
-                            <div className="mt-3 flex items-center gap-1 text-[7px] font-black text-emerald-600 uppercase"><CheckCircle size={10}/> Pago em {inst.paidAt ? new Date(inst.paidAt).toLocaleDateString() : '-'}</div>
+                        <div
+                          key={idx}
+                          className={`p-3 rounded-xl border ${
+                            inst.status === 'PAGO'
+                              ? 'bg-emerald-500/5 border-emerald-500/20'
+                              : diasAtraso > 0
+                                ? 'bg-red-500/5 border-red-500/20'
+                                : 'bg-white/5 border-white/5'
+                          }`}
+                        >
+                          <div className="flex justify-between text-[8px] font-bold text-zinc-500 mb-1">
+                            <span>PARCELA {inst.number}</span>
+                            <span>{String(inst.dueDate || '').split('-').reverse().join('/')}</span>
+                          </div>
+
+                          <p className={`text-sm font-black ${diasAtraso > 0 && inst.status !== 'PAGO' ? 'text-red-500' : 'text-white'}`}>
+                            R$ {valorTotal.toFixed(2)}
+                          </p>
+
+                          {inst.status !== 'PAGO' && (
+                            <>
+                              {diasAtraso > 0 && (
+                                <p className="mt-1 text-[8px] font-bold text-red-400 uppercase">
+                                  {diasAtraso} dia(s) em atraso
+                                </p>
+                              )}
+
+                              <button
+                                onClick={() => handlePayInstallment(loan, idx)}
+                                disabled={locked || !!actionLock}
+                                className={`w-full mt-2 py-1.5 text-[9px] font-black uppercase rounded-md ${
+                                  locked || actionLock
+                                    ? 'bg-white/10 text-zinc-400 cursor-not-allowed'
+                                    : 'bg-[#BF953F] text-black'
+                                }`}
+                              >
+                                {locked ? 'PROCESSANDO...' : 'Quitar'}
+                              </button>
+                            </>
                           )}
                         </div>
                       );
@@ -286,17 +474,63 @@ const Reports: React.FC<ReportsProps> = ({
           })}
         </div>
       </div>
+
+      {/* Extrato */}
+      <div className="bg-[#0a0a0a] border border-white/5 rounded-[2rem] p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xs font-black uppercase text-white tracking-widest">Movimentações</h3>
+
+          <select
+            value={transFilter}
+            onChange={e => setTransFilter(e.target.value as any)}
+            className="bg-black border border-white/10 rounded-lg px-3 py-2 text-[10px] text-white outline-none"
+          >
+            <option value="TODOS">TODOS</option>
+            <option value="APORTE">APORTE</option>
+            <option value="RETIRADA">RETIRADA</option>
+            <option value="PAGAMENTO">PAGAMENTO</option>
+            <option value="ESTORNO">ESTORNO</option>
+          </select>
+        </div>
+
+        <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+          {filteredMovements.slice().reverse().map((t, i) => {
+            const entrada = isInflow(t);
+            const Icon = entrada ? ArrowDownLeft : ArrowUpRightIcon;
+
+            return (
+              <div key={i} className="flex items-center justify-between p-3 bg-white/[0.02] border border-white/5 rounded-xl">
+                <div className="flex items-center gap-3">
+                  <div className={entrada ? 'text-emerald-500' : 'text-red-500'}>
+                    <Icon size={16} />
+                  </div>
+                  <div>
+                    <p className="text-[9px] font-black text-white uppercase">{t.description}</p>
+                    <p className="text-[7px] text-zinc-600 uppercase">
+                      {new Date(t.date).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+
+                <p className={`text-[10px] font-black ${entrada ? 'text-emerald-500' : 'text-red-500'}`}>
+                  R$ {Number(t.amount || 0).toFixed(2)}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 };
 
-const isLiquidated = (l: Loan) => (Number(l.totalToReturn || 0) - Number(l.paidAmount || 0)) <= 0.5;
-
 const StatCard = ({ title, value, color, icon }: any) => (
-  <div className="p-5 rounded-3xl bg-[#0a0a0a] border border-white/5 hover:border-white/10 transition-all">
-    <div className={`p-2.5 w-fit rounded-xl bg-white/5 mb-3 ${color}`}>{icon}</div>
-    <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">{title}</p>
-    <h3 className="text-xl font-black text-white mt-1">R$ {Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
+  <div className="p-4 rounded-2xl bg-[#0a0a0a] border border-white/5">
+    <div className={`p-2 w-fit rounded-lg bg-white/5 mb-2 ${color}`}>{icon}</div>
+    <p className="text-[8px] font-bold text-zinc-500 uppercase">{title}</p>
+    <h3 className="text-lg font-black text-white leading-none">
+      R$ {Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+    </h3>
   </div>
 );
 
