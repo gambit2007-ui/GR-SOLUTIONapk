@@ -1,8 +1,15 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import {
-  Wallet, CheckCircle, History,
-  ArrowUpRight, ChevronDown, RotateCcw,
-  Calendar, Search, ArrowDownLeft, ArrowUpRight as ArrowUpRightIcon
+  Wallet,
+  CheckCircle,
+  History,
+  ArrowUpRight,
+  ChevronDown,
+  RotateCcw,
+  Calendar,
+  Search,
+  ArrowDownLeft,
+  ArrowUpRight as ArrowUpRightIcon
 } from 'lucide-react';
 import { Loan, Installment } from '../types';
 
@@ -16,10 +23,9 @@ type CashMovement = {
 };
 
 type InstallmentUI = Installment & {
-  // Sugestão: mantenha o "valor base" sempre salvo ao criar parcelas
-  baseValue?: number;
-  lastPaidValue?: number;
-  paidAt?: string;
+  baseValue?: number;      // valor original (recomendado manter)
+  lastPaidValue?: number;  // quanto foi pago (com juros)
+  paidAt?: string;         // data de pagamento
 };
 
 interface ReportsProps {
@@ -37,17 +43,16 @@ const parseISODate = (iso?: string) => {
   if (!iso) return null;
   const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!m) return null;
+
   const y = Number(m[1]);
   const mo = Number(m[2]) - 1;
   const d = Number(m[3]);
+
   const dt = new Date(y, mo, d);
   if (Number.isNaN(dt.getTime())) return null;
   dt.setHours(0, 0, 0, 0);
   return dt;
 };
-
-const money = (v: unknown) =>
-  Number(Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }));
 
 const Reports: React.FC<ReportsProps> = ({
   loans = [],
@@ -57,7 +62,7 @@ const Reports: React.FC<ReportsProps> = ({
   onUpdateLoan,
   showToast,
 }) => {
-  const [filterStatus, setFilterStatus] = useState<'ATIVOS' | 'FINALIZADOS'>('ATIVOS');
+  const [filterStatus, setFilterStatus] = useState<'ATIVOS' | 'ATRASADOS' | 'FINALIZADOS'>('ATIVOS');
   const [searchTerm, setSearchTerm] = useState('');
   const [transFilter, setTransFilter] = useState<'TODOS' | MovementType>('TODOS');
   const [expandedLoan, setExpandedLoan] = useState<string | null>(null);
@@ -69,7 +74,7 @@ const Reports: React.FC<ReportsProps> = ({
     description: '',
   });
 
-  // trava anti “cliquei 2x e quebrei o caixa”
+  // trava anti “cliquei 2x e bagunçou o caixa”
   const [actionLock, setActionLock] = useState<string | null>(null);
 
   const calcularJurosAtraso = useCallback((dueDate: string, amount: unknown) => {
@@ -90,14 +95,38 @@ const Reports: React.FC<ReportsProps> = ({
     return { valorTotal: valorBase + juros, diasAtraso };
   }, []);
 
+  const isLoanLate = useCallback((loan: Loan) => {
+    const installments = (loan.installments || []) as any[];
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    return installments.some((inst) => {
+      if (inst.status === 'PAGO') return false;
+      const venc = parseISODate(inst.dueDate);
+      if (!venc) return false;
+      return venc < hoje;
+    });
+  }, []);
+
+  const isLiquidated = (loan: Loan) =>
+    (loan.paidAmount || 0) >= ((loan.totalToReturn || 0) - 0.1);
+
   const filteredLoans = useMemo(() => {
     const term = searchTerm.trim().toLowerCase();
+
     return (loans || []).filter(l => {
-      const isLiq = (l.paidAmount || 0) >= ((l.totalToReturn || 0) - 0.1);
+      const liq = isLiquidated(l);
       const matchesSearch = !term || (l.customerName || '').toLowerCase().includes(term);
-      return filterStatus === 'FINALIZADOS' ? (isLiq && matchesSearch) : (!isLiq && matchesSearch);
+
+      if (!matchesSearch) return false;
+
+      if (filterStatus === 'FINALIZADOS') return liq;
+      if (filterStatus === 'ATRASADOS') return !liq && isLoanLate(l);
+
+      // ATIVOS
+      return !liq;
     });
-  }, [loans, filterStatus, searchTerm]);
+  }, [loans, filterStatus, searchTerm, isLoanLate]);
 
   const stats = useMemo(() => {
     return (loans || []).reduce((acc, l) => {
@@ -131,9 +160,8 @@ const Reports: React.FC<ReportsProps> = ({
         return;
       }
 
-      const baseAmount =
-        Number(inst.baseValue ?? inst.value ?? inst.amount ?? 0);
-
+      // Base real da parcela (sem depender de amount que pode ser mexido)
+      const baseAmount = Number(inst.baseValue ?? inst.value ?? inst.amount ?? 0);
       const { valorTotal } = calcularJurosAtraso(inst.dueDate as any, baseAmount);
 
       const ok = window.confirm(`Receber R$ ${Number(valorTotal).toFixed(2)}?`);
@@ -192,7 +220,6 @@ const Reports: React.FC<ReportsProps> = ({
         status: 'PENDENTE',
         lastPaidValue: 0,
         paidAt: undefined,
-        // restaura base (não inventa número)
         amount: base > 0 ? base : inst.amount,
       };
 
@@ -298,16 +325,31 @@ const Reports: React.FC<ReportsProps> = ({
             />
           </div>
 
+          {/* Filtros ATIVOS / ATRASADOS / PAGOS */}
           <div className="flex bg-black p-1 rounded-xl border border-white/5">
             <button
               onClick={() => setFilterStatus('ATIVOS')}
-              className={`px-6 py-1.5 rounded-lg text-[9px] font-black ${filterStatus === 'ATIVOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}
+              className={`px-6 py-1.5 rounded-lg text-[9px] font-black ${
+                filterStatus === 'ATIVOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'
+              }`}
             >
               ATIVOS
             </button>
+
+            <button
+              onClick={() => setFilterStatus('ATRASADOS')}
+              className={`px-6 py-1.5 rounded-lg text-[9px] font-black ${
+                filterStatus === 'ATRASADOS' ? 'bg-red-500 text-white' : 'text-zinc-600'
+              }`}
+            >
+              ATRASADOS
+            </button>
+
             <button
               onClick={() => setFilterStatus('FINALIZADOS')}
-              className={`px-6 py-1.5 rounded-lg text-[9px] font-black ${filterStatus === 'FINALIZADOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}
+              className={`px-6 py-1.5 rounded-lg text-[9px] font-black ${
+                filterStatus === 'FINALIZADOS' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'
+              }`}
             >
               PAGOS
             </button>
@@ -317,6 +359,9 @@ const Reports: React.FC<ReportsProps> = ({
         <div className="space-y-3">
           {filteredLoans.map(loan => {
             const saldo = ((loan.totalToReturn || 0) - (loan.paidAmount || 0));
+            const liq = isLiquidated(loan);
+            const late = !liq && isLoanLate(loan);
+
             return (
               <div key={loan.id} className="border border-white/5 rounded-[1.5rem] bg-black/20 overflow-hidden">
                 <div className="p-4 flex items-center justify-between">
@@ -325,7 +370,14 @@ const Reports: React.FC<ReportsProps> = ({
                       <Calendar size={18} />
                     </div>
                     <div>
-                      <h4 className="text-xs font-black text-white uppercase">{loan.customerName}</h4>
+                      <h4 className="text-xs font-black text-white uppercase flex items-center">
+                        {loan.customerName}
+                        {late && (
+                          <span className="ml-2 px-2 py-0.5 rounded-full bg-red-500/15 text-red-400 text-[8px] font-black uppercase">
+                            Atrasado
+                          </span>
+                        )}
+                      </h4>
                       <p className="text-[9px] text-zinc-500">
                         SALDO: R$ {Number(saldo).toFixed(2)}
                       </p>
@@ -398,6 +450,7 @@ const Reports: React.FC<ReportsProps> = ({
                                   {diasAtraso} dia(s) em atraso
                                 </p>
                               )}
+
                               <button
                                 onClick={() => handlePayInstallment(loan, idx)}
                                 disabled={locked || !!actionLock}
