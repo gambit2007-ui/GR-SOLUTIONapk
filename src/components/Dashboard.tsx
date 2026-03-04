@@ -1,15 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import {
-  Users,
-  Briefcase,
-  AlertCircle,
-  ChevronDown,
-  PlusCircle,
-  MinusCircle,
-  ArrowUpRight,
-  ArrowDownRight,
-  History,
-  CheckCircle2
+  Users, Briefcase, AlertCircle, ChevronDown, 
+  PlusCircle, MinusCircle, ArrowUpRight, 
+  ArrowDownRight, History, CheckCircle2
 } from 'lucide-react';
 import { Loan, Customer, CashMovement } from '../types';
 
@@ -38,7 +31,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
 
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // --- LÓGICA DE STATS SINCRONIZADA COM O FINANCEIRO ---
+  // --- LÓGICA DE STATS CORRIGIDA ---
   const stats = useMemo(() => {
     const activeContracts = (loans || []).filter(l => {
       const pAmount = Number(l.paidAmount || 0);
@@ -46,16 +39,27 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
       return pAmount < (tReturn - 0.1);
     }).length;
 
-    // NOVO FILTRO: Só conta se houver parcela ATRASADA que NÃO esteja PAGA
-    const overdueContracts = (loans || []).filter(l =>
-      (l.installments || []).some(inst => {
-        const isVencida = inst.dueDate < todayStr;
-        const naoEstaPaga = String(inst.status || '').toUpperCase() !== 'PAGO';
-        return isVencida && naoEstaPaga;
-      })
-    ).length;
+    const overdueContracts = (loans || []).filter(l => {
+      // 1. Só verifica se o contrato ainda tem saldo devedor real
+      const saldoDevedor = Number(l.totalToReturn || 0) - Number(l.paidAmount || 0);
+      if (saldoDevedor <= 0.1) return false;
 
-    return { activeContracts, overdueContracts, activeCustomers: (customers || []).length };
+      // 2. Verifica se há alguma parcela vencida que não foi paga
+      return (l.installments || []).some(inst => {
+        const vencida = inst.dueDate < todayStr;
+        const status = String(inst.status || '').trim().toUpperCase();
+        const pendente = status !== 'PAGO' && status !== 'LIQUIDADO';
+        const comValor = (Number(inst.amount) || Number(inst.value) || 0) > 0.1;
+
+        return vencida && pendente && comValor;
+      });
+    }).length;
+
+    return { 
+      activeContracts, 
+      overdueContracts: Math.max(0, overdueContracts), 
+      activeCustomers: (customers || []).length 
+    };
   }, [loans, customers, todayStr]);
 
   const monthlyHistory = useMemo(() => {
@@ -210,6 +214,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
   );
 };
 
+// ... (StatCard, ListItem e Empty permanecem os mesmos do seu arquivo)
 const StatCard = ({ title, value, icon, border, description }: any) => (
   <div className={`bg-[#0a0a0a] p-8 rounded-[2.5rem] border ${border || 'border-zinc-900'} shadow-xl flex flex-col justify-between hover:border-zinc-700 transition-all group`}>
     <div className="flex items-center justify-between mb-6">
