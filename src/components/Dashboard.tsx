@@ -29,34 +29,33 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
     setExpandedMonth(`${now.getFullYear()}-${now.getMonth()}`);
   }, []);
 
-  // Função de parsing de data robusta
   const parseDate = (d: any): Date => {
     if (!d) return new Date();
-    // Caso seja Firestore Timestamp
     if (typeof d === 'object' && d.seconds) return new Date(d.seconds * 1000);
-    // Caso seja String ou Date objeto
     const date = new Date(d);
-    // Se a data for inválida, retorna data atual para não quebrar o map
     return isNaN(date.getTime()) ? new Date() : date;
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
 
+  // --- LÓGICA DE STATS SINCRONIZADA COM O FINANCEIRO ---
   const stats = useMemo(() => {
-    const activeContracts = loans.filter(l => {
+    const activeContracts = (loans || []).filter(l => {
       const pAmount = Number(l.paidAmount || 0);
       const tReturn = Number(l.totalToReturn || 0);
-      return pAmount < (tReturn - 0.1); // Considera ativo se não estiver liquidado
+      return pAmount < (tReturn - 0.1);
     }).length;
 
-    const overdueContracts = loans.filter(l =>
-      l.installments?.some(inst => {
-        const s = String(inst.status || '').toUpperCase();
-        return (s === 'PENDENTE' || s === 'ATRASADO') && inst.dueDate < todayStr;
+    // NOVO FILTRO: Só conta se houver parcela ATRASADA que NÃO esteja PAGA
+    const overdueContracts = (loans || []).filter(l =>
+      (l.installments || []).some(inst => {
+        const isVencida = inst.dueDate < todayStr;
+        const naoEstaPaga = String(inst.status || '').toUpperCase() !== 'PAGO';
+        return isVencida && naoEstaPaga;
       })
     ).length;
 
-    return { activeContracts, overdueContracts, activeCustomers: customers.length };
+    return { activeContracts, overdueContracts, activeCustomers: (customers || []).length };
   }, [loans, customers, todayStr]);
 
   const monthlyHistory = useMemo(() => {
@@ -65,7 +64,6 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
     const today = new Date();
     const currentYear = today.getFullYear();
     
-    // Varre de 2024 até o ano atual (ajustado para cobrir histórico)
     for (let year = 2024; year <= currentYear; year++) {
       for (let month = 0; month <= 11; month++) {
         const tempDate = new Date(year, month, 1);
@@ -77,23 +75,19 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           return d.getMonth() === month && d.getFullYear() === year;
         };
 
-        // 1. Entradas de Caixa (Aportes/Manual)
-        const entradasManuais = cashMovements.filter(m => {
+        const entradasManuais = (cashMovements || []).filter(m => {
           const t = String(m.type || '').toUpperCase();
           return isMatch(m.date) && (t === 'APORTE' || t === 'PAGAMENTO' || t === 'ENTRADA');
         });
 
-        // 2. Saídas de Caixa (Retiradas/Estornos/Manual)
-        const saidasManuais = cashMovements.filter(m => {
+        const saidasManuais = (cashMovements || []).filter(m => {
           const t = String(m.type || '').toUpperCase();
           return isMatch(m.date) && (t === 'RETIRADA' || t === 'ESTORNO' || t === 'SAIDA');
         });
 
-        // 3. Recebimentos de Parcelas (Varre todos os empréstimos)
         const recebimentosParcelas: any[] = [];
-        loans.forEach(loan => {
-          loan.installments?.forEach(inst => {
-            // Verifica se houve pagamento (seja total ou parcial via lastPaidValue)
+        (loans || []).forEach(loan => {
+          (loan.installments || []).forEach(inst => {
             const pDate = inst.paymentDate || inst.lastPaymentDate;
             if (pDate && isMatch(pDate)) {
               const valorPago = Number(inst.lastPaidValue || 0);
@@ -110,8 +104,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           });
         });
 
-        // 4. Novos Empréstimos (Saída de Capital)
-        const novosEmprestimos = loans.filter(l => isMatch(l.createdAt || l.startDate));
+        const novosEmprestimos = (loans || []).filter(l => isMatch(l.createdAt || l.startDate));
 
         const totalRetorno = [...entradasManuais, ...recebimentosParcelas].reduce((acc, r) => 
           acc + (Number(r.amount || r.value || 0)), 0);
@@ -140,7 +133,6 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
 
   return (
     <div className="space-y-10 animate-in fade-in duration-700 pb-10 px-2">
-      {/* CARDS PRINCIPAIS */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard title="Contratos Ativos" value={stats.activeContracts.toString()} icon={<Briefcase size={20} className="text-[#BF953F]" />} description="Em andamento" />
         <StatCard title="Clientes na Base" value={stats.activeCustomers.toString()} icon={<Users size={20} className="text-blue-500" />} description="Cadastrados" />
@@ -148,12 +140,11 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           title="Inadimplência" 
           value={stats.overdueContracts.toString()} 
           icon={<AlertCircle size={20} className={stats.overdueContracts > 0 ? "text-red-500" : "text-zinc-600"} />} 
-          description="Contratos com atraso" 
+          description="Contratos com atraso real" 
           border={stats.overdueContracts > 0 ? "border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.05)]" : "border-zinc-900"} 
         />
       </div>
 
-      {/* HISTÓRICO MENSAL */}
       <div className="space-y-4">
         <div className="flex items-center gap-2 mb-6 opacity-60">
           <History size={16} className="text-[#BF953F]" />
@@ -183,7 +174,6 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
             {expandedMonth === month.id && (
               <div className="px-6 pb-10 border-t border-white/5 pt-8 animate-in slide-in-from-top-4 duration-500">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-                  {/* COLUNA ENTRADAS */}
                   <div>
                     <h5 className="text-[9px] font-black text-emerald-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowUpRight size={14} /> Receitas e Aportes</h5>
                     <div className="space-y-3">
@@ -191,8 +181,6 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
                       {month.entradas.length === 0 && <Empty msg="Sem entradas registradas" />}
                     </div>
                   </div>
-                  
-                  {/* COLUNA SAÍDAS */}
                   <div>
                     <h5 className="text-[9px] font-black text-red-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowDownRight size={14} /> Investimentos e Custos</h5>
                     <div className="space-y-3">
