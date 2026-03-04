@@ -1,4 +1,4 @@
-import { initializeApp } from "firebase/app";
+import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth, GoogleAuthProvider, signInWithPopup } from "firebase/auth";
 
@@ -11,12 +11,17 @@ const firebaseConfig = {
   appId: "1:65708479471:web:f9eff0ed0f59bd579b9c1a",
 };
 
-const app = initializeApp(firebaseConfig);
+// evita reinicialização do firebase em hot reload
+const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
 
+// serviços
 export const db = getFirestore(app);
 export const auth = getAuth(app);
 
+// provider
+const googleProvider = new GoogleAuthProvider();
+
+// login google
 export async function loginWithGoogle() {
-  const provider = new GoogleAuthProvider();
-  return signInWithPopup(auth, provider);
+  return signInWithPopup(auth, googleProvider);
 }
