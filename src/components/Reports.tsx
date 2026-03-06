@@ -173,7 +173,7 @@ const Reports: React.FC<ReportsProps> = ({
                       {/* BOTAO WHATSAPP */}
                       <button 
                         onClick={() => {
-                          const msg = encodeURIComponent(`Olá ${loan.customerName}, gostaria de tratar sobre seu contrato com a GR-SOLUTION.`);
+                          const msg = encodeURIComponent(`Olá ${loan.customerName}, Gostaria de tratar sobre seu contrato com a GR-SULUTION.Sua parcela esta atrasada.`);
                           window.open(`https://wa.me/?text=${msg}`, '_blank');
                         }}
                         className="p-1.5 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"
