@@ -1,26 +1,25 @@
-export type Frequency = 'DIARIO' | 'SEMANAL' | 'QUINZENAL' | 'MENSAL'; // Adicionei QUINZENAL que usamos no LoanSection
+export type Frequency = 'DIARIO' | 'SEMANAL' | 'QUINZENAL' | 'MENSAL';
 export type InterestType = 'SIMPLES' | 'PRICE';
 export type PaymentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO';
 
-// ✅ Padronizei os tipos de movimentação para bater com o que usamos nas funções
-export type CashMovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO';
+// Padronizado para bater com as funções handleAddTransaction do App.tsx
+export type CashMovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
 
 export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  password?: string;
   createdAt: number;
 }
 
-// ✅ Esta é a interface que o TypeScript não estava achando
 export interface CashMovement {
   id?: string;
-  type: CashMovementType; // Usa o type acima
-  amout: number;
+  type: CashMovementType;
+  amount: number; // ✅ Corrigido de 'amout' para 'amount'
   description: string;
   date: string;
   loanId?: string;
+  value?: number; // Fallback para compatibilidade com Dashboard antigo
 }
 
 export interface CustomerDocument {
@@ -44,14 +43,17 @@ export interface Customer {
 }
 
 export interface Installment {
-  id?: string; // Adicionei ID para facilitar a busca no Firebase
+  id?: string;
   number: number;
-  amout: number;
+  value: number; // ✅ Use 'value' ou 'amount', mas garanta que o Dashboard use o mesmo
+  amount?: number; // ✅ Adicionado como opcional para evitar quebra de tipos
   dueDate: string;
-  status: 'PENDENTE' | 'PAGO';
+  status: 'PENDENTE' | 'PAGO' | 'ATRASADO'; // ✅ Adicionado ATRASADO
+  paymentDate?: string; // ✅ Adicionado: essencial para o histórico do Dashboard
+  lastPaymentDate?: string; 
   partialPaid?: number;
   lastPaidValue?: number;
-  originalValue?: number; // Para controle de juros/mora futuro
+  originalValue?: number;
 }
 
 export interface Loan {
@@ -69,7 +71,7 @@ export interface Loan {
   installmentValue: number;
   startDate: string;
   dueDate: string;
-  createdAt: number;
+  createdAt: any; // ✅ Alterado para 'any' pois o Firebase usa Timestamp ou ServerTimestamp
   notes?: string;
   installments: Installment[];
   status: 'ATIVO' | 'QUITADO' | 'ATRASADO' | 'CANCELADO';

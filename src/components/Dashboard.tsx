@@ -31,27 +31,27 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
 
   const todayStr = new Date().toISOString().split('T')[0];
 
-  // --- LÓGICA DE STATS CORRIGIDA ---
   const stats = useMemo(() => {
     const activeContracts = (loans || []).filter(l => {
-      const pAmount = Number(l.paidAmount || 0);
-      const tReturn = Number(l.totalToReturn || 0);
-      return pAmount < (tReturn - 0.1);
+      const pago = Number(l.paidAmount || 0);
+      const total = Number(l.totalToReturn || 0);
+      return pago < (total - 0.5);
     }).length;
 
     const overdueContracts = (loans || []).filter(l => {
-      // 1. Só verifica se o contrato ainda tem saldo devedor real
+      // REGRA DE OURO: Se o saldo devedor é zero, ele nunca está inadimplente
       const saldoDevedor = Number(l.totalToReturn || 0) - Number(l.paidAmount || 0);
-      if (saldoDevedor <= 0.1) return false;
+      if (saldoDevedor <= 0.5) return false;
 
-      // 2. Verifica se há alguma parcela vencida que não foi paga
       return (l.installments || []).some(inst => {
-        const vencida = inst.dueDate < todayStr;
         const status = String(inst.status || '').trim().toUpperCase();
-        const pendente = status !== 'PAGO' && status !== 'LIQUIDADO';
-        const comValor = (Number(inst.amount) || Number(inst.value) || 0) > 0.1;
+        if (status === 'PAGO' || status === 'LIQUIDADO') return false;
 
-        return vencida && pendente && comValor;
+        const vencimento = String(inst.dueDate || '').trim();
+        const jaVenceu = vencimento < todayStr;
+        const temValor = (Number(inst.amount) || Number(inst.value) || 0) > 0.1;
+
+        return jaVenceu && temValor;
       });
     }).length;
 
@@ -66,9 +66,8 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
     const monthsFull = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     const data = [];
     const today = new Date();
-    const currentYear = today.getFullYear();
     
-    for (let year = 2024; year <= currentYear; year++) {
+    for (let year = 2024; year <= today.getFullYear(); year++) {
       for (let month = 0; month <= 11; month++) {
         const tempDate = new Date(year, month, 1);
         if (tempDate > today) break;
@@ -109,28 +108,15 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
         });
 
         const novosEmprestimos = (loans || []).filter(l => isMatch(l.createdAt || l.startDate));
-
-        const totalRetorno = [...entradasManuais, ...recebimentosParcelas].reduce((acc, r) => 
-          acc + (Number(r.amount || r.value || 0)), 0);
-        
-        const totalSaida = novosEmprestimos.reduce((acc, l) => acc + Number(l.amount || 0), 0) + 
-                           saidasManuais.reduce((acc, r) => acc + Number(r.amount || 0), 0);
+        const totalRetorno = [...entradasManuais, ...recebimentosParcelas].reduce((acc, r) => acc + (Number(r.amount || r.value || 0)), 0);
+        const totalSaida = novosEmprestimos.reduce((acc, l) => acc + Number(l.amount || 0), 0) + saidasManuais.reduce((acc, r) => acc + Number(r.amount || 0), 0);
 
         if (totalRetorno > 0 || totalSaida > 0 || (month === today.getMonth() && year === today.getFullYear())) {
-          data.push({
-            id: `${year}-${month}`,
-            name: monthsFull[month],
-            year: year,
-            entradas: [...entradasManuais, ...recebimentosParcelas],
-            saidasManuais,
-            novosEmprestimos,
-            totalSaida,
-            totalRetorno
-          });
+          data.push({ id: `${year}-${month}`, name: monthsFull[month], year, entradas: [...entradasManuais, ...recebimentosParcelas], saidasManuais, novosEmprestimos, totalSaida, totalRetorno });
         }
       }
     }
-    return data.sort((a, b) => b.year !== a.year ? b.year - a.year : data.indexOf(b) - data.indexOf(a)).reverse().slice(-12).reverse();
+    return data.sort((a, b) => b.year !== a.year ? b.year - a.year : 0).reverse().slice(-12);
   }, [loans, cashMovements]);
 
   if (!isMounted) return null;
@@ -159,49 +145,45 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           <div key={month.id} className={`bg-[#0a0a0a] rounded-[2.5rem] border transition-all duration-500 ${expandedMonth === month.id ? 'border-[#BF953F]/40 shadow-2xl scale-[1.01]' : 'border-zinc-900 hover:border-zinc-800'}`}>
             <button onClick={() => setExpandedMonth(expandedMonth === month.id ? null : month.id)} className="w-full px-6 py-6 flex items-center justify-between">
               <div className="flex items-center gap-5">
-                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border font-black text-[11px] transition-colors ${expandedMonth === month.id ? 'bg-[#BF953F] text-black border-[#BF953F]' : 'bg-black text-zinc-600 border-zinc-800'}`}>
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border font-black text-[11px] ${expandedMonth === month.id ? 'bg-[#BF953F] text-black border-[#BF953F]' : 'bg-black text-zinc-600 border-zinc-800'}`}>
                   {month.name.slice(0, 3).toUpperCase()}
                 </div>
                 <div className="text-left">
-                  <h4 className="text-lg font-black text-white uppercase tracking-tight">{month.name} <span className="text-zinc-800 ml-1 font-bold">{month.year}</span></h4>
+                  <h4 className="text-lg font-black text-white uppercase">{month.name} <span className="text-zinc-800 ml-1">{month.year}</span></h4>
                   <div className="flex gap-4 mt-1">
-                    <span className="text-[9px] font-black text-emerald-500 uppercase tracking-tighter">Entradas: {month.totalRetorno.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    <span className="text-[9px] font-black text-red-500 uppercase tracking-tighter">Saídas: {month.totalSaida.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    <span className="text-[9px] font-black text-emerald-500 uppercase">Entradas: {month.totalRetorno.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    <span className="text-[9px] font-black text-red-500 uppercase">Saídas: {month.totalSaida.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   </div>
                 </div>
               </div>
-              <div className={`p-2 rounded-full border transition-all ${expandedMonth === month.id ? 'bg-[#BF953F]/10 border-[#BF953F]/20 rotate-180' : 'bg-transparent border-zinc-800'}`}>
-                <ChevronDown size={18} className={expandedMonth === month.id ? 'text-[#BF953F]' : 'text-zinc-700'} />
-              </div>
+              <ChevronDown size={18} className={`transition-transform ${expandedMonth === month.id ? 'rotate-180 text-[#BF953F]' : 'text-zinc-700'}`} />
             </button>
-
             {expandedMonth === month.id && (
-              <div className="px-6 pb-10 border-t border-white/5 pt-8 animate-in slide-in-from-top-4 duration-500">
+              <div className="px-6 pb-10 border-t border-white/5 pt-8 animate-in slide-in-from-top-4">
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
                   <div>
-                    <h5 className="text-[9px] font-black text-emerald-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowUpRight size={14} /> Receitas e Aportes</h5>
+                    <h5 className="text-[9px] font-black text-emerald-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowUpRight size={14} /> Receitas</h5>
                     <div className="space-y-3">
                       {month.entradas.map((m, i) => <ListItem key={i} m={m} color="emerald" />)}
-                      {month.entradas.length === 0 && <Empty msg="Sem entradas registradas" />}
+                      {month.entradas.length === 0 && <Empty msg="Sem entradas" />}
                     </div>
                   </div>
                   <div>
-                    <h5 className="text-[9px] font-black text-red-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowDownRight size={14} /> Investimentos e Custos</h5>
+                    <h5 className="text-[9px] font-black text-red-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowDownRight size={14} /> Saídas</h5>
                     <div className="space-y-3">
                       {month.novosEmprestimos.map(l => (
-                        <div key={l.id} className="bg-white/[0.01] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between group hover:border-red-500/20 transition-all">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-red-500/10 rounded-xl text-red-500"><Users size={14} /></div>
-                            <div>
-                              <p className="text-[10px] font-black text-zinc-200 uppercase">{l.customerName}</p>
-                              <p className="text-[8px] text-zinc-600 font-bold uppercase tracking-tighter">Capital Emprestado</p>
+                         <div key={l.id} className="bg-white/[0.01] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                               <div className="p-2 bg-red-500/10 rounded-xl text-red-500"><Users size={14} /></div>
+                               <div>
+                                  <p className="text-[10px] font-black text-zinc-200 uppercase">{l.customerName}</p>
+                                  <p className="text-[8px] text-zinc-600 font-bold uppercase">Empréstimo</p>
+                               </div>
                             </div>
-                          </div>
-                          <span className="text-xs font-black text-red-500">-{Number(l.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                        </div>
+                            <span className="text-xs font-black text-red-500">-{Number(l.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                         </div>
                       ))}
                       {month.saidasManuais.map((m, i) => <ListItem key={i} m={m} color="red" />)}
-                      {(month.novosEmprestimos.length === 0 && month.saidasManuais.length === 0) && <Empty msg="Sem saídas registradas" />}
                     </div>
                   </div>
                 </div>
@@ -214,42 +196,33 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
   );
 };
 
-// ... (StatCard, ListItem e Empty permanecem os mesmos do seu arquivo)
 const StatCard = ({ title, value, icon, border, description }: any) => (
-  <div className={`bg-[#0a0a0a] p-8 rounded-[2.5rem] border ${border || 'border-zinc-900'} shadow-xl flex flex-col justify-between hover:border-zinc-700 transition-all group`}>
+  <div className={`bg-[#0a0a0a] p-8 rounded-[2.5rem] border ${border || 'border-zinc-900'} shadow-xl group transition-all`}>
     <div className="flex items-center justify-between mb-6">
-      <span className="text-[9px] font-black uppercase text-zinc-600 tracking-[0.2em] group-hover:text-zinc-400 transition-colors">{title}</span>
-      <div className="p-3 bg-black rounded-2xl border border-zinc-800 group-hover:border-zinc-700 transition-all">{icon}</div>
+      <span className="text-[9px] font-black uppercase text-zinc-600 tracking-[0.2em] group-hover:text-zinc-400">{title}</span>
+      <div className="p-3 bg-black rounded-2xl border border-zinc-800">{icon}</div>
     </div>
     <p className="text-5xl font-black text-white tracking-tighter mb-2">{value}</p>
     <p className="text-[9px] text-zinc-600 font-black uppercase tracking-widest">{description}</p>
   </div>
 );
 
-const ListItem = ({ m, color }: any) => {
-  const isPos = color === 'emerald';
-  const type = String(m.type || '').toUpperCase().trim();
-  const displayAmount = Number(m.amount || m.value || 0);
-
-  return (
-    <div className={`bg-white/[0.01] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between group hover:border-${color}-500/20 transition-all`}>
-      <div className="flex items-center gap-3">
-        <div className={`p-2 rounded-xl ${isPos ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
-          {type === 'APORTE' ? <PlusCircle size={14} /> : type === 'PAGAMENTO' ? <CheckCircle2 size={14} /> : <MinusCircle size={14} />}
-        </div>
-        <div>
-          <p className="text-[10px] font-black text-zinc-300 uppercase tracking-tight group-hover:text-white transition-colors">{m.description || 'Movimentação'}</p>
-          <p className="text-[8px] text-zinc-600 font-bold uppercase">
-            {m.date ? new Date(m.date).toLocaleDateString('pt-BR') : 'Data Indefinida'}
-          </p>
-        </div>
+const ListItem = ({ m, color }: any) => (
+  <div className={`bg-white/[0.01] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between hover:border-${color}-500/20 transition-all`}>
+    <div className="flex items-center gap-3">
+      <div className={`p-2 rounded-xl ${color === 'emerald' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
+        {color === 'emerald' ? <PlusCircle size={14} /> : <MinusCircle size={14} />}
       </div>
-      <span className={`text-xs font-black ${isPos ? 'text-emerald-500' : 'text-red-500'}`}>
-        {isPos ? '+' : '-'}{displayAmount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-      </span>
+      <div>
+        <p className="text-[10px] font-black text-zinc-300 uppercase">{m.description || 'Movimentação'}</p>
+        <p className="text-[8px] text-zinc-600 font-bold uppercase">{m.date ? new Date(m.date).toLocaleDateString('pt-BR') : 'Data Indefinida'}</p>
+      </div>
     </div>
-  );
-};
+    <span className={`text-xs font-black ${color === 'emerald' ? 'text-emerald-500' : 'text-red-500'}`}>
+      {color === 'emerald' ? '+' : '-'}{(m.amount || m.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+    </span>
+  </div>
+);
 
 const Empty = ({ msg }: any) => (
   <div className="py-8 text-center border border-dashed border-zinc-900 rounded-[2rem] opacity-20">
