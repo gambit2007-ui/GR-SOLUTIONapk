@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import { 
   Search, UserPlus, Trash2, Briefcase, Eye, Camera, FileUp, Pencil, X,
-  User as UserIcon, FileDown, TrendingUp, Star 
+  User as UserIcon, FileDown, TrendingUp, Star, AlertCircle, CheckCircle2 
 } from 'lucide-react';
 import { Customer, CustomerDocument, Loan } from '../types';
 import { validateCPF } from '../utils/validation';
@@ -21,7 +21,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [viewingCustomer, setViewingCustomer] = useState<any | null>(null); // Alterado para any para evitar erro de unknown
+  const [viewingCustomer, setViewingCustomer] = useState<any | null>(null);
   const [cpfValid, setCpfValid] = useState<boolean | null>(null);
   const [documents, setDocuments] = useState<CustomerDocument[]>([]);
   
@@ -40,23 +40,26 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     notes: '', createdAt: getTodayStr(), avatar: ''
   });
 
-  // Lógica de Score baseada em pagamentos
+  // Lógica de Score e Status Global
   const getCustomerStats = (customerId: string) => {
     const customerLoans = loans.filter(l => l.customerId === customerId);
     let totalInstallments = 0;
     let latePayments = 0;
+    let hasLateLoan = false;
 
     customerLoans.forEach(loan => {
       loan.installments?.forEach(inst => {
         totalInstallments++;
-        if (inst.status === 'PAGO' && inst.paymentDate) {
-          if (new Date(inst.paymentDate) > new Date(inst.dueDate)) latePayments++;
+        const isLate = inst.status !== 'PAGO' && new Date(inst.dueDate) < new Date();
+        if (isLate) {
+          latePayments++;
+          hasLateLoan = true;
         }
       });
     });
 
     const score = totalInstallments === 0 ? 5 : Math.max(1, Math.min(5, 5 - (latePayments / totalInstallments * 5)));
-    return { score: Math.round(score), loans: customerLoans };
+    return { score: Math.round(score), hasLateLoan, loans: customerLoans };
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
@@ -164,7 +167,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         </button>
       </div>
 
-      {/* FORMULÁRIO (Mantido do original) */}
+      {/* FORMULÁRIO */}
       {isAdding && (
         <div className="bg-[#0a0a0a] border border-[#BF953F]/40 p-8 rounded-[2.5rem] mb-10 shadow-2xl animate-in fade-in zoom-in-95">
           <h3 className="text-[#BF953F] font-black uppercase text-[10px] tracking-widest mb-6">
@@ -229,18 +232,23 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         </div>
       )}
 
-      {/* GRID DE CLIENTES COM SCORE */}
+      {/* GRID DE CLIENTES */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {filteredCustomers.map(customer => {
-          const { score } = getCustomerStats(customer.id);
+          const { score, hasLateLoan } = getCustomerStats(customer.id);
           return (
             <div key={customer.id} className="bg-[#0D0D0D] border border-zinc-800/50 p-6 rounded-[2.5rem] hover:border-[#BF953F]/40 transition-all group relative overflow-hidden">
               <div className="flex justify-between items-start mb-4">
-                <div className="w-14 h-14 bg-zinc-900 rounded-2xl flex items-center justify-center border border-zinc-800 overflow-hidden">
+                <div className="w-14 h-14 bg-zinc-900 rounded-2xl flex items-center justify-center border border-zinc-800 overflow-hidden relative">
                   {customer.avatar ? (
                     <img src={customer.avatar} className="w-full h-full object-cover" alt={customer.name} />
                   ) : (
                     <span className="text-[#BF953F] font-black text-xl">{customer.name[0]}</span>
+                  )}
+                  {hasLateLoan && (
+                    <div className="absolute top-0 right-0 p-1 bg-red-500 rounded-bl-lg">
+                      <AlertCircle size={10} className="text-white" />
+                    </div>
                   )}
                 </div>
                 <div className="flex gap-1 relative z-10">
@@ -256,7 +264,6 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 </div>
               </div>
               <h3 className="text-white font-bold text-base leading-tight">{customer.name}</h3>
-              {/* Estrelas de Score no Card */}
               <div className="flex gap-0.5 mt-2">
                 {[...Array(5)].map((_, i) => (
                   <Star key={i} size={10} fill={i < score ? "#BF953F" : "transparent"} className={i < score ? "text-[#BF953F]" : "text-zinc-800"} />
@@ -268,7 +275,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         })}
       </div>
 
-      {/* MODAL DE VISUALIZAÇÃO APRIMORADO - SIMPLIFICADO */}
+      {/* MODAL DE VISUALIZAÇÃO COM STATUS DE CONTRATO */}
       {viewingCustomer && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-in fade-in duration-300">
           <div className="bg-[#0a0a0a] border border-[#BF953F]/20 w-full max-w-3xl rounded-[3rem] overflow-hidden shadow-2xl">
@@ -292,7 +299,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                         <Star key={i} size={14} fill={i < getCustomerStats(viewingCustomer.id).score ? "#BF953F" : "transparent"} className="text-[#BF953F]" />
                       ))}
                     </div>
-                    <span className="px-2 py-0.5 bg-[#BF953F]/10 text-[#BF953F] text-[8px] font-black uppercase rounded-full border border-[#BF953F]/20">Score do Cliente</span>
+                    <span className="px-2 py-0.5 bg-[#BF953F]/10 text-[#BF953F] text-[8px] font-black uppercase rounded-full border border-[#BF953F]/20">Score Atual</span>
                   </div>
                 </div>
               </div>
@@ -300,36 +307,82 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
 
             <div className="p-10 pt-16 grid grid-cols-1 lg:grid-cols-3 gap-10">
               <div className="lg:col-span-2 space-y-8">
-                {/* RESUMO FINANCEIRO SIMPLIFICADO */}
+                {/* RESUMO FINANCEIRO COM STATUS DO CONTRATO */}
                 <div>
                   <h4 className="text-[10px] text-[#BF953F] font-black uppercase tracking-widest mb-4 flex items-center gap-2">
                     <TrendingUp size={14} /> Resumo de Contratos
                   </h4>
-                  <div className="space-y-3">
-                    {loans.filter(l => l.customerId === viewingCustomer.id).map((loan: any) => (
-                      <div key={loan.id} className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl flex justify-between items-center">
-                        <div>
-                          <p className="text-zinc-500 text-[8px] font-black uppercase">Valor que Pegou</p>
-                          <p className="text-white font-black text-lg">R$ {Number(loan.amount).toLocaleString('pt-BR')}</p>
+                  <div className="space-y-4">
+                    {loans.filter(l => l.customerId === viewingCustomer.id).map((loan: any) => {
+                      // Lógica de Status em tempo real
+                      const isLate = loan.installments?.some((inst: any) => 
+                        inst.status !== 'PAGO' && new Date(inst.dueDate) < new Date()
+                      );
+                      
+                      let statusLabel = "EM CURSO";
+                      let statusColor = "bg-blue-500/10 text-blue-500 border-blue-500/20";
+
+                      if (loan.status === 'QUITADO' || loan.status === 'paid') {
+                        statusLabel = "QUITADO";
+                        statusColor = "bg-green-500/10 text-green-500 border-green-500/20";
+                      } else if (isLate) {
+                        statusLabel = "ATRASADO";
+                        statusColor = "bg-red-500/10 text-red-500 border-red-500/20";
+                      }
+
+                      const paidCount = loan.installments?.filter((i:any) => i.status === 'PAGO').length || 0;
+                      const progress = (paidCount / (loan.installmentCount || 1)) * 100;
+
+                      return (
+                        <div key={loan.id} className="p-4 bg-zinc-900/50 border border-zinc-800 rounded-2xl relative overflow-hidden group">
+                          {/* Badge Status */}
+                          <div className={`absolute top-0 right-0 px-3 py-1 rounded-bl-xl border-l border-b text-[8px] font-black uppercase tracking-tighter ${statusColor}`}>
+                            {statusLabel}
+                          </div>
+
+                          <div className="flex justify-between items-end mt-2">
+                            <div>
+                              <p className="text-zinc-500 text-[8px] font-black uppercase mb-1">Valor do Empréstimo</p>
+                              <p className="text-white font-black text-lg">R$ {Number(loan.amount).toLocaleString('pt-BR')}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-zinc-500 text-[8px] font-black uppercase mb-1">Total a Retornar</p>
+                              <p className="text-[#BF953F] font-black text-lg">R$ {Number(loan.totalToReturn).toLocaleString('pt-BR')}</p>
+                            </div>
+                          </div>
+                          
+                          {/* Barra de Progresso */}
+                          <div className="mt-4">
+                            <div className="flex justify-between text-[7px] font-black uppercase mb-1 text-zinc-500">
+                              <span>Progresso de Pagamento</span>
+                              <span>{paidCount} de {loan.installmentCount}</span>
+                            </div>
+                            <div className="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full transition-all duration-500 ${isLate ? 'bg-red-500' : 'bg-[#BF953F]'}`} 
+                                style={{ width: `${progress}%` }}
+                              />
+                            </div>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-zinc-500 text-[8px] font-black uppercase">Total a Pagar</p>
-                          <p className="text-[#BF953F] font-black text-lg">R$ {Number(loan.totalToReturn).toLocaleString('pt-BR')}</p>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                     {loans.filter(l => l.customerId === viewingCustomer.id).length === 0 && (
-                      <p className="text-zinc-600 text-[10px] uppercase font-bold text-center py-4 bg-zinc-900/30 rounded-2xl border border-dashed border-zinc-800">Nenhum contrato ativo</p>
+                      <div className="text-center py-8 bg-zinc-900/30 rounded-3xl border border-dashed border-zinc-800">
+                        <CheckCircle2 size={24} className="text-zinc-800 mx-auto mb-2" />
+                        <p className="text-zinc-600 text-[9px] uppercase font-black">Nenhum contrato ativo para este cliente</p>
+                      </div>
                     )}
                   </div>
                 </div>
 
+                {/* DADOS DE CONTATO */}
                 <div className="pt-6 border-t border-zinc-900">
-                  <h4 className="text-[10px] text-zinc-500 font-black uppercase tracking-widest mb-4 flex items-center gap-2"><UserIcon size={12} className="text-[#BF953F]" /> Contato</h4>
+                  <h4 className="text-[10px] text-zinc-500 font-black uppercase tracking-widest mb-4 flex items-center gap-2"><UserIcon size={12} className="text-[#BF953F]" /> Informações</h4>
                   <div className="grid grid-cols-2 gap-4">
                     <div className="bg-zinc-900/30 p-3 rounded-xl border border-zinc-800/50">
                       <span className="text-[8px] text-zinc-600 font-black uppercase">WhatsApp</span>
-                      <p className="text-zinc-200 text-sm font-medium">{viewingCustomer.phone || 'N/A'}</p>
+                      <p className="text-zinc-200 text-sm font-medium">{viewingCustomer.phone || '---'}</p>
                     </div>
                     <div className="bg-zinc-900/30 p-3 rounded-xl border border-zinc-800/50">
                       <span className="text-[8px] text-zinc-600 font-black uppercase">CPF</span>
@@ -339,26 +392,28 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 </div>
               </div>
 
-              {/* COLUNA LATERAL - DOCUMENTOS E NOTAS */}
+              {/* DOCUMENTOS E NOTAS */}
               <div className="space-y-8">
                 <div>
-                  <h4 className="text-[10px] text-zinc-500 font-black uppercase tracking-widest mb-4">Documentação</h4>
+                  <h4 className="text-[10px] text-zinc-500 font-black uppercase tracking-widest mb-4">Documentos</h4>
                   <div className="flex flex-col gap-2">
                     {viewingCustomer.documents?.map((doc: any, idx: number) => (
                       <a key={idx} href={doc.data} download={doc.name} className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl flex items-center gap-3 group hover:border-[#BF953F]/50 transition-all">
                         <div className="p-2 bg-black rounded-lg text-[#BF953F]"><FileDown size={14} /></div>
                         <div className="flex-1 overflow-hidden text-white">
                           <p className="text-[10px] font-bold truncate">{doc.name}</p>
-                          <p className="text-[8px] text-zinc-600 uppercase">Baixar Arquivo</p>
+                          <p className="text-[8px] text-zinc-600 uppercase">Download</p>
                         </div>
                       </a>
                     ))}
-                    {(!viewingCustomer.documents || viewingCustomer.documents.length === 0) && <p className="text-[9px] text-zinc-700 font-black uppercase text-center">Sem anexos</p>}
+                    {(!viewingCustomer.documents || viewingCustomer.documents.length === 0) && (
+                      <p className="text-[9px] text-zinc-700 font-black uppercase text-center py-4 bg-zinc-900/20 rounded-2xl border border-dashed border-zinc-800">Sem anexos</p>
+                    )}
                   </div>
                 </div>
                 <div className="p-5 bg-[#BF953F]/5 border border-[#BF953F]/10 rounded-3xl text-zinc-400">
-                  <h4 className="text-[9px] text-[#BF953F] font-black uppercase mb-2">Observações</h4>
-                  <p className="text-xs italic leading-relaxed">{viewingCustomer.notes || "Sem observações internas."}</p>
+                  <h4 className="text-[9px] text-[#BF953F] font-black uppercase mb-2">Notas Internas</h4>
+                  <p className="text-xs italic leading-relaxed">{viewingCustomer.notes || "Nenhuma observação registrada."}</p>
                 </div>
               </div>
             </div>
