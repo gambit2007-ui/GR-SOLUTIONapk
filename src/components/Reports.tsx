@@ -417,6 +417,7 @@ const Reports: React.FC<ReportsProps> = ({
         <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           <StatCard title="A Receber Total" value={stats.totalAReceber} color="text-red-500" icon={<History size={20}/>} desc="Inclui juros previstos" />
           <StatCard title="Valor na Rua" value={stats.valorEmRua} color="text-orange-400" icon={<ArrowUpRightIcon size={20}/>} desc="Capital puro pendente" />
+          <StatCard title="Lucro Estimado" value={Math.max(0, Number((stats.totalAReceber - stats.valorEmRua).toFixed(2)))} color="text-emerald-300" icon={<CheckCircle size={20}/>} desc="A receber menos valor na rua" />
           <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-400" icon={<ArrowDownLeft size={20}/>} desc="Historico de saidas" />
           <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle size={20}/>} desc="Historico de entradas" />
           <StatCard title="Total de Aportes" value={cashTotals.totalAportes} color="text-emerald-400" icon={<ArrowDownLeft size={20}/>} desc="Somente movimentacoes APORTE" />

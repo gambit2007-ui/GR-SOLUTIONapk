@@ -114,7 +114,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
             const linkedLoan = (loans || []).some(loan => isMovementLinkedToLoan(m as CashMovement, loan));
             if (linkedLoan) return false;
           }
-          return t === 'RETIRADA' || t === 'ESTORNO' || t === 'SAIDA';
+          return t === 'RETIRADA' || t === 'SAIDA';
         });
 
         const recebimentosParcelas: any[] = [];
