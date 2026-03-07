@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import {
   Wallet, CheckCircle, History, ArrowUpRight, ChevronDown,
-  RotateCcw, ArrowDownLeft, ArrowUpRight as ArrowUpRightIcon
+  RotateCcw, ArrowDownLeft, ArrowUpRight as ArrowUpRightIcon, MessageCircle
 } from 'lucide-react';
 import { Loan, Installment, CashMovement } from '../types';
 
@@ -115,7 +115,7 @@ const Reports: React.FC<ReportsProps> = ({
     }
 
     if (!reason) {
-      showToast('Informe o motivo da movimentacao.', 'error');
+      showToast('Motivo obrigatorio: informe o motivo da movimentacao.', 'error');
       return;
     }
 
@@ -249,6 +249,18 @@ const Reports: React.FC<ReportsProps> = ({
                   <div>
                     <div className="flex items-center gap-3">
                       <h4 className="text-sm font-black text-white uppercase">{loan.customerName}</h4>
+                      <button
+                        onClick={() => {
+                          const msg = encodeURIComponent(
+                            `Ola ${loan.customerName}, entrando em contato sobre seu contrato com a GR SOLUTION.`
+                          );
+                          window.open(`https://wa.me/?text=${msg}`, '_blank');
+                        }}
+                        className="p-1.5 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"
+                        title="Cobrar via WhatsApp"
+                      >
+                        <MessageCircle size={14} />
+                      </button>
 
                       {loan.paidAmount > 0 && (
                         <button
@@ -329,6 +341,7 @@ const Reports: React.FC<ReportsProps> = ({
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Motivo</label>
+              <p className="text-[10px] text-zinc-400">Campo obrigatorio.</p>
               <textarea
                 value={cashReason}
                 onChange={(e) => setCashReason(e.target.value)}
@@ -375,3 +388,4 @@ const StatCard = ({ title, value, color, icon, desc }: any) => (
 );
 
 export default Reports;
+
