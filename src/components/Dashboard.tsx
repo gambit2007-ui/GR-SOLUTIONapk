@@ -78,14 +78,51 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           return d.getMonth() === month && d.getFullYear() === year;
         };
 
+        const normalize = (value: string) =>
+          String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toUpperCase();
+
         const entradasManuais = (cashMovements || []).filter(m => {
-          const t = String(m.type || '').toUpperCase();
+          const t = normalize(String(m.type || ''));
           return isMatch(m.date) && (t === 'APORTE' || t === 'PAGAMENTO' || t === 'ENTRADA');
         });
 
+        const isLoanWithdrawalMovement = (movement: CashMovement, loan: Loan) => {
+          const type = normalize(String(movement.type || ''));
+          if (type !== 'RETIRADA') return false;
+          if (!isMatch(movement.date)) return false;
+
+          if (movement.loanId && movement.loanId === loan.id) return true;
+
+          const desc = normalize(String(movement.description || ''));
+          const customerName = normalize(String(loan.customerName || ''));
+          const contractNumber = normalize(String(loan.contractNumber || ''));
+
+          if (contractNumber && desc.includes(contractNumber)) return true;
+          if (desc.includes('EMPRESTIMO') && customerName && desc.includes(customerName)) return true;
+
+          const amountMatch = Math.abs(Number(movement.amount || 0)) === Math.abs(Number(loan.amount || 0));
+          const sameDate = parseDate(movement.date).toDateString() === parseDate(loan.createdAt || loan.startDate).toDateString();
+          return amountMatch && sameDate;
+        };
+
+        const hasLoanCashMovement = (loan: Loan) => {
+          return (cashMovements || []).some(m => isLoanWithdrawalMovement(m as CashMovement, loan));
+        };
+
         const saidasManuais = (cashMovements || []).filter(m => {
-          const t = String(m.type || '').toUpperCase();
-          return isMatch(m.date) && (t === 'RETIRADA' || t === 'ESTORNO' || t === 'SAIDA');
+          const t = normalize(String(m.type || ''));
+          if (!isMatch(m.date)) return false;
+          if (t === 'RETIRADA') {
+            const desc = normalize(String(m.description || ''));
+            if (desc.startsWith('EMPRESTIMO:')) return false;
+
+            const linkedLoan = (loans || []).some(loan => isLoanWithdrawalMovement(m as CashMovement, loan));
+            if (linkedLoan) return false;
+          }
+          return t === 'RETIRADA' || t === 'ESTORNO' || t === 'SAIDA';
         });
 
         const recebimentosParcelas: any[] = [];
@@ -107,7 +144,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           });
         });
 
-        const novosEmprestimos = (loans || []).filter(l => isMatch(l.createdAt || l.startDate));
+        const novosEmprestimos = (loans || []).filter(l => isMatch(l.createdAt || l.startDate) && !hasLoanCashMovement(l));
         const totalRetorno = [...entradasManuais, ...recebimentosParcelas].reduce((acc, r) => acc + (Number(r.amount || r.value || 0)), 0);
         const totalSaida = novosEmprestimos.reduce((acc, l) => acc + Number(l.amount || 0), 0) + saidasManuais.reduce((acc, r) => acc + Number(r.amount || 0), 0);
 
@@ -231,3 +268,7 @@ const Empty = ({ msg }: any) => (
 );
 
 export default Dashboard;
+
+
+
+
