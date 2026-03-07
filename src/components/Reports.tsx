@@ -125,47 +125,49 @@ const Reports: React.FC<ReportsProps> = ({
 
   return (
     <div className="space-y-6 pb-20 max-w-[1400px] mx-auto">
-      {/* INDICADORES */}
+      {/* HEADER DE INDICADORES */}
       <div className="flex flex-col xl:flex-row gap-4">
-        <div className="xl:w-1/3 p-8 rounded-[2.5rem] bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 shadow-2xl relative overflow-hidden group">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-3 rounded-2xl bg-emerald-500 text-black shadow-lg"><Wallet size={24} /></div>
-            <span className="text-[10px] font-black uppercase text-emerald-500 tracking-[0.3em]">Caixa Geral</span>
+        {/* CARD CAIXA GERAL COM BOTÕES EMBUTIDOS */}
+        <div className="xl:w-1/3 p-8 rounded-[2.5rem] bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 shadow-2xl relative overflow-hidden group flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-3 rounded-2xl bg-emerald-500 text-black shadow-lg"><Wallet size={24} /></div>
+              <span className="text-[10px] font-black uppercase text-emerald-500 tracking-[0.3em]">Caixa Geral</span>
+            </div>
+            <h2 className="text-5xl font-black text-white tracking-tighter mb-8">
+              R$ {Number(caixa || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </h2>
           </div>
-          <h2 className="text-5xl font-black text-white tracking-tighter">
-            R$ {Number(caixa || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-          </h2>
+
+          {/* BOTÕES DE AÇÃO DO CAIXA */}
+          <div className="flex gap-2">
+            <button 
+              onClick={() => {
+                const val = prompt("Valor do APORTE:");
+                if(val) onAddTransaction('APORTE', Number(val), "Aporte via Caixa");
+              }}
+              className="flex-1 py-3 rounded-xl bg-emerald-500 text-black text-[10px] font-black uppercase hover:bg-emerald-400 transition-all flex items-center justify-center gap-2"
+            >
+              <ArrowDownLeft size={14} /> Aporte
+            </button>
+            <button 
+              onClick={() => {
+                const val = prompt("Valor da RETIRADA:");
+                if(val) onAddTransaction('RETIRADA', Number(val), "Retirada via Caixa");
+              }}
+              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2"
+            >
+              <ArrowUpRight size={14} /> Retirada
+            </button>
+          </div>
         </div>
+
         <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard title="A Receber Total" value={stats.totalAReceber} color="text-red-500" icon={<History size={20}/>} desc="Inclui juros previstos" />
           <StatCard title="Valor na Rua" value={stats.valorEmRua} color="text-orange-400" icon={<ArrowUpRightIcon size={20}/>} desc="Capital puro pendente" />
           <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-400" icon={<ArrowDownLeft size={20}/>} desc="Histórico de saídas" />
           <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle size={20}/>} desc="Histórico de entradas" />
         </div>
-      </div>
-
-      {/* MOVIMENTAÇÃO DE CAIXA RÁPIDA */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <button 
-          onClick={() => {
-            const val = prompt("Valor do APORTE:");
-            if(val) onAddTransaction('APORTE', Number(val), "Aporte manual via Relatórios");
-          }}
-          className="p-4 rounded-3xl bg-emerald-500/5 border border-emerald-500/10 hover:bg-emerald-500/10 transition-all flex items-center justify-center gap-3 group"
-        >
-          <ArrowDownLeft className="text-emerald-500 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-black text-emerald-500 uppercase">Realizar Aporte</span>
-        </button>
-        <button 
-          onClick={() => {
-            const val = prompt("Valor da RETIRADA:");
-            if(val) onAddTransaction('RETIRADA', Number(val), "Retirada manual via Relatórios");
-          }}
-          className="p-4 rounded-3xl bg-red-500/5 border border-red-500/10 hover:bg-red-500/10 transition-all flex items-center justify-center gap-3 group"
-        >
-          <ArrowUpRight className="text-red-500 group-hover:scale-110 transition-transform" />
-          <span className="text-xs font-black text-red-500 uppercase">Realizar Retirada</span>
-        </button>
       </div>
 
       <div className="bg-[#0a0a0a] border border-white/5 rounded-[2.5rem] p-8 shadow-xl">
@@ -193,14 +195,12 @@ const Reports: React.FC<ReportsProps> = ({
                   <div>
                     <div className="flex items-center gap-3">
                       <h4 className="text-sm font-black text-white uppercase">{loan.customerName}</h4>
-                      
                       <button 
                         onClick={() => {
                           const msg = encodeURIComponent(`Olá ${loan.customerName}, gostaria de tratar sobre seu contrato com a GR-SOLUTION. Sua parcela está pendente.`);
                           window.open(`https://wa.me/?text=${msg}`, '_blank');
                         }}
                         className="p-1.5 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"
-                        title="WhatsApp"
                       >
                         <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
                       </button>
@@ -215,7 +215,6 @@ const Reports: React.FC<ReportsProps> = ({
                             showToast('Contrato resetado!', 'info');
                           }}
                           className="p-1.5 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
-                          title="Estorno Total"
                         >
                           <RotateCcw size={14} />
                         </button>
