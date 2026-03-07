@@ -82,16 +82,15 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           String(value || '')
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '')
-            .toUpperCase();
+            .toUpperCase()
+            .trim();
 
         const entradasManuais = (cashMovements || []).filter(m => {
           const t = normalize(String(m.type || ''));
           return isMatch(m.date) && (t === 'APORTE' || t === 'PAGAMENTO' || t === 'ENTRADA');
         });
 
-        const isLoanWithdrawalMovement = (movement: CashMovement, loan: Loan) => {
-          const type = normalize(String(movement.type || ''));
-          if (type !== 'RETIRADA') return false;
+        const isMovementLinkedToLoan = (movement: CashMovement, loan: Loan) => {
           if (!isMatch(movement.date)) return false;
 
           if (movement.loanId && movement.loanId === loan.id) return true;
@@ -108,18 +107,11 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           return amountMatch && sameDate;
         };
 
-        const hasLoanCashMovement = (loan: Loan) => {
-          return (cashMovements || []).some(m => isLoanWithdrawalMovement(m as CashMovement, loan));
-        };
-
         const saidasManuais = (cashMovements || []).filter(m => {
           const t = normalize(String(m.type || ''));
           if (!isMatch(m.date)) return false;
-          if (t === 'RETIRADA') {
-            const desc = normalize(String(m.description || ''));
-            if (desc.startsWith('EMPRESTIMO:')) return false;
-
-            const linkedLoan = (loans || []).some(loan => isLoanWithdrawalMovement(m as CashMovement, loan));
+          if (t === 'RETIRADA' || t === 'SAIDA') {
+            const linkedLoan = (loans || []).some(loan => isMovementLinkedToLoan(m as CashMovement, loan));
             if (linkedLoan) return false;
           }
           return t === 'RETIRADA' || t === 'ESTORNO' || t === 'SAIDA';
@@ -144,7 +136,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           });
         });
 
-        const novosEmprestimos = (loans || []).filter(l => isMatch(l.createdAt || l.startDate) && !hasLoanCashMovement(l));
+        const novosEmprestimos = (loans || []).filter(l => isMatch(l.createdAt || l.startDate));
         const totalRetorno = [...entradasManuais, ...recebimentosParcelas].reduce((acc, r) => acc + (Number(r.amount || r.value || 0)), 0);
         const totalSaida = novosEmprestimos.reduce((acc, l) => acc + Number(l.amount || 0), 0) + saidasManuais.reduce((acc, r) => acc + Number(r.amount || 0), 0);
 
@@ -268,6 +260,12 @@ const Empty = ({ msg }: any) => (
 );
 
 export default Dashboard;
+
+
+
+
+
+
 
 
 
