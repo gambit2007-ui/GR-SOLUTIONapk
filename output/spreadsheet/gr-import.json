@@ -1,0 +1,1305 @@
+﻿{
+    "sourceFile":  "C:\\Users\\Guilherme\\OneDrive - The Mosaic Company\\Desktop\\GR SOLUTION.xlsm",
+    "generatedAt":  "2026-03-06T22:19:00",
+    "customers":  [
+                      {
+                          "id":  "cust-02823292a8",
+                          "name":  "Maycon Brener",
+                          "cpf":  "12475047607",
+                          "rg":  "MG17840313",
+                          "email":  "Maikerah123@gmail.com",
+                          "phone":  "34991268101",
+                          "address":  "Rua Antonia Alves Magalhaes n°160 Residencial Espanha I",
+                          "notes":  "",
+                          "createdAt":  1772846340118
+                      },
+                      {
+                          "id":  "cust-b00adf05c3",
+                          "name":  "Marcos Cesar",
+                          "cpf":  "",
+                          "rg":  "",
+                          "email":  "",
+                          "phone":  "34999239635",
+                          "address":  "",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-491693e81b",
+                          "name":  "Gabriel Aparecido de Oliveira Sousa",
+                          "cpf":  "15619226689",
+                          "rg":  "",
+                          "email":  "gabriellsousaoliveira22@gmail.com",
+                          "phone":  "34998960675",
+                          "address":  "Rua Itacuru n°50 Centro",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-c496b6ec8f",
+                          "name":  "Giuliano Roberto",
+                          "cpf":  "5869638631",
+                          "rg":  "MG12877106",
+                          "email":  "",
+                          "phone":  "34992476204",
+                          "address":  "Rua Alexandre Dumontn°50 Santa Luzia",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-0a58a29323",
+                          "name":  "Jonatan Patrick",
+                          "cpf":  "11514903695",
+                          "rg":  "",
+                          "email":  "",
+                          "phone":  "34991195235",
+                          "address":  "Dalva Rios dos Reis n°50 Max Newman",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-1c84a10a20",
+                          "name":  "Maria Angélica Bento",
+                          "cpf":  "4845009617",
+                          "rg":  "M883260",
+                          "email":  "",
+                          "phone":  "34988794516",
+                          "address":  "Rua Pau Brasil n°75 PEP4",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-ef6640f233",
+                          "name":  "Gustavo Erick Machado Manoel",
+                          "cpf":  "13668015635",
+                          "rg":  "MG19672187",
+                          "email":  "",
+                          "phone":  "34997911738",
+                          "address":  "AV.Astolfo Lemos n°285 Urciano Lemos",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-a216404bff",
+                          "name":  "Eduardo Reis Bento",
+                          "cpf":  "12821871635",
+                          "rg":  "MG19125756",
+                          "email":  "ereis6433@gmail.com",
+                          "phone":  "21951119842",
+                          "address":  "Rua Pau Brasil n°75 PEP4",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-3a96a3c1e8",
+                          "name":  "Artur",
+                          "cpf":  "",
+                          "rg":  "",
+                          "email":  "",
+                          "phone":  "34988108526",
+                          "address":  "",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-04eb4db8ed",
+                          "name":  "Iago Carlos dos Santos",
+                          "cpf":  "14607327662",
+                          "rg":  "MG21281808",
+                          "email":  "",
+                          "phone":  "34997359431",
+                          "address":  "Av.Antonio de Alvarenga de Rese n°645 Max Newman",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-79870607c6",
+                          "name":  "Deryck Torres Viegas",
+                          "cpf":  "10821389670",
+                          "rg":  "MG17335615",
+                          "email":  "",
+                          "phone":  "34999308429",
+                          "address":  "Rua Maria Benedita de Oliveira n°105 Jose ferreira Guimaraes",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-58abfa6978",
+                          "name":  "Marlon Lucas dos Reis Victor",
+                          "cpf":  "12354948611",
+                          "rg":  "MG18652219",
+                          "email":  "",
+                          "phone":  "34999183966",
+                          "address":  "Rua Joao Abadio Alves n°135 Max Newman",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-a23b31f472",
+                          "name":  "Gabriel Magalhães Ferreira",
+                          "cpf":  "13585306616",
+                          "rg":  "MG20146613",
+                          "email":  "",
+                          "phone":  "34988711519",
+                          "address":  "Rua Olga RochaMartins n°135Francisco Duarte",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-75a05f0bb8",
+                          "name":  "Roberto Cardoso Bernades",
+                          "cpf":  "10686875680",
+                          "rg":  "MG14609680",
+                          "email":  "",
+                          "phone":  "34888557210",
+                          "address":  "Rua Paul Harris Nº645 AP 101",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-d178e78c4f",
+                          "name":  "Guilherme Nathan Elias Reis",
+                          "cpf":  "10121958647",
+                          "rg":  "MG15454812",
+                          "email":  "",
+                          "phone":  "34984430543",
+                          "address":  "Rua Geraldo Viera n°55 Jardim Esplendido",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-8fd18c8f14",
+                          "name":  "Carlos Eduardo da Silva",
+                          "cpf":  "1976527600",
+                          "rg":  "MG18861872",
+                          "email":  "",
+                          "phone":  "34991344801",
+                          "address":  "Rua Francisca Fulgencio Oliveira n°70 Boa Vista",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-d66aed183b",
+                          "name":  "Luciene Abadia Fonseca",
+                          "cpf":  "3820162623",
+                          "rg":  "MG10741910",
+                          "email":  "Lucienefonseca155@gmail.com",
+                          "phone":  "34988019499",
+                          "address":  "Rua Maria Auxiliadora de Oliveira N°445 Novo Pao de Açucar IV",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-0f27d0fc3d",
+                          "name":  "Leonardo Pereira Camargos",
+                          "cpf":  "17346993705",
+                          "rg":  "30.162.258-5",
+                          "email":  "Camargosleonardo317@gmail.com",
+                          "phone":  "34991043577",
+                          "address":  "Rua domingo Vaz de Oliveira numero 305 casa branca de esquina bairro Ana Antônia 2",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-3fa7379900",
+                          "name":  "Igor de Andrade Ribeiro",
+                          "cpf":  "2315813603",
+                          "rg":  "MG20525572",
+                          "email":  "",
+                          "phone":  "34984316095",
+                          "address":  "Rua Salomao Pereira Mesquita n°141 Centro",
+                          "notes":  "",
+                          "createdAt":  1772846340134
+                      },
+                      {
+                          "id":  "cust-46ae7a817c",
+                          "name":  "Maria Angélica",
+                          "cpf":  "",
+                          "rg":  "",
+                          "email":  "",
+                          "phone":  "34988794516",
+                          "address":  "",
+                          "notes":  "Importado da planilha Base",
+                          "createdAt":  1772846340308
+                      },
+                      {
+                          "id":  "cust-6f5cc28e3d",
+                          "name":  "Deryck Torres",
+                          "cpf":  "",
+                          "rg":  "",
+                          "email":  "",
+                          "phone":  "34999308429",
+                          "address":  "",
+                          "notes":  "Importado da planilha Base",
+                          "createdAt":  1772846340308
+                      }
+                  ],
+    "loans":  [
+                  {
+                      "id":  "loan-104f666a0e",
+                      "contractNumber":  "2026018",
+                      "customerId":  "cust-a23b31f472",
+                      "customerName":  "Gabriel Magalhães Ferreira",
+                      "customerPhone":  "34988711519",
+                      "amount":  1500,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1950,
+                      "installmentValue":  1950,
+                      "startDate":  "2026-03-18",
+                      "dueDate":  "2026-03-18",
+                      "createdAt":  1773792000000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-e77ca90b1d",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-18",
+                                               "value":  1950,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1950
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-363d426987",
+                      "contractNumber":  "2026025",
+                      "customerId":  "cust-c496b6ec8f",
+                      "customerName":  "Giuliano Roberto",
+                      "customerPhone":  "34992476204",
+                      "amount":  2000,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  2600,
+                      "installmentValue":  2600,
+                      "startDate":  "2026-04-06",
+                      "dueDate":  "2026-04-06",
+                      "createdAt":  1775433600000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-c9ce5a7a7d",
+                                               "number":  1,
+                                               "dueDate":  "2026-04-06",
+                                               "value":  2600,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  2600
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-7d92606329",
+                      "contractNumber":  "2026023",
+                      "customerId":  "cust-0f27d0fc3d",
+                      "customerName":  "Leonardo Pereira Camargos",
+                      "customerPhone":  "34991043577",
+                      "amount":  1000,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1300,
+                      "installmentValue":  1300,
+                      "startDate":  "2026-04-04",
+                      "dueDate":  "2026-04-04",
+                      "createdAt":  1775260800000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-45c200b190",
+                                               "number":  1,
+                                               "dueDate":  "2026-04-04",
+                                               "value":  1300,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1300
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-2c45c1ddcf",
+                      "contractNumber":  "2026002",
+                      "customerId":  "cust-b00adf05c3",
+                      "customerName":  "Marcos Cesar",
+                      "customerPhone":  "34999239635",
+                      "amount":  390,
+                      "interestRate":  20,
+                      "installmentCount":  3,
+                      "frequency":  "SEMANAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  468,
+                      "installmentValue":  156,
+                      "startDate":  "2026-02-03",
+                      "dueDate":  "2026-02-03",
+                      "createdAt":  1770076800000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-ba20881612",
+                                               "number":  1,
+                                               "dueDate":  "2026-02-03",
+                                               "value":  156,
+                                               "status":  "PAGO",
+                                               "originalValue":  156,
+                                               "lastPaidValue":  156,
+                                               "paymentDate":  "2026-02-03"
+                                           },
+                                           {
+                                               "id":  "inst-8373d86224",
+                                               "number":  2,
+                                               "dueDate":  "2026-02-10",
+                                               "value":  156,
+                                               "status":  "PAGO",
+                                               "originalValue":  156,
+                                               "lastPaidValue":  156,
+                                               "paymentDate":  "2026-02-10"
+                                           },
+                                           {
+                                               "id":  "inst-924f5e9d7c",
+                                               "number":  3,
+                                               "dueDate":  "2026-02-17",
+                                               "value":  156,
+                                               "status":  "PAGO",
+                                               "originalValue":  156,
+                                               "lastPaidValue":  156,
+                                               "paymentDate":  "2026-02-17"
+                                           }
+                                       ],
+                      "status":  "QUITADO",
+                      "paidAmount":  468
+                  },
+                  {
+                      "id":  "loan-c3c596d306",
+                      "contractNumber":  "2026004",
+                      "customerId":  "cust-0a58a29323",
+                      "customerName":  "Jonatan Patrick",
+                      "customerPhone":  "34991195235",
+                      "amount":  500,
+                      "interestRate":  61.3,
+                      "installmentCount":  4,
+                      "frequency":  "SEMANAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  806.5,
+                      "installmentValue":  201.62,
+                      "startDate":  "2026-01-22",
+                      "dueDate":  "2026-01-22",
+                      "createdAt":  1769040000000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-9e8bb81024",
+                                               "number":  1,
+                                               "dueDate":  "2026-01-22",
+                                               "value":  227,
+                                               "status":  "ATRASADO",
+                                               "originalValue":  227
+                                           },
+                                           {
+                                               "id":  "inst-1e1cfc022c",
+                                               "number":  2,
+                                               "dueDate":  "2026-01-29",
+                                               "value":  225,
+                                               "status":  "ATRASADO",
+                                               "originalValue":  225
+                                           },
+                                           {
+                                               "id":  "inst-098a910d97",
+                                               "number":  3,
+                                               "dueDate":  "2026-01-06",
+                                               "value":  132,
+                                               "status":  "ATRASADO",
+                                               "originalValue":  132
+                                           },
+                                           {
+                                               "id":  "inst-b8cb40ad79",
+                                               "number":  4,
+                                               "dueDate":  "2026-02-13",
+                                               "value":  222.5,
+                                               "status":  "ATRASADO",
+                                               "originalValue":  222.5
+                                           }
+                                       ],
+                      "status":  "ATRASADO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-2cae03aba6",
+                      "contractNumber":  "2026014",
+                      "customerId":  "cust-04eb4db8ed",
+                      "customerName":  "Iago Carlos dos Santos",
+                      "customerPhone":  "34997359431",
+                      "amount":  250,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  325,
+                      "installmentValue":  325,
+                      "startDate":  "2026-03-06",
+                      "dueDate":  "2026-03-06",
+                      "createdAt":  1772755200000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-bb03d2a0fe",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-06",
+                                               "value":  325,
+                                               "status":  "PAGO",
+                                               "originalValue":  325,
+                                               "lastPaidValue":  325,
+                                               "paymentDate":  "2026-03-06"
+                                           }
+                                       ],
+                      "status":  "QUITADO",
+                      "paidAmount":  325
+                  },
+                  {
+                      "id":  "loan-3eee5153b8",
+                      "contractNumber":  "2026024",
+                      "customerId":  "cust-3fa7379900",
+                      "customerName":  "Igor de Andrade Ribeiro",
+                      "customerPhone":  "16996488932",
+                      "amount":  1000,
+                      "interestRate":  30,
+                      "installmentCount":  4,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1300,
+                      "installmentValue":  325,
+                      "startDate":  "2026-03-11",
+                      "dueDate":  "2026-03-11",
+                      "createdAt":  1773187200000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-121e91aead",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-11",
+                                               "value":  325,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  325
+                                           },
+                                           {
+                                               "id":  "inst-dc005dd26e",
+                                               "number":  2,
+                                               "dueDate":  "2026-03-18",
+                                               "value":  325,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  325
+                                           },
+                                           {
+                                               "id":  "inst-25964302c5",
+                                               "number":  3,
+                                               "dueDate":  "2026-03-25",
+                                               "value":  325,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  325
+                                           },
+                                           {
+                                               "id":  "inst-a5ede50d1e",
+                                               "number":  4,
+                                               "dueDate":  "2026-04-01",
+                                               "value":  325,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  325
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-eef7810f4d",
+                      "contractNumber":  "2026022",
+                      "customerId":  "cust-d66aed183b",
+                      "customerName":  "Luciene Abadia Fonseca",
+                      "customerPhone":  "34988019499",
+                      "amount":  2000,
+                      "interestRate":  53.69,
+                      "installmentCount":  3,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  3073.77,
+                      "installmentValue":  1024.59,
+                      "startDate":  "2026-03-23",
+                      "dueDate":  "2026-03-23",
+                      "createdAt":  1774224000000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-5181f93e8b",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-23",
+                                               "value":  1024.59,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1024.59
+                                           },
+                                           {
+                                               "id":  "inst-000796f4b1",
+                                               "number":  2,
+                                               "dueDate":  "2026-04-23",
+                                               "value":  1024.59,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1024.59
+                                           },
+                                           {
+                                               "id":  "inst-c6d53a1424",
+                                               "number":  3,
+                                               "dueDate":  "2026-05-23",
+                                               "value":  1024.59,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1024.59
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-bfe608fbb3",
+                      "contractNumber":  "2026017",
+                      "customerId":  "cust-d178e78c4f",
+                      "customerName":  "Guilherme Nathan Elias Reis",
+                      "customerPhone":  "34984430543",
+                      "amount":  1300,
+                      "interestRate":  30,
+                      "installmentCount":  2,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1690,
+                      "installmentValue":  845,
+                      "startDate":  "2026-02-28",
+                      "dueDate":  "2026-02-28",
+                      "createdAt":  1772236800000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-84b51f8fda",
+                                               "number":  1,
+                                               "dueDate":  "2026-02-28",
+                                               "value":  845,
+                                               "status":  "PAGO",
+                                               "originalValue":  845,
+                                               "lastPaidValue":  845,
+                                               "paymentDate":  "2026-02-28"
+                                           },
+                                           {
+                                               "id":  "inst-3b33fc7102",
+                                               "number":  2,
+                                               "dueDate":  "2026-03-16",
+                                               "value":  845,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  845
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  845
+                  },
+                  {
+                      "id":  "loan-2b8222daf2",
+                      "contractNumber":  "2026005",
+                      "customerId":  "cust-46ae7a817c",
+                      "customerName":  "Maria Angélica",
+                      "customerPhone":  "34988794516",
+                      "amount":  1200,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1560,
+                      "installmentValue":  1560,
+                      "startDate":  "2026-03-06",
+                      "dueDate":  "2026-03-06",
+                      "createdAt":  1772755200000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-419d0ee90b",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-06",
+                                               "value":  1560,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1560
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-8ac510ab53",
+                      "contractNumber":  "2026007",
+                      "customerId":  "cust-a216404bff",
+                      "customerName":  "Eduardo Reis Bento",
+                      "customerPhone":  "21951119842",
+                      "amount":  1500,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1950,
+                      "installmentValue":  1950,
+                      "startDate":  "2026-03-06",
+                      "dueDate":  "2026-03-06",
+                      "createdAt":  1772755200000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-cf7a2eacf1",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-06",
+                                               "value":  1950,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1950
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-f299e4f73d",
+                      "contractNumber":  "2026009",
+                      "customerId":  "cust-6f5cc28e3d",
+                      "customerName":  "Deryck Torres",
+                      "customerPhone":  "34999308429",
+                      "amount":  1000,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1300,
+                      "installmentValue":  1300,
+                      "startDate":  "2026-03-06",
+                      "dueDate":  "2026-03-06",
+                      "createdAt":  1772755200000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-163470da91",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-06",
+                                               "value":  1300,
+                                               "status":  "PAGO",
+                                               "originalValue":  1300,
+                                               "lastPaidValue":  1300,
+                                               "paymentDate":  "2026-03-06"
+                                           }
+                                       ],
+                      "status":  "QUITADO",
+                      "paidAmount":  1300
+                  },
+                  {
+                      "id":  "loan-f071abc360",
+                      "contractNumber":  "2026011",
+                      "customerId":  "cust-58abfa6978",
+                      "customerName":  "Marlon Lucas dos Reis Victor",
+                      "customerPhone":  "34999183966",
+                      "amount":  1200,
+                      "interestRate":  30,
+                      "installmentCount":  2,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1560,
+                      "installmentValue":  780,
+                      "startDate":  "2026-02-20",
+                      "dueDate":  "2026-02-20",
+                      "createdAt":  1771545600000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-86b0f9b498",
+                                               "number":  1,
+                                               "dueDate":  "2026-02-20",
+                                               "value":  780,
+                                               "status":  "PAGO",
+                                               "originalValue":  780,
+                                               "lastPaidValue":  780,
+                                               "paymentDate":  "2026-02-20"
+                                           },
+                                           {
+                                               "id":  "inst-1f7722731c",
+                                               "number":  2,
+                                               "dueDate":  "2026-03-06",
+                                               "value":  780,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  780
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  780
+                  },
+                  {
+                      "id":  "loan-aaa7b9a174",
+                      "contractNumber":  "2026021",
+                      "customerId":  "cust-02823292a8",
+                      "customerName":  "Maycon Brener",
+                      "customerPhone":  "34991268101",
+                      "amount":  1000,
+                      "interestRate":  25,
+                      "installmentCount":  2,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1250,
+                      "installmentValue":  625,
+                      "startDate":  "2026-03-07",
+                      "dueDate":  "2026-03-07",
+                      "createdAt":  1772841600000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-fb3ff9157f",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-07",
+                                               "value":  625,
+                                               "status":  "PAGO",
+                                               "originalValue":  625,
+                                               "lastPaidValue":  625,
+                                               "paymentDate":  "2026-03-07"
+                                           },
+                                           {
+                                               "id":  "inst-59e1927fe5",
+                                               "number":  2,
+                                               "dueDate":  "2026-03-23",
+                                               "value":  625,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  625
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  625
+                  },
+                  {
+                      "id":  "loan-45a72eca36",
+                      "contractNumber":  "2026006",
+                      "customerId":  "cust-ef6640f233",
+                      "customerName":  "Gustavo Erick Machado Manoel",
+                      "customerPhone":  "34997911738",
+                      "amount":  1500,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1950,
+                      "installmentValue":  1950,
+                      "startDate":  "2026-03-06",
+                      "dueDate":  "2026-03-06",
+                      "createdAt":  1772755200000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-d6c0c4a66e",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-06",
+                                               "value":  1950,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1950
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-69b7101985",
+                      "contractNumber":  "2026008",
+                      "customerId":  "cust-04eb4db8ed",
+                      "customerName":  "Iago Carlos dos Santos",
+                      "customerPhone":  "34997359431",
+                      "amount":  250,
+                      "interestRate":  20,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  300,
+                      "installmentValue":  300,
+                      "startDate":  "2026-02-08",
+                      "dueDate":  "2026-02-08",
+                      "createdAt":  1770508800000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-e25686fdd7",
+                                               "number":  1,
+                                               "dueDate":  "2026-02-08",
+                                               "value":  300,
+                                               "status":  "PAGO",
+                                               "originalValue":  300,
+                                               "lastPaidValue":  300,
+                                               "paymentDate":  "2026-02-08"
+                                           }
+                                       ],
+                      "status":  "QUITADO",
+                      "paidAmount":  300
+                  },
+                  {
+                      "id":  "loan-f3727c7590",
+                      "contractNumber":  "2026010",
+                      "customerId":  "cust-3a96a3c1e8",
+                      "customerName":  "Artur",
+                      "customerPhone":  "34988108526",
+                      "amount":  1000,
+                      "interestRate":  40,
+                      "installmentCount":  7,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1400,
+                      "installmentValue":  200,
+                      "startDate":  "2025-12-08",
+                      "dueDate":  "2025-12-08",
+                      "createdAt":  1765152000000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-0eaffbe608",
+                                               "number":  1,
+                                               "dueDate":  "2025-12-08",
+                                               "value":  200,
+                                               "status":  "PAGO",
+                                               "originalValue":  200,
+                                               "lastPaidValue":  200,
+                                               "paymentDate":  "2025-12-08"
+                                           },
+                                           {
+                                               "id":  "inst-ff06f690ae",
+                                               "number":  2,
+                                               "dueDate":  "2026-01-08",
+                                               "value":  200,
+                                               "status":  "PAGO",
+                                               "originalValue":  200,
+                                               "lastPaidValue":  200,
+                                               "paymentDate":  "2026-01-08"
+                                           },
+                                           {
+                                               "id":  "inst-c267f32b55",
+                                               "number":  3,
+                                               "dueDate":  "2026-02-08",
+                                               "value":  200,
+                                               "status":  "PAGO",
+                                               "originalValue":  200,
+                                               "lastPaidValue":  200,
+                                               "paymentDate":  "2026-02-08"
+                                           },
+                                           {
+                                               "id":  "inst-287c3a146e",
+                                               "number":  4,
+                                               "dueDate":  "2026-03-08",
+                                               "value":  200,
+                                               "status":  "PAGO",
+                                               "originalValue":  200,
+                                               "lastPaidValue":  200,
+                                               "paymentDate":  "2026-03-08"
+                                           },
+                                           {
+                                               "id":  "inst-f23ae23533",
+                                               "number":  5,
+                                               "dueDate":  "2026-04-08",
+                                               "value":  200,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  200
+                                           },
+                                           {
+                                               "id":  "inst-df1e7f8df3",
+                                               "number":  6,
+                                               "dueDate":  "2026-05-08",
+                                               "value":  200,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  200
+                                           },
+                                           {
+                                               "id":  "inst-1f6083b9f2",
+                                               "number":  7,
+                                               "dueDate":  "2026-06-08",
+                                               "value":  200,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  200
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  800
+                  },
+                  {
+                      "id":  "loan-f711ff6b22",
+                      "contractNumber":  "2026016",
+                      "customerId":  "cust-75a05f0bb8",
+                      "customerName":  "Roberto Cardoso Bernades",
+                      "customerPhone":  "34888557210",
+                      "amount":  5000,
+                      "interestRate":  85.92,
+                      "installmentCount":  5,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  9296.17,
+                      "installmentValue":  1859.23,
+                      "startDate":  "2026-03-17",
+                      "dueDate":  "2026-03-17",
+                      "createdAt":  1773705600000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-81eca757d0",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-17",
+                                               "value":  1859.23,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1859.23
+                                           },
+                                           {
+                                               "id":  "inst-a4dd93e56c",
+                                               "number":  2,
+                                               "dueDate":  "2026-04-17",
+                                               "value":  1859.23,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1859.23
+                                           },
+                                           {
+                                               "id":  "inst-74f912c78d",
+                                               "number":  3,
+                                               "dueDate":  "2026-05-17",
+                                               "value":  1859.24,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1859.24
+                                           },
+                                           {
+                                               "id":  "inst-8412f826e5",
+                                               "number":  4,
+                                               "dueDate":  "2026-06-17",
+                                               "value":  1859.23,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1859.23
+                                           },
+                                           {
+                                               "id":  "inst-8adf9bfa63",
+                                               "number":  5,
+                                               "dueDate":  "2026-07-17",
+                                               "value":  1859.24,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1859.24
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-92770291e5",
+                      "contractNumber":  "2026026",
+                      "customerId":  "cust-04eb4db8ed",
+                      "customerName":  "Iago Carlos dos Santos",
+                      "customerPhone":  "34997359431",
+                      "amount":  350,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  455,
+                      "installmentValue":  455,
+                      "startDate":  "2026-04-06",
+                      "dueDate":  "2026-04-06",
+                      "createdAt":  1775433600000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-5fd591de82",
+                                               "number":  1,
+                                               "dueDate":  "2026-04-06",
+                                               "value":  455,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  455
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-42b7a4a99d",
+                      "contractNumber":  "2026013",
+                      "customerId":  "cust-c496b6ec8f",
+                      "customerName":  "Giuliano Roberto",
+                      "customerPhone":  "34992476204",
+                      "amount":  2000,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  2600,
+                      "installmentValue":  2600,
+                      "startDate":  "2026-03-09",
+                      "dueDate":  "2026-03-09",
+                      "createdAt":  1773014400000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-18cf4e8390",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-09",
+                                               "value":  2600,
+                                               "status":  "PAGO",
+                                               "originalValue":  2600,
+                                               "lastPaidValue":  2600,
+                                               "paymentDate":  "2026-03-09"
+                                           }
+                                       ],
+                      "status":  "QUITADO",
+                      "paidAmount":  2600
+                  },
+                  {
+                      "id":  "loan-073de0b954",
+                      "contractNumber":  "2026001",
+                      "customerId":  "cust-02823292a8",
+                      "customerName":  "Maycon Brener",
+                      "customerPhone":  "34991268101",
+                      "amount":  1000,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1300,
+                      "installmentValue":  1300,
+                      "startDate":  "2025-11-12",
+                      "dueDate":  "2025-11-12",
+                      "createdAt":  1762905600000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-a71b628093",
+                                               "number":  1,
+                                               "dueDate":  "2025-11-12",
+                                               "value":  1300,
+                                               "status":  "PAGO",
+                                               "originalValue":  1300,
+                                               "lastPaidValue":  1300,
+                                               "paymentDate":  "2025-11-12"
+                                           }
+                                       ],
+                      "status":  "QUITADO",
+                      "paidAmount":  1300
+                  },
+                  {
+                      "id":  "loan-aa77cabf41",
+                      "contractNumber":  "2026019",
+                      "customerId":  "cust-8fd18c8f14",
+                      "customerName":  "Carlos Eduardo da Silva",
+                      "customerPhone":  "34991344801",
+                      "amount":  800,
+                      "interestRate":  30,
+                      "installmentCount":  1,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1040,
+                      "installmentValue":  1040,
+                      "startDate":  "2026-03-16",
+                      "dueDate":  "2026-03-16",
+                      "createdAt":  1773619200000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-6b5f2a194c",
+                                               "number":  1,
+                                               "dueDate":  "2026-03-16",
+                                               "value":  1040,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  1040
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  0
+                  },
+                  {
+                      "id":  "loan-55146930f6",
+                      "contractNumber":  "2026020",
+                      "customerId":  "cust-491693e81b",
+                      "customerName":  "Gabriel Aparecido de Oliveira Sousa",
+                      "customerPhone":  "34998960675",
+                      "amount":  1500,
+                      "interestRate":  25.01,
+                      "installmentCount":  21,
+                      "frequency":  "MENSAL",
+                      "interestType":  "SIMPLES",
+                      "totalToReturn":  1875.09,
+                      "installmentValue":  89.29,
+                      "startDate":  "2026-02-23",
+                      "dueDate":  "2026-02-23",
+                      "createdAt":  1771804800000,
+                      "installments":  [
+                                           {
+                                               "id":  "inst-9382e48132",
+                                               "number":  1,
+                                               "dueDate":  "2026-02-23",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-02-23"
+                                           },
+                                           {
+                                               "id":  "inst-95309b930b",
+                                               "number":  2,
+                                               "dueDate":  "2026-02-24",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-02-24"
+                                           },
+                                           {
+                                               "id":  "inst-83713a589d",
+                                               "number":  3,
+                                               "dueDate":  "2026-02-25",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-02-25"
+                                           },
+                                           {
+                                               "id":  "inst-611c0ae749",
+                                               "number":  4,
+                                               "dueDate":  "2026-02-26",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-02-26"
+                                           },
+                                           {
+                                               "id":  "inst-c0efd19ebc",
+                                               "number":  5,
+                                               "dueDate":  "2026-02-27",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-02-27"
+                                           },
+                                           {
+                                               "id":  "inst-aa5cde2b6b",
+                                               "number":  6,
+                                               "dueDate":  "2026-02-28",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-02-28"
+                                           },
+                                           {
+                                               "id":  "inst-871a30a86d",
+                                               "number":  7,
+                                               "dueDate":  "2026-03-01",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-03-01"
+                                           },
+                                           {
+                                               "id":  "inst-20d7119bb9",
+                                               "number":  8,
+                                               "dueDate":  "2026-03-02",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-03-02"
+                                           },
+                                           {
+                                               "id":  "inst-e6c4063cbb",
+                                               "number":  9,
+                                               "dueDate":  "2026-03-03",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-03-03"
+                                           },
+                                           {
+                                               "id":  "inst-980747a8a8",
+                                               "number":  10,
+                                               "dueDate":  "2026-03-04",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-03-04"
+                                           },
+                                           {
+                                               "id":  "inst-f2051d366e",
+                                               "number":  11,
+                                               "dueDate":  "2026-03-05",
+                                               "value":  89.29,
+                                               "status":  "PAGO",
+                                               "originalValue":  89.29,
+                                               "lastPaidValue":  89.29,
+                                               "paymentDate":  "2026-03-05"
+                                           },
+                                           {
+                                               "id":  "inst-be20e56dc8",
+                                               "number":  12,
+                                               "dueDate":  "2026-03-06",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-e98cd21c49",
+                                               "number":  13,
+                                               "dueDate":  "2026-03-07",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-966efe28f4",
+                                               "number":  14,
+                                               "dueDate":  "2026-03-08",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-63c9f22421",
+                                               "number":  15,
+                                               "dueDate":  "2026-03-09",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-5893521a9f",
+                                               "number":  16,
+                                               "dueDate":  "2026-03-10",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-58831c7d2c",
+                                               "number":  17,
+                                               "dueDate":  "2026-03-11",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-acc76fa5e4",
+                                               "number":  18,
+                                               "dueDate":  "2026-03-12",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-df92c694a3",
+                                               "number":  19,
+                                               "dueDate":  "2026-03-13",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-ca68f41687",
+                                               "number":  20,
+                                               "dueDate":  "2026-03-14",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           },
+                                           {
+                                               "id":  "inst-0443acb49c",
+                                               "number":  21,
+                                               "dueDate":  "2026-03-15",
+                                               "value":  89.29,
+                                               "status":  "PENDENTE",
+                                               "originalValue":  89.29
+                                           }
+                                       ],
+                      "status":  "ATIVO",
+                      "paidAmount":  982.19
+                  }
+              ],
+    "settings":  {
+                     "caixa":  -5189.79
+                 }
+}
