@@ -13,6 +13,13 @@ interface ReportsProps {
   caixa: number;
   onAddTransaction: (type: MovementType, amount: number, description: string) => Promise<void>;
   onUpdateLoan: (loanId: string, newData: any) => Promise<void>;
+  onUpdateLoanAndAddTransaction?: (
+    loanId: string,
+    newData: Partial<Loan>,
+    type: MovementType,
+    amount: number,
+    description: string,
+  ) => Promise<void>;
   onRecalculateCash: () => Promise<void>;
   showToast: (message: string, type: 'success' | 'info' | 'error') => void;
 }
@@ -33,6 +40,7 @@ const Reports: React.FC<ReportsProps> = ({
   caixa = 0,
   onAddTransaction,
   onUpdateLoan,
+  onUpdateLoanAndAddTransaction,
   onRecalculateCash,
   showToast,
 }) => {
@@ -311,18 +319,40 @@ const Reports: React.FC<ReportsProps> = ({
 
   const handleRefundInstallment = async (loan: Loan, idx: number) => {
     const inst = loan.installments[idx];
-    const valorParaEstornar = inst.lastPaidValue || getValue(inst);
+    if (!inst || inst.status !== 'PAGO') {
+      showToast('Parcela nao esta paga.', 'info');
+      return;
+    }
+
+    const valorParaEstornar = Number(inst.lastPaidValue || getValue(inst));
+    if (!Number.isFinite(valorParaEstornar) || valorParaEstornar <= 0) {
+      showToast('Valor invalido para estorno.', 'error');
+      return;
+    }
 
     if (!window.confirm(`Estornar pagamento de R$ ${valorParaEstornar.toFixed(2)}?`)) return;
 
     try {
       const installments = [...loan.installments];
-      const { paymentDate, lastPaidValue, ...installmentBase } = inst;
+      const installmentBase: Installment = { ...inst };
+      delete installmentBase.paymentDate;
+      delete installmentBase.lastPaidValue;
+      delete installmentBase.partialPaid;
       installments[idx] = { ...installmentBase, status: 'PENDENTE' };
-      const novoPago = Number((loan.paidAmount - valorParaEstornar).toFixed(2));
 
-      await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: 'ATIVO' });
-      await onAddTransaction('ESTORNO', valorParaEstornar, `ESTORNO: ${loan.customerName} (P${inst.number})`);
+      const novoPago = Math.max(0, Number((Number(loan.paidAmount || 0) - valorParaEstornar).toFixed(2)));
+      const saldoRestante = Number(loan.totalToReturn || 0) - novoPago;
+      const novoStatus = saldoRestante <= 0.5 ? 'QUITADO' : 'ATIVO';
+      const updatePayload = { installments, paidAmount: novoPago, status: novoStatus };
+      const estornoDesc = `ESTORNO: ${loan.customerName} (P${inst.number})`;
+
+      if (onUpdateLoanAndAddTransaction) {
+        await onUpdateLoanAndAddTransaction(loan.id, updatePayload, 'ESTORNO', valorParaEstornar, estornoDesc);
+      } else {
+        await onUpdateLoan(loan.id, updatePayload);
+        await onAddTransaction('ESTORNO', valorParaEstornar, estornoDesc);
+      }
+
       showToast('Estorno realizado!', 'info');
     } catch {
       showToast('Erro ao estornar.', 'error');
@@ -434,13 +464,39 @@ const Reports: React.FC<ReportsProps> = ({
                         <button
                           onClick={async () => {
                             if (!window.confirm('ESTORNAR TODOS os pagamentos deste cliente?')) return;
+
+                            const valorTotalEstorno = Number(loan.paidAmount || 0);
+                            if (!Number.isFinite(valorTotalEstorno) || valorTotalEstorno <= 0) {
+                              showToast('Nao ha valor pago para estornar.', 'info');
+                              return;
+                            }
+
                             const reset = loan.installments.map(i => {
-                              const { paymentDate, lastPaidValue, ...installmentBase } = i;
-                              return { ...installmentBase, status: 'PENDENTE' };
+                              const installmentBase: Installment = { ...i };
+                              delete installmentBase.paymentDate;
+                              delete installmentBase.lastPaidValue;
+                              delete installmentBase.partialPaid;
+                              return { ...installmentBase, status: 'PENDENTE' as const };
                             });
-                            await onUpdateLoan(loan.id, { installments: reset, paidAmount: 0, status: 'ATIVO' });
-                            await onAddTransaction('ESTORNO', loan.paidAmount, `ESTORNO TOTAL: ${loan.customerName}`);
-                            showToast('Contrato resetado!', 'info');
+
+                            try {
+                              if (onUpdateLoanAndAddTransaction) {
+                                await onUpdateLoanAndAddTransaction(
+                                  loan.id,
+                                  { installments: reset, paidAmount: 0, status: 'ATIVO' },
+                                  'ESTORNO',
+                                  valorTotalEstorno,
+                                  `ESTORNO TOTAL: ${loan.customerName}`,
+                                );
+                              } else {
+                                await onUpdateLoan(loan.id, { installments: reset, paidAmount: 0, status: 'ATIVO' });
+                                await onAddTransaction('ESTORNO', valorTotalEstorno, `ESTORNO TOTAL: ${loan.customerName}`);
+                              }
+
+                              showToast('Contrato resetado!', 'info');
+                            } catch {
+                              showToast('Erro ao estornar contrato.', 'error');
+                            }
                           }}
                           className="p-1.5 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
                         >

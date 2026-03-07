@@ -9,7 +9,7 @@ import { db, auth } from "./firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import {
   collection, onSnapshot, query, orderBy, addDoc,
-  updateDoc, doc, setDoc, runTransaction, serverTimestamp, deleteDoc, getDocs
+  updateDoc, doc, setDoc, runTransaction, serverTimestamp, deleteDoc, getDocs, where, writeBatch
 } from "firebase/firestore";
 
 // Tipos e Componentes
@@ -25,6 +25,8 @@ interface Toast {
   message: string;
   type: 'success' | 'info' | 'error';
 }
+
+type MovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
 
 const App: React.FC = () => {
   // --- ESTADOS DE AUTENTICAÇÃO ---
@@ -111,22 +113,22 @@ const App: React.FC = () => {
     } catch (e) { showToast("Erro ao atualizar contrato", "error"); }
   };
 
-  const handleAddTransaction = async (type: string, amount: number, description: string) => {
+  const handleAddTransaction = async (type: MovementType, amount: number, description: string) => {
+    const valorNum = Number(amount);
+    const tipo = String(type || '').toUpperCase() as MovementType;
+    const motivo = String(description || '').trim();
+
+    if (!Number.isFinite(valorNum) || valorNum <= 0) {
+      showToast("Valor invalido para movimentacao", "error");
+      throw new Error('VALOR_INVALIDO');
+    }
+
+    if (!motivo) {
+      showToast("Informe um motivo para a movimentacao", "error");
+      throw new Error('MOTIVO_OBRIGATORIO');
+    }
+
     try {
-      const valorNum = Number(amount);
-      const tipo = type.toUpperCase();
-      const motivo = description.trim();
-
-      if (!Number.isFinite(valorNum) || valorNum <= 0) {
-        showToast("Valor invalido para movimentacao", "error");
-        return;
-      }
-
-      if (!motivo) {
-        showToast("Informe um motivo para a movimentacao", "error");
-        return;
-      }
-
       await runTransaction(db, async (tx) => {
         const caixaRef = doc(db, 'settings', 'caixa');
         const movimentoRef = doc(collection(db, 'cashMovement'));
@@ -148,6 +150,63 @@ const App: React.FC = () => {
       showToast('Caixa atualizado!', 'success');
     } catch (e) {
       showToast("Erro no processamento do caixa", "error");
+      throw e;
+    }
+  };
+
+  const handleUpdateLoanAndAddTransaction = async (
+    loanId: string,
+    newData: Partial<Loan>,
+    type: MovementType,
+    amount: number,
+    description: string,
+  ) => {
+    const valorNum = Number(amount);
+    const tipo = String(type || '').toUpperCase() as MovementType;
+    const motivo = String(description || '').trim();
+
+    if (!loanId) {
+      showToast('Contrato invalido para estorno', 'error');
+      throw new Error('LOAN_ID_INVALIDO');
+    }
+
+    if (!Number.isFinite(valorNum) || valorNum <= 0) {
+      showToast("Valor invalido para movimentacao", "error");
+      throw new Error('VALOR_INVALIDO');
+    }
+
+    if (!motivo) {
+      showToast("Informe um motivo para a movimentacao", "error");
+      throw new Error('MOTIVO_OBRIGATORIO');
+    }
+
+    try {
+      await runTransaction(db, async (tx) => {
+        const loanRef = doc(db, 'loans', loanId);
+        const caixaRef = doc(db, 'settings', 'caixa');
+        const movimentoRef = doc(collection(db, 'cashMovement'));
+
+        const loanSnap = await tx.get(loanRef);
+        if (!loanSnap.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
+
+        const caixaSnap = await tx.get(caixaRef);
+        const saldoAtual = caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
+        const isEntrada = tipo === 'APORTE' || tipo === 'PAGAMENTO' || tipo === 'ENTRADA';
+        const novoSaldo = Number((saldoAtual + (isEntrada ? valorNum : -valorNum)).toFixed(2));
+
+        tx.update(loanRef, newData);
+        tx.set(movimentoRef, {
+          type: tipo,
+          amount: valorNum,
+          description: motivo.toUpperCase(),
+          date: new Date().toISOString(),
+          loanId,
+        });
+        tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
+      });
+    } catch (e) {
+      showToast('Erro ao estornar parcela', 'error');
+      throw e;
     }
   };
 
@@ -194,10 +253,24 @@ const App: React.FC = () => {
   };
 
   const handleDeleteCustomer = async (id: string) => {
-    if (!window.confirm("Isso excluira apenas o cadastro do cliente. Confirma?")) return;
+    if (!window.confirm("Isso excluira o cliente e todos os contratos dele. Confirma?")) return;
     try {
+      const loansSnap = await getDocs(query(collection(db, "loans"), where("customerId", "==", id)));
+      const loanDocs = loansSnap.docs;
+
+      const MAX_BATCH_SIZE = 450;
+      let index = 0;
+
+      while (index < loanDocs.length) {
+        const batch = writeBatch(db);
+        const slice = loanDocs.slice(index, index + MAX_BATCH_SIZE);
+        slice.forEach((loanDoc) => batch.delete(doc(db, "loans", loanDoc.id)));
+        await batch.commit();
+        index += MAX_BATCH_SIZE;
+      }
+
       await deleteDoc(doc(db, "clientes", id));
-      showToast('Cliente removido', 'info');
+      showToast(`Cliente removido com ${loanDocs.length} contrato(s)`, 'info');
     } catch (e) { showToast('Erro ao remover cliente', 'error'); }
   };
 
@@ -353,7 +426,7 @@ const App: React.FC = () => {
             {currentView === 'REPORTS' && (
               <Reports
                 loans={loans} cashMovements={transactions}
-                caixa={caixa} onAddTransaction={handleAddTransaction} onUpdateLoan={handleUpdateLoan} onRecalculateCash={handleRecalculateCash} showToast={showToast}
+                caixa={caixa} onAddTransaction={handleAddTransaction} onUpdateLoan={handleUpdateLoan} onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction} onRecalculateCash={handleRecalculateCash} showToast={showToast}
               />
             )}
         </div>
@@ -373,5 +446,7 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+
 
 
