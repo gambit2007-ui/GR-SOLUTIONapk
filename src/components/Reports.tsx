@@ -75,6 +75,18 @@ const Reports: React.FC<ReportsProps> = ({
     }, { totalRecebido: 0, totalAReceber: 0, totalEmprestado: 0, valorEmRua: 0 });
   }, [loans, cashMovements]);
 
+  const cashTotals = useMemo(() => {
+    return (cashMovements || []).reduce((acc, movement) => {
+      const type = String(movement.type || '').toUpperCase();
+      const amount = Math.abs(Number(movement.amount || movement.value || 0));
+      if (!Number.isFinite(amount)) return acc;
+
+      if (type === 'APORTE') acc.totalAportes += amount;
+      if (type === 'RETIRADA' || type === 'SAIDA') acc.totalRetiradas += amount;
+      return acc;
+    }, { totalAportes: 0, totalRetiradas: 0 });
+  }, [cashMovements]);
+
   const isLoanLate = useCallback((loan: Loan) => {
     const saldo = Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0);
     if (saldo <= 0.1) return false;
@@ -238,11 +250,13 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </div>
 
-        <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           <StatCard title="A Receber Total" value={stats.totalAReceber} color="text-red-500" icon={<History size={20}/>} desc="Inclui juros previstos" />
           <StatCard title="Valor na Rua" value={stats.valorEmRua} color="text-orange-400" icon={<ArrowUpRightIcon size={20}/>} desc="Capital puro pendente" />
           <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-400" icon={<ArrowDownLeft size={20}/>} desc="Historico de saidas" />
           <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle size={20}/>} desc="Historico de entradas" />
+          <StatCard title="Total de Aportes" value={cashTotals.totalAportes} color="text-emerald-400" icon={<ArrowDownLeft size={20}/>} desc="Somente movimentacoes APORTE" />
+          <StatCard title="Total de Retiradas" value={cashTotals.totalRetiradas} color="text-rose-400" icon={<ArrowUpRight size={20}/>} desc="Movimentacoes RETIRADA/SAIDA" />
         </div>
       </div>
 
@@ -408,6 +422,7 @@ const StatCard = ({ title, value, color, icon, desc }: any) => (
 );
 
 export default Reports;
+
 
 
 
