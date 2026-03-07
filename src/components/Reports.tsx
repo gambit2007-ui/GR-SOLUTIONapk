@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useCallback } from 'react';
 import {
-  Wallet, CheckCircle, History, ArrowUpRight, ChevronDown, 
-  RotateCcw, Search, ArrowDownLeft, ArrowUpRight as ArrowUpRightIcon
+  Wallet, CheckCircle, History, ArrowUpRight, ChevronDown,
+  RotateCcw, ArrowDownLeft, ArrowUpRight as ArrowUpRightIcon
 } from 'lucide-react';
 import { Loan, Installment, CashMovement } from '../types';
 
@@ -11,12 +11,12 @@ interface ReportsProps {
   loans: Loan[];
   cashMovements: CashMovement[];
   caixa: number;
-  onAddTransaction: (type: MovementType, amount: number, description: string) => void;
+  onAddTransaction: (type: MovementType, amount: number, description: string) => Promise<void>;
   onUpdateLoan: (loanId: string, newData: any) => Promise<void>;
   showToast: (message: string, type: 'success' | 'info' | 'error') => void;
 }
 
-const JUROS_DIA = 0.015; // 1,5% ao dia
+const JUROS_DIA = 0.015;
 
 const parseISODate = (iso?: string) => {
   if (!iso) return null;
@@ -28,6 +28,7 @@ const parseISODate = (iso?: string) => {
 
 const Reports: React.FC<ReportsProps> = ({
   loans = [],
+  cashMovements = [],
   caixa = 0,
   onAddTransaction,
   onUpdateLoan,
@@ -37,6 +38,11 @@ const Reports: React.FC<ReportsProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedLoan, setExpandedLoan] = useState<string | null>(null);
   const [actionLock, setActionLock] = useState<string | null>(null);
+
+  const [cashActionType, setCashActionType] = useState<'APORTE' | 'RETIRADA' | null>(null);
+  const [cashValue, setCashValue] = useState('');
+  const [cashReason, setCashReason] = useState('');
+  const [cashSubmitting, setCashSubmitting] = useState(false);
 
   const getValue = (inst: any) => Number(inst.amount || inst.value || inst.baseValue || 0);
 
@@ -64,7 +70,7 @@ const Reports: React.FC<ReportsProps> = ({
       acc.valorEmRua += Math.max(0, emprestado - pago);
       return acc;
     }, { totalRecebido: 0, totalAReceber: 0, totalEmprestado: 0, valorEmRua: 0 });
-  }, [loans]);
+  }, [loans, cashMovements]);
 
   const isLoanLate = useCallback((loan: Loan) => {
     const saldo = Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0);
@@ -90,44 +96,93 @@ const Reports: React.FC<ReportsProps> = ({
     });
   }, [loans, filterStatus, searchTerm, isLoanLate]);
 
+  const closeCashModal = () => {
+    setCashActionType(null);
+    setCashValue('');
+    setCashReason('');
+    setCashSubmitting(false);
+  };
+
+  const handleCashAction = async () => {
+    if (!cashActionType) return;
+
+    const value = Number(String(cashValue).replace(',', '.'));
+    const reason = cashReason.trim();
+
+    if (!Number.isFinite(value) || value <= 0) {
+      showToast('Informe um valor valido maior que zero.', 'error');
+      return;
+    }
+
+    if (!reason) {
+      showToast('Informe o motivo da movimentacao.', 'error');
+      return;
+    }
+
+    try {
+      setCashSubmitting(true);
+      await onAddTransaction(cashActionType, value, `${cashActionType}: ${reason}`);
+      closeCashModal();
+    } catch {
+      setCashSubmitting(false);
+      showToast('Nao foi possivel registrar a movimentacao.', 'error');
+    }
+  };
+
   const handlePayInstallment = async (loan: Loan, idx: number) => {
     if (actionLock) return;
     setActionLock(`${loan.id}-${idx}`);
+
     try {
       const installments = [...loan.installments];
       const inst = installments[idx];
       const valorComJuros = getValueWithJuros(inst);
+
       if (!window.confirm(`Receber R$ ${valorComJuros.toFixed(2)}?`)) return;
-      installments[idx] = { ...inst, status: 'PAGO', lastPaidValue: valorComJuros, paymentDate: new Date().toISOString() };
+
+      installments[idx] = {
+        ...inst,
+        status: 'PAGO',
+        lastPaidValue: valorComJuros,
+        paymentDate: new Date().toISOString(),
+      };
+
       const novoPago = Number(((loan.paidAmount || 0) + valorComJuros).toFixed(2));
       const saldoRestante = Number(loan.totalToReturn || 0) - novoPago;
-      const novoStatus = saldoRestante <= 0.5 ? 'FINALIZADO' : (loan.status || 'EM_CURSO');
+      const novoStatus = saldoRestante <= 0.5 ? 'QUITADO' : 'ATIVO';
+
       await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: novoStatus });
-      onAddTransaction('PAGAMENTO', valorComJuros, `PAG: ${loan.customerName} (P${inst.number})`);
+      await onAddTransaction('PAGAMENTO', valorComJuros, `PAG: ${loan.customerName} (P${inst.number})`);
       showToast('Pagamento registrado!', 'success');
-    } catch (e) { showToast('Erro ao processar.', 'error'); } 
-    finally { setActionLock(null); }
+    } catch {
+      showToast('Erro ao processar.', 'error');
+    } finally {
+      setActionLock(null);
+    }
   };
 
   const handleRefundInstallment = async (loan: Loan, idx: number) => {
     const inst = loan.installments[idx];
     const valorParaEstornar = inst.lastPaidValue || getValue(inst);
+
     if (!window.confirm(`Estornar pagamento de R$ ${valorParaEstornar.toFixed(2)}?`)) return;
+
     try {
       const installments = [...loan.installments];
       installments[idx] = { ...inst, status: 'PENDENTE', paymentDate: undefined, lastPaidValue: undefined };
       const novoPago = Number((loan.paidAmount - valorParaEstornar).toFixed(2));
-      await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: 'EM_CURSO' });
-      onAddTransaction('ESTORNO', valorParaEstornar, `ESTORNO: ${loan.customerName} (P${inst.number})`);
+
+      await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: 'ATIVO' });
+      await onAddTransaction('ESTORNO', valorParaEstornar, `ESTORNO: ${loan.customerName} (P${inst.number})`);
       showToast('Estorno realizado!', 'info');
-    } catch (e) { showToast('Erro ao estornar.', 'error'); }
+    } catch {
+      showToast('Erro ao estornar.', 'error');
+    }
   };
 
   return (
     <div className="space-y-6 pb-20 max-w-[1400px] mx-auto">
-      {/* HEADER DE INDICADORES */}
       <div className="flex flex-col xl:flex-row gap-4">
-        {/* CARD CAIXA GERAL COM BOTÕES EMBUTIDOS */}
         <div className="xl:w-1/3 p-8 rounded-[2.5rem] bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 shadow-2xl relative overflow-hidden group flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-3 mb-4">
@@ -139,23 +194,24 @@ const Reports: React.FC<ReportsProps> = ({
             </h2>
           </div>
 
-          {/* BOTÕES DE AÇÃO DO CAIXA */}
-          <div className="flex gap-2">
-            <button 
+          <div className="flex gap-2 relative z-10">
+            <button
               onClick={() => {
-                const val = prompt("Valor do APORTE:");
-                if(val) onAddTransaction('APORTE', Number(val), "Aporte via Caixa");
+                setCashActionType('APORTE');
+                setCashValue('');
+                setCashReason('');
               }}
-              className="flex-1 py-3 rounded-xl bg-emerald-500 text-black text-[10px] font-black uppercase hover:bg-emerald-400 transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-xl bg-emerald-500 text-black text-[10px] font-black uppercase hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-lg"
             >
               <ArrowDownLeft size={14} /> Aporte
             </button>
-            <button 
+            <button
               onClick={() => {
-                const val = prompt("Valor da RETIRADA:");
-                if(val) onAddTransaction('RETIRADA', Number(val), "Retirada via Caixa");
+                setCashActionType('RETIRADA');
+                setCashValue('');
+                setCashReason('');
               }}
-              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2"
+              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-lg"
             >
               <ArrowUpRight size={14} /> Retirada
             </button>
@@ -165,13 +221,12 @@ const Reports: React.FC<ReportsProps> = ({
         <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard title="A Receber Total" value={stats.totalAReceber} color="text-red-500" icon={<History size={20}/>} desc="Inclui juros previstos" />
           <StatCard title="Valor na Rua" value={stats.valorEmRua} color="text-orange-400" icon={<ArrowUpRightIcon size={20}/>} desc="Capital puro pendente" />
-          <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-400" icon={<ArrowDownLeft size={20}/>} desc="Histórico de saídas" />
-          <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle size={20}/>} desc="Histórico de entradas" />
+          <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-400" icon={<ArrowDownLeft size={20}/>} desc="Historico de saidas" />
+          <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle size={20}/>} desc="Historico de entradas" />
         </div>
       </div>
 
       <div className="bg-[#0a0a0a] border border-white/5 rounded-[2.5rem] p-8 shadow-xl">
-        {/* BUSCA E FILTROS */}
         <div className="flex flex-col md:flex-row gap-4 mb-8">
           <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="PESQUISAR CLIENTE..." className="flex-1 bg-black border border-white/10 rounded-2xl px-6 py-4 text-[11px] text-white outline-none font-bold uppercase tracking-wider" />
           <div className="flex bg-black p-1.5 rounded-2xl border border-white/5">
@@ -183,7 +238,6 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </div>
 
-        {/* LISTA DE CLIENTES */}
         <div className="grid grid-cols-1 gap-4">
           {filteredLoans.map(loan => (
             <div key={loan.id} className="group border border-white/5 rounded-3xl bg-white/[0.01] hover:bg-white/[0.03] transition-all overflow-hidden">
@@ -195,23 +249,14 @@ const Reports: React.FC<ReportsProps> = ({
                   <div>
                     <div className="flex items-center gap-3">
                       <h4 className="text-sm font-black text-white uppercase">{loan.customerName}</h4>
-                      <button 
-                        onClick={() => {
-                          const msg = encodeURIComponent(`Olá ${loan.customerName}, gostaria de tratar sobre seu contrato com a GR-SOLUTION. Sua parcela está pendente.`);
-                          window.open(`https://wa.me/?text=${msg}`, '_blank');
-                        }}
-                        className="p-1.5 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"
-                      >
-                        <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>
-                      </button>
 
                       {loan.paidAmount > 0 && (
-                        <button 
+                        <button
                           onClick={async () => {
-                            if (!window.confirm("ESTORNAR TODOS os pagamentos deste cliente?")) return;
-                            const reset = loan.installments.map(i => ({...i, status: 'PENDENTE', paymentDate: undefined, lastPaidValue: undefined}));
-                            await onUpdateLoan(loan.id, { installments: reset, paidAmount: 0, status: 'EM_CURSO' });
-                            onAddTransaction('ESTORNO', loan.paidAmount, `ESTORNO TOTAL: ${loan.customerName}`);
+                            if (!window.confirm('ESTORNAR TODOS os pagamentos deste cliente?')) return;
+                            const reset = loan.installments.map(i => ({ ...i, status: 'PENDENTE', paymentDate: undefined, lastPaidValue: undefined }));
+                            await onUpdateLoan(loan.id, { installments: reset, paidAmount: 0, status: 'ATIVO' });
+                            await onAddTransaction('ESTORNO', loan.paidAmount, `ESTORNO TOTAL: ${loan.customerName}`);
                             showToast('Contrato resetado!', 'info');
                           }}
                           className="p-1.5 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
@@ -264,6 +309,54 @@ const Reports: React.FC<ReportsProps> = ({
           ))}
         </div>
       </div>
+
+      {cashActionType && (
+        <div className="fixed inset-0 z-[210] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md rounded-3xl border border-zinc-800 bg-[#0b0b0b] p-6 space-y-5 shadow-2xl">
+            <h3 className="text-sm font-black uppercase tracking-widest text-white">
+              {cashActionType === 'APORTE' ? 'Registrar Aporte' : 'Registrar Retirada'}
+            </h3>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Valor (R$)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={cashValue}
+                onChange={(e) => setCashValue(e.target.value)}
+                className="w-full px-4 py-3 rounded-xl bg-black border border-zinc-800 text-white outline-none focus:border-[#BF953F]"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Motivo</label>
+              <textarea
+                value={cashReason}
+                onChange={(e) => setCashReason(e.target.value)}
+                rows={3}
+                className="w-full px-4 py-3 rounded-xl bg-black border border-zinc-800 text-white outline-none focus:border-[#BF953F] resize-none"
+                placeholder="Descreva o motivo"
+              />
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={closeCashModal}
+                className="px-4 py-2 rounded-xl border border-zinc-700 text-zinc-300 text-[10px] font-black uppercase"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={cashSubmitting}
+                onClick={handleCashAction}
+                className="px-5 py-2 rounded-xl gold-gradient text-black text-[10px] font-black uppercase disabled:opacity-50"
+              >
+                Confirmar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

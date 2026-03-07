@@ -9,7 +9,7 @@ import { db, auth } from "./firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import {
   collection, onSnapshot, query, orderBy, addDoc,
-  updateDoc, doc, setDoc, writeBatch, serverTimestamp, deleteDoc
+  updateDoc, doc, setDoc, runTransaction, serverTimestamp, deleteDoc
 } from "firebase/firestore";
 
 // Tipos e Componentes
@@ -114,17 +114,41 @@ const App: React.FC = () => {
   const handleAddTransaction = async (type: string, amount: number, description: string) => {
     try {
       const valorNum = Number(amount);
-      await addDoc(collection(db, 'cashMovement'), {
-        type: type.toUpperCase(),
-        amount: valorNum,
-        description: description.toUpperCase(),
-        date: new Date().toISOString()
+      const tipo = type.toUpperCase();
+      const motivo = description.trim();
+
+      if (!Number.isFinite(valorNum) || valorNum <= 0) {
+        showToast("Valor invalido para movimentacao", "error");
+        return;
+      }
+
+      if (!motivo) {
+        showToast("Informe um motivo para a movimentacao", "error");
+        return;
+      }
+
+      await runTransaction(db, async (tx) => {
+        const caixaRef = doc(db, 'settings', 'caixa');
+        const movimentoRef = doc(collection(db, 'cashMovement'));
+        const caixaSnap = await tx.get(caixaRef);
+        const saldoAtual = caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
+        const isEntrada = tipo === 'APORTE' || tipo === 'PAGAMENTO' || tipo === 'ENTRADA';
+        const novoSaldo = Number((saldoAtual + (isEntrada ? valorNum : -valorNum)).toFixed(2));
+
+        tx.set(movimentoRef, {
+          type: tipo,
+          amount: valorNum,
+          description: motivo.toUpperCase(),
+          date: new Date().toISOString(),
+        });
+
+        tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
       });
-      
-      let novoSaldo = (type === 'APORTE' || type === 'PAGAMENTO') ? caixa + valorNum : caixa - valorNum;
-      await setDoc(doc(db, 'settings', 'caixa'), { value: novoSaldo, updatedAt: serverTimestamp() });
+
       showToast('Caixa atualizado!', 'success');
-    } catch (e) { showToast("Erro no processamento do caixa", "error"); }
+    } catch (e) {
+      showToast("Erro no processamento do caixa", "error");
+    }
   };
 
   const handleAddCustomer = async (c: Customer) => {
@@ -145,7 +169,7 @@ const App: React.FC = () => {
   };
 
   const handleDeleteCustomer = async (id: string) => {
-    if (!window.confirm("Isso excluirá o cliente e todos os seus registros permanentemente. Confirma?")) return;
+    if (!window.confirm("Isso excluira apenas o cadastro do cliente. Confirma?")) return;
     try {
       await deleteDoc(doc(db, "clientes", id));
       showToast('Cliente removido', 'info');
@@ -155,11 +179,32 @@ const App: React.FC = () => {
   const handleAddLoan = async (l: Loan) => {
     try {
       const { id, ...data } = l;
-      await setDoc(doc(db, "loans", l.id), { ...data, createdAt: serverTimestamp() });
-      await handleAddTransaction('RETIRADA', l.amount, `EMPRÉSTIMO: ${l.customerName}`);
+
+      await runTransaction(db, async (tx) => {
+        const loanRef = doc(db, "loans", l.id);
+        const caixaRef = doc(db, 'settings', 'caixa');
+        const movimentoRef = doc(collection(db, 'cashMovement'));
+
+        const caixaSnap = await tx.get(caixaRef);
+        const saldoAtual = caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
+        const novoSaldo = Number((saldoAtual - Number(l.amount || 0)).toFixed(2));
+
+        tx.set(loanRef, { ...data, createdAt: serverTimestamp() });
+        tx.set(movimentoRef, {
+          type: 'RETIRADA',
+          amount: Number(l.amount || 0),
+          description: `EMPRESTIMO: ${l.customerName}`,
+          date: new Date().toISOString(),
+          loanId: l.id,
+        });
+        tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
+      });
+
       setCurrentView('DASHBOARD');
       showToast('Contrato efetivado!');
-    } catch (e) { showToast('Erro ao salvar contrato', 'error'); }
+    } catch (e) {
+      showToast('Erro ao salvar contrato', 'error');
+    }
   };
 
   // --- COMPONENTES DE TELA ---
@@ -282,7 +327,7 @@ const App: React.FC = () => {
             {currentView === 'SIMULATION' && <SimulationTab customers={customers} />}
             {currentView === 'REPORTS' && (
               <Reports
-                loans={loans} cashMovements={transactions} customers={customers}
+                loans={loans} cashMovements={transactions}
                 caixa={caixa} onAddTransaction={handleAddTransaction} onUpdateLoan={handleUpdateLoan} showToast={showToast}
               />
             )}
@@ -303,3 +348,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+

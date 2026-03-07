@@ -12,9 +12,6 @@ import {
 
 } from 'lucide-react';
 
-import { collection, addDoc, doc, getDoc, setDoc } from 'firebase/firestore';
-
-import { db } from '../firebase';
 
 import { Customer, Loan, Installment } from '../types';
 
@@ -200,7 +197,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
 
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SyntheticEvent) => {
 
     e.preventDefault();
 
@@ -284,70 +281,19 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
     };
 
-
-
     try {
-
-      // 1. Atualiza o saldo do caixa (Settings)
-
-      const caixaRef = doc(db, 'settings', 'caixa');
-
-      const caixaSnap = await getDoc(caixaRef);
-
-      const saldoAtual = caixaSnap.exists() ? (caixaSnap.data().value || 0) : 0;
-
-      await setDoc(caixaRef, { value: saldoAtual - parseFloat(amount) }, { merge: true });
-
-
-
-      // 2. Registra a saída no movimento de caixa
-
-      await addDoc(collection(db, 'cashMovement'), {
-
-        type: 'RETIRADA',
-
-        amount: -Math.abs(parseFloat(amount)),
-
-        description: `Empréstimo: ${customer.name} (Contrato #${contractNumber})`,
-
-        date: new Date().toISOString(),
-
-        loanId: loanId
-
-      });
-
-
-
-      // 3. Salva o empréstimo no Firestore (via App.tsx)
-
       await onAddLoan(newLoan);
 
-
-
-      // 4. Gera o PDF do contrato
-
       if (generateContractPDF) {
-
         generateContractPDF(customer, newLoan);
-
       }
 
-
-
       setLastCreated({ customer, loan: newLoan });
-
       setIsSuccess(true);
-
       showToast?.("Contrato gerado com sucesso!", "success");
-
-
-
     } catch (error) {
-
       console.error("Erro ao efetivar:", error);
-
-      showToast?.("Erro técnico ao salvar no banco de dados.", "error");
-
+      showToast?.("Erro tecnico ao salvar no banco de dados.", "error");
     }
 
 };
@@ -555,3 +501,4 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
 
 export default LoanSection;
+
