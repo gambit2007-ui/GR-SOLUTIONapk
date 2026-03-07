@@ -78,11 +78,15 @@ const Reports: React.FC<ReportsProps> = ({
   const cashTotals = useMemo(() => {
     return (cashMovements || []).reduce((acc, movement) => {
       const type = String(movement.type || '').toUpperCase();
+      const description = String(movement.description || '').toUpperCase();
       const amount = Math.abs(Number(movement.amount || movement.value || 0));
       if (!Number.isFinite(amount)) return acc;
 
       if (type === 'APORTE') acc.totalAportes += amount;
-      if (type === 'RETIRADA' || type === 'SAIDA') acc.totalRetiradas += amount;
+      const isManualRetirada =
+        type === 'RETIRADA' &&
+        (description.startsWith('RETIRADA:') || description.includes('RETIRADA VIA CAIXA'));
+      if (isManualRetirada) acc.totalRetiradas += amount;
       return acc;
     }, { totalAportes: 0, totalRetiradas: 0 });
   }, [cashMovements]);
@@ -175,6 +179,75 @@ const Reports: React.FC<ReportsProps> = ({
       setActionLock(null);
     }
   };
+  const handlePartialPayInstallment = async (loan: Loan, idx: number) => {
+    if (actionLock) return;
+    setActionLock(`${loan.id}-${idx}-partial`);
+
+    try {
+      const installments = [...loan.installments];
+      const inst = installments[idx];
+      const valorComJuros = getValueWithJuros(inst);
+      const parcialPagoAtual = Number(inst.partialPaid || 0);
+      const valorRestante = Number((valorComJuros - parcialPagoAtual).toFixed(2));
+
+      if (valorRestante <= 0) {
+        showToast('Parcela ja quitada.', 'info');
+        return;
+      }
+
+      const parcialInput = window.prompt(`Valor parcial (restante R$ ${valorRestante.toFixed(2)}):`);
+      if (!parcialInput) return;
+
+      const valorParcial = Number(String(parcialInput).replace(',', '.'));
+      if (!Number.isFinite(valorParcial) || valorParcial <= 0) {
+        showToast('Informe um valor parcial valido.', 'error');
+        return;
+      }
+
+      if (valorParcial > valorRestante + 0.01) {
+        showToast('Valor parcial maior que o restante da parcela.', 'error');
+        return;
+      }
+
+      const novoParcialPago = Number((parcialPagoAtual + valorParcial).toFixed(2));
+      const quitada = novoParcialPago >= valorComJuros - 0.01;
+
+      if (quitada) {
+        const { partialPaid, ...baseInstallment } = inst;
+        installments[idx] = {
+          ...baseInstallment,
+          status: 'PAGO',
+          lastPaidValue: valorComJuros,
+          paymentDate: new Date().toISOString(),
+        };
+      } else {
+        const { paymentDate, lastPaidValue, ...baseInstallment } = inst;
+        installments[idx] = {
+          ...baseInstallment,
+          status: 'PENDENTE',
+          partialPaid: novoParcialPago,
+        };
+      }
+
+      const novoPago = Number(((loan.paidAmount || 0) + valorParcial).toFixed(2));
+      const saldoRestante = Number(loan.totalToReturn || 0) - novoPago;
+      const novoStatus = saldoRestante <= 0.5 ? 'QUITADO' : 'ATIVO';
+
+      await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: novoStatus });
+      await onAddTransaction('PAGAMENTO', valorParcial, `PAG PARCIAL: ${loan.customerName} (P${inst.number})`);
+
+      if (quitada) {
+        showToast('Parcela quitada com pagamento parcial final!', 'success');
+      } else {
+        const restante = Number((valorComJuros - novoParcialPago).toFixed(2));
+        showToast(`Pagamento parcial registrado. Restante: R$ ${restante.toFixed(2)}`, 'info');
+      }
+    } catch {
+      showToast('Erro ao registrar pagamento parcial.', 'error');
+    } finally {
+      setActionLock(null);
+    }
+  };
 
   const handleRefundInstallment = async (loan: Loan, idx: number) => {
     const inst = loan.installments[idx];
@@ -184,7 +257,8 @@ const Reports: React.FC<ReportsProps> = ({
 
     try {
       const installments = [...loan.installments];
-      installments[idx] = { ...inst, status: 'PENDENTE', paymentDate: undefined, lastPaidValue: undefined };
+      const { paymentDate, lastPaidValue, ...installmentBase } = inst;
+      installments[idx] = { ...installmentBase, status: 'PENDENTE' };
       const novoPago = Number((loan.paidAmount - valorParaEstornar).toFixed(2));
 
       await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: 'ATIVO' });
@@ -300,7 +374,10 @@ const Reports: React.FC<ReportsProps> = ({
                         <button
                           onClick={async () => {
                             if (!window.confirm('ESTORNAR TODOS os pagamentos deste cliente?')) return;
-                            const reset = loan.installments.map(i => ({ ...i, status: 'PENDENTE', paymentDate: undefined, lastPaidValue: undefined }));
+                            const reset = loan.installments.map(i => {
+                              const { paymentDate, lastPaidValue, ...installmentBase } = i;
+                              return { ...installmentBase, status: 'PENDENTE' };
+                            });
                             await onUpdateLoan(loan.id, { installments: reset, paidAmount: 0, status: 'ATIVO' });
                             await onAddTransaction('ESTORNO', loan.paidAmount, `ESTORNO TOTAL: ${loan.customerName}`);
                             showToast('Contrato resetado!', 'info');
@@ -325,6 +402,8 @@ const Reports: React.FC<ReportsProps> = ({
                   {loan.installments.map((inst, idx) => {
                     const valorAtualizado = getValueWithJuros(inst);
                     const temJuros = valorAtualizado > getValue(inst) && inst.status !== 'PAGO';
+                    const parcialPago = Number(inst.partialPaid || 0);
+                    const restanteParcial = Math.max(0, Number((valorAtualizado - parcialPago).toFixed(2))); 
                     return (
                       <div key={idx} className={`p-5 rounded-2xl border transition-all ${inst.status === 'PAGO' ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-white/5 bg-white/[0.02]'}`}>
                         <div className="flex justify-between items-center mb-2">
@@ -336,7 +415,17 @@ const Reports: React.FC<ReportsProps> = ({
                         </p>
                         <div className="mt-4 space-y-2">
                           {inst.status !== 'PAGO' ? (
-                            <button onClick={() => handlePayInstallment(loan, idx)} className="w-full py-3 bg-white text-black text-[10px] font-black rounded-xl hover:bg-emerald-500 transition-all uppercase">Receber Agora</button>
+                            <>
+                              {parcialPago > 0 && (
+                                <div className="text-[8px] font-black text-amber-500 uppercase text-center">
+                                  Pago parcial: R$ {parcialPago.toFixed(2)} | Restante: R$ {restanteParcial.toFixed(2)}
+                                </div>
+                              )}
+                              <button onClick={() => handlePayInstallment(loan, idx)} className="w-full py-3 bg-white text-black text-[10px] font-black rounded-xl hover:bg-emerald-500 transition-all uppercase">Receber Agora</button>
+                              <button onClick={() => handlePartialPayInstallment(loan, idx)} className="w-full py-2 bg-amber-500/10 text-amber-400 text-[9px] font-black rounded-lg hover:bg-amber-500 hover:text-black transition-all uppercase">
+                                Pagamento Parcial
+                              </button>
+                            </>
                           ) : (
                             <>
                               <div className="text-[8px] font-black text-emerald-600 uppercase flex items-center gap-2 justify-center"><CheckCircle size={10}/> Pago em {new Date(inst.paymentDate!).toLocaleDateString()}</div>
@@ -422,6 +511,11 @@ const StatCard = ({ title, value, color, icon, desc }: any) => (
 );
 
 export default Reports;
+
+
+
+
+
 
 
 
