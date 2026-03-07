@@ -186,6 +186,12 @@ const Reports: React.FC<ReportsProps> = ({
     try {
       const installments = [...loan.installments];
       const inst = installments[idx];
+
+      if (!inst || inst.status === 'PAGO') {
+        showToast('Parcela ja quitada.', 'info');
+        return;
+      }
+
       const valorComJuros = getValueWithJuros(inst);
       const parcialPagoAtual = Number(inst.partialPaid || 0);
       const valorRestante = Number((valorComJuros - parcialPagoAtual).toFixed(2));
@@ -204,42 +210,83 @@ const Reports: React.FC<ReportsProps> = ({
         return;
       }
 
-      if (valorParcial > valorRestante + 0.01) {
-        showToast('Valor parcial maior que o restante da parcela.', 'error');
+      let valorParaDistribuir = Number(valorParcial.toFixed(2));
+      let valorAplicado = 0;
+      const parcelasAfetadas: number[] = [];
+      const nowIso = new Date().toISOString();
+
+      for (let i = idx; i < installments.length && valorParaDistribuir > 0.009; i += 1) {
+        const parcelaAtual = installments[i];
+        if (!parcelaAtual || parcelaAtual.status === 'PAGO') continue;
+
+        const valorAtualComJuros = getValueWithJuros(parcelaAtual);
+        const parcialAtual = Number(parcelaAtual.partialPaid || 0);
+        const restanteAtual = Number((valorAtualComJuros - parcialAtual).toFixed(2));
+        if (restanteAtual <= 0) continue;
+
+        const valorNestePagamento = Math.min(valorParaDistribuir, restanteAtual);
+        const novoParcialPago = Number((parcialAtual + valorNestePagamento).toFixed(2));
+        const quitada = novoParcialPago >= valorAtualComJuros - 0.01;
+
+        parcelasAfetadas.push(parcelaAtual.number);
+
+        if (quitada) {
+          const { partialPaid, ...baseInstallment } = parcelaAtual;
+          installments[i] = {
+            ...baseInstallment,
+            status: 'PAGO',
+            lastPaidValue: valorAtualComJuros,
+            paymentDate: nowIso,
+          };
+        } else {
+          const { paymentDate, lastPaidValue, ...baseInstallment } = parcelaAtual;
+          installments[i] = {
+            ...baseInstallment,
+            status: parcelaAtual.status === 'ATRASADO' ? 'ATRASADO' : 'PENDENTE',
+            partialPaid: novoParcialPago,
+          };
+        }
+
+        valorAplicado = Number((valorAplicado + valorNestePagamento).toFixed(2));
+        valorParaDistribuir = Number((valorParaDistribuir - valorNestePagamento).toFixed(2));
+      }
+
+      if (valorAplicado <= 0) {
+        showToast('Nao foi possivel aplicar o pagamento parcial.', 'error');
         return;
       }
 
-      const novoParcialPago = Number((parcialPagoAtual + valorParcial).toFixed(2));
-      const quitada = novoParcialPago >= valorComJuros - 0.01;
-
-      if (quitada) {
-        const { partialPaid, ...baseInstallment } = inst;
-        installments[idx] = {
-          ...baseInstallment,
-          status: 'PAGO',
-          lastPaidValue: valorComJuros,
-          paymentDate: new Date().toISOString(),
-        };
-      } else {
-        const { paymentDate, lastPaidValue, ...baseInstallment } = inst;
-        installments[idx] = {
-          ...baseInstallment,
-          status: 'PENDENTE',
-          partialPaid: novoParcialPago,
-        };
-      }
-
-      const novoPago = Number(((loan.paidAmount || 0) + valorParcial).toFixed(2));
+      const novoPago = Number(((loan.paidAmount || 0) + valorAplicado).toFixed(2));
       const saldoRestante = Number(loan.totalToReturn || 0) - novoPago;
       const novoStatus = saldoRestante <= 0.5 ? 'QUITADO' : 'ATIVO';
 
       await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: novoStatus });
-      await onAddTransaction('PAGAMENTO', valorParcial, `PAG PARCIAL: ${loan.customerName} (P${inst.number})`);
 
-      if (quitada) {
+      const primeiraParcela = parcelasAfetadas[0];
+      const ultimaParcela = parcelasAfetadas[parcelasAfetadas.length - 1];
+      const faixaParcelas = parcelasAfetadas.length > 1
+        ? `P${primeiraParcela} a P${ultimaParcela}`
+        : `P${primeiraParcela}`;
+
+      await onAddTransaction('PAGAMENTO', valorAplicado, `PAG PARCIAL: ${loan.customerName} (${faixaParcelas})`);
+
+      if (valorParaDistribuir > 0.01) {
+        showToast(`Pagamento aplicado. Excedente de R$ ${valorParaDistribuir.toFixed(2)} ignorado por falta de saldo.`, 'info');
+        return;
+      }
+
+      if (parcelasAfetadas.length > 1) {
+        showToast(`Pagamento parcial distribuido ate ${faixaParcelas}.`, 'success');
+        return;
+      }
+
+      const parcelaAtualizada = installments[idx];
+      if (parcelaAtualizada.status === 'PAGO') {
         showToast('Parcela quitada com pagamento parcial final!', 'success');
       } else {
-        const restante = Number((valorComJuros - novoParcialPago).toFixed(2));
+        const valorAtualizado = getValueWithJuros(parcelaAtualizada);
+        const parcialAtualizado = Number(parcelaAtualizada.partialPaid || 0);
+        const restante = Math.max(0, Number((valorAtualizado - parcialAtualizado).toFixed(2)));
         showToast(`Pagamento parcial registrado. Restante: R$ ${restante.toFixed(2)}`, 'info');
       }
     } catch {
