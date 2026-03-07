@@ -155,23 +155,36 @@ const Reports: React.FC<ReportsProps> = ({
     try {
       const installments = [...loan.installments];
       const inst = installments[idx];
+      if (!inst || inst.status === 'PAGO') {
+        showToast('Parcela ja quitada.', 'info');
+        return;
+      }
+
       const valorComJuros = getValueWithJuros(inst);
+      const parcialPagoAtual = Number(inst.partialPaid || 0);
+      const valorRestante = Math.max(0, Number((valorComJuros - parcialPagoAtual).toFixed(2)));
 
-      if (!window.confirm(`Receber R$ ${valorComJuros.toFixed(2)}?`)) return;
+      if (valorRestante <= 0.01) {
+        showToast('Parcela ja quitada.', 'info');
+        return;
+      }
 
+      if (!window.confirm(`Receber R$ ${valorRestante.toFixed(2)}?`)) return;
+
+      const { partialPaid, ...baseInstallment } = inst;
       installments[idx] = {
-        ...inst,
+        ...baseInstallment,
         status: 'PAGO',
         lastPaidValue: valorComJuros,
         paymentDate: new Date().toISOString(),
       };
 
-      const novoPago = Number(((loan.paidAmount || 0) + valorComJuros).toFixed(2));
+      const novoPago = Number(((loan.paidAmount || 0) + valorRestante).toFixed(2));
       const saldoRestante = Number(loan.totalToReturn || 0) - novoPago;
       const novoStatus = saldoRestante <= 0.5 ? 'QUITADO' : 'ATIVO';
 
       await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: novoStatus });
-      await onAddTransaction('PAGAMENTO', valorComJuros, `PAG: ${loan.customerName} (P${inst.number})`);
+      await onAddTransaction('PAGAMENTO', valorRestante, `PAG: ${loan.customerName} (P${inst.number})`);
       showToast('Pagamento registrado!', 'success');
     } catch {
       showToast('Erro ao processar.', 'error');
