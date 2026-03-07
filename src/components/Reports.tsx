@@ -13,6 +13,7 @@ interface ReportsProps {
   caixa: number;
   onAddTransaction: (type: MovementType, amount: number, description: string) => Promise<void>;
   onUpdateLoan: (loanId: string, newData: any) => Promise<void>;
+  onRecalculateCash: () => Promise<void>;
   showToast: (message: string, type: 'success' | 'info' | 'error') => void;
 }
 
@@ -32,6 +33,7 @@ const Reports: React.FC<ReportsProps> = ({
   caixa = 0,
   onAddTransaction,
   onUpdateLoan,
+  onRecalculateCash,
   showToast,
 }) => {
   const [filterStatus, setFilterStatus] = useState<'ATIVOS' | 'ATRASADOS' | 'FINALIZADOS'>('ATIVOS');
@@ -43,6 +45,7 @@ const Reports: React.FC<ReportsProps> = ({
   const [cashValue, setCashValue] = useState('');
   const [cashReason, setCashReason] = useState('');
   const [cashSubmitting, setCashSubmitting] = useState(false);
+  const [recalcLoading, setRecalcLoading] = useState(false);
 
   const getValue = (inst: any) => Number(inst.amount || inst.value || inst.baseValue || 0);
 
@@ -194,26 +197,43 @@ const Reports: React.FC<ReportsProps> = ({
             </h2>
           </div>
 
-          <div className="flex gap-2 relative z-10">
+          <div className="space-y-2 relative z-10">
+            <div className="flex gap-2">
+              <button
+                onClick={() => {
+                  setCashActionType('APORTE');
+                  setCashValue('');
+                  setCashReason('');
+                }}
+                className="flex-1 py-3 rounded-xl bg-emerald-500 text-black text-[10px] font-black uppercase hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-lg"
+              >
+                <ArrowDownLeft size={14} /> Aporte
+              </button>
+              <button
+                onClick={() => {
+                  setCashActionType('RETIRADA');
+                  setCashValue('');
+                  setCashReason('');
+                }}
+                className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-lg"
+              >
+                <ArrowUpRight size={14} /> Retirada
+              </button>
+            </div>
             <button
-              onClick={() => {
-                setCashActionType('APORTE');
-                setCashValue('');
-                setCashReason('');
+              onClick={async () => {
+                if (!window.confirm('Recalcular o caixa com base em todo o historico de movimentacoes?')) return;
+                try {
+                  setRecalcLoading(true);
+                  await onRecalculateCash();
+                } finally {
+                  setRecalcLoading(false);
+                }
               }}
-              className="flex-1 py-3 rounded-xl bg-emerald-500 text-black text-[10px] font-black uppercase hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-lg"
+              disabled={recalcLoading}
+              className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-200 text-[10px] font-black uppercase hover:bg-zinc-800 transition-all disabled:opacity-60"
             >
-              <ArrowDownLeft size={14} /> Aporte
-            </button>
-            <button
-              onClick={() => {
-                setCashActionType('RETIRADA');
-                setCashValue('');
-                setCashReason('');
-              }}
-              className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-lg"
-            >
-              <ArrowUpRight size={14} /> Retirada
+              {recalcLoading ? 'Recalculando...' : 'Recalcular Caixa'}
             </button>
           </div>
         </div>
@@ -388,4 +408,7 @@ const StatCard = ({ title, value, color, icon, desc }: any) => (
 );
 
 export default Reports;
+
+
+
 

@@ -9,7 +9,7 @@ import { db, auth } from "./firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import {
   collection, onSnapshot, query, orderBy, addDoc,
-  updateDoc, doc, setDoc, runTransaction, serverTimestamp, deleteDoc
+  updateDoc, doc, setDoc, runTransaction, serverTimestamp, deleteDoc, getDocs
 } from "firebase/firestore";
 
 // Tipos e Componentes
@@ -148,6 +148,31 @@ const App: React.FC = () => {
       showToast('Caixa atualizado!', 'success');
     } catch (e) {
       showToast("Erro no processamento do caixa", "error");
+    }
+  };
+
+  const handleRecalculateCash = async () => {
+    try {
+      const movementSnap = await getDocs(collection(db, 'cashMovement'));
+
+      const saldoCalculado = movementSnap.docs.reduce((acc, movementDoc) => {
+        const data: any = movementDoc.data();
+        const rawAmount = Number(data.amount ?? data.value ?? 0);
+        if (!Number.isFinite(rawAmount) || rawAmount === 0) return acc;
+
+        // Compatibilidade: alguns registros antigos salvaram saidas como valor negativo.
+        if (rawAmount < 0) return acc + rawAmount;
+
+        const type = String(data.type || '').toUpperCase();
+        const isEntrada = type === 'APORTE' || type === 'PAGAMENTO' || type === 'ENTRADA';
+        return acc + (isEntrada ? rawAmount : -rawAmount);
+      }, 0);
+
+      const novoSaldo = Number(saldoCalculado.toFixed(2));
+      await setDoc(doc(db, 'settings', 'caixa'), { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
+      showToast(`Caixa recalculado para R$ ${novoSaldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'success');
+    } catch (e) {
+      showToast('Erro ao recalcular o caixa', 'error');
     }
   };
 
@@ -328,7 +353,7 @@ const App: React.FC = () => {
             {currentView === 'REPORTS' && (
               <Reports
                 loans={loans} cashMovements={transactions}
-                caixa={caixa} onAddTransaction={handleAddTransaction} onUpdateLoan={handleUpdateLoan} showToast={showToast}
+                caixa={caixa} onAddTransaction={handleAddTransaction} onUpdateLoan={handleUpdateLoan} onRecalculateCash={handleRecalculateCash} showToast={showToast}
               />
             )}
         </div>
@@ -348,4 +373,5 @@ const App: React.FC = () => {
 };
 
 export default App;
+
 
