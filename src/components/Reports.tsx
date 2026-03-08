@@ -414,14 +414,11 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </div>
 
-        <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <StatCard title="A Receber Total" value={stats.totalAReceber} color="text-red-500" icon={<History size={20}/>} desc="Inclui juros previstos" />
           <StatCard title="Valor na Rua" value={stats.valorEmRua} color="text-orange-400" icon={<ArrowUpRightIcon size={20}/>} desc="Capital puro pendente" />
           <StatCard title="Lucro Estimado" value={Math.max(0, Number((stats.totalAReceber - stats.valorEmRua).toFixed(2)))} color="text-emerald-300" icon={<CheckCircle size={20}/>} desc="A receber menos valor na rua" />
-          <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-400" icon={<ArrowDownLeft size={20}/>} desc="Historico de saidas" />
-          <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle size={20}/>} desc="Historico de entradas" />
-          <StatCard title="Total de Aportes" value={cashTotals.totalAportes} color="text-emerald-400" icon={<ArrowDownLeft size={20}/>} desc="Somente movimentacoes APORTE" />
-          <StatCard title="Total de Retiradas" value={cashTotals.totalRetiradas} color="text-rose-400" icon={<ArrowUpRight size={20}/>} desc="Movimentacoes RETIRADA/SAIDA" />
+          <StatCard title="Aportes / Retiradas" value={cashTotals.totalAportes} color="text-emerald-400" icon={<ArrowDownLeft size={20}/>} desc={`Aportes: R$ ${Number(cashTotals.totalAportes || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })} | Retiradas: R$ ${Number(cashTotals.totalRetiradas || 0).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`} />
         </div>
       </div>
 
@@ -615,7 +612,7 @@ const Reports: React.FC<ReportsProps> = ({
 };
 
 const StatCard = ({ title, value, color, icon, desc }: any) => (
-  <div className="p-6 rounded-[2rem] bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all shadow-lg">
+  <div className="h-full min-h-[152px] p-6 rounded-[2rem] bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all shadow-lg flex flex-col justify-between">
     <div className="flex justify-between items-start mb-4">
       <div className={`p-3 rounded-xl bg-black border border-white/5 shadow-inner ${color}`}>{icon}</div>
       <div className="text-right">
