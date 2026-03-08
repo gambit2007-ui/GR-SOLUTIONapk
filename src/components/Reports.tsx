@@ -362,13 +362,13 @@ const Reports: React.FC<ReportsProps> = ({
   return (
     <div className="space-y-6 pb-20 max-w-[1400px] mx-auto">
       <div className="flex flex-col xl:flex-row gap-4">
-        <div className="xl:w-1/3 p-8 rounded-[2.5rem] bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 shadow-2xl relative overflow-hidden group flex flex-col justify-between">
+        <div className="xl:w-[300px] p-6 rounded-[2rem] bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 shadow-2xl relative overflow-hidden group flex flex-col justify-between">
           <div>
             <div className="flex items-center gap-3 mb-4">
-              <div className="p-3 rounded-2xl bg-emerald-500 text-black shadow-lg"><Wallet size={24} /></div>
-              <span className="text-[10px] font-black uppercase text-emerald-500 tracking-[0.3em]">Caixa Geral</span>
+              <div className="p-2.5 rounded-2xl bg-emerald-500 text-black shadow-lg"><Wallet size={20} /></div>
+              <span className="text-[9px] font-black uppercase text-emerald-500 tracking-[0.28em]">Caixa Geral</span>
             </div>
-            <h2 className="text-5xl font-black text-white tracking-tighter mb-8">
+            <h2 className="text-4xl font-black text-white tracking-tighter mb-6">
               R$ {Number(caixa || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
             </h2>
           </div>
@@ -381,7 +381,7 @@ const Reports: React.FC<ReportsProps> = ({
                   setCashValue('');
                   setCashReason('');
                 }}
-                className="flex-1 py-3 rounded-xl bg-emerald-500 text-black text-[10px] font-black uppercase hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-lg"
+                className="flex-1 py-2.5 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-lg"
               >
                 <ArrowDownLeft size={14} /> Aporte
               </button>
@@ -391,7 +391,7 @@ const Reports: React.FC<ReportsProps> = ({
                   setCashValue('');
                   setCashReason('');
                 }}
-                className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-[10px] font-black uppercase hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-lg"
+                className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-[9px] font-black uppercase hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-lg"
               >
                 <ArrowUpRight size={14} /> Retirada
               </button>
@@ -407,7 +407,7 @@ const Reports: React.FC<ReportsProps> = ({
                 }
               }}
               disabled={recalcLoading}
-              className="w-full py-3 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-200 text-[10px] font-black uppercase hover:bg-zinc-800 transition-all disabled:opacity-60"
+              className="w-full py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-200 text-[9px] font-black uppercase hover:bg-zinc-800 transition-all disabled:opacity-60"
             >
               {recalcLoading ? 'Recalculando...' : 'Recalcular Caixa'}
             </button>
