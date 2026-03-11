@@ -39,7 +39,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
     }).length;
 
     const overdueContracts = (loans || []).filter(l => {
-      // REGRA DE OURO: Se o saldo devedor √© zero, ele nunca est√° inadimplente
+      // REGRA DE OURO: Se o saldo devedor È zero, ele nunca est· inadimplente
       const saldoDevedor = Number(l.totalToReturn || 0) - Number(l.paidAmount || 0);
       if (saldoDevedor <= 0.5) return false;
 
@@ -63,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
   }, [loans, customers, todayStr]);
 
   const monthlyHistory = useMemo(() => {
-    const monthsFull = ['Janeiro', 'Fevereiro', 'Mar√ßo', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const monthsFull = ['Janeiro', 'Fevereiro', 'MarÁo', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     const data = [];
     const today = new Date();
     
@@ -90,6 +90,11 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           return isMatch(m.date) && (t === 'APORTE' || t === 'PAGAMENTO' || t === 'ENTRADA');
         });
 
+
+        const estornosDoMes = (cashMovements || []).filter(m => {
+          const t = normalize(String(m.type || ''));
+          return isMatch(m.date) && t === 'ESTORNO';
+        });
         const isMovementLinkedToLoan = (movement: CashMovement, loan: Loan) => {
           if (!isMatch(movement.date)) return false;
 
@@ -117,31 +122,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
           return t === 'RETIRADA' || t === 'SAIDA';
         });
 
-        const recebimentosParcelas: any[] = [];
-        (loans || []).forEach(loan => {
-          (loan.installments || []).forEach(inst => {
-            const pDate = inst.paymentDate || inst.lastPaymentDate;
-            if (pDate && isMatch(pDate)) {
-              const valorPago = Number(inst.lastPaidValue || 0);
-              if (valorPago > 0) {
-                recebimentosParcelas.push({
-                  id: `p-${loan.id}-${inst.number}`,
-                  description: `PARC ${inst.number}: ${loan.customerName}`,
-                  amount: valorPago,
-                  date: pDate,
-                  type: 'PAGAMENTO'
-                });
-              }
-            }
-          });
-        });
-
         const novosEmprestimos = (loans || []).filter(l => isMatch(l.createdAt || l.startDate));
-        const totalRetorno = [...entradasManuais, ...recebimentosParcelas].reduce((acc, r) => acc + (Number(r.amount || r.value || 0)), 0);
-        const totalSaida = novosEmprestimos.reduce((acc, l) => acc + Number(l.amount || 0), 0) + saidasManuais.reduce((acc, r) => acc + Number(r.amount || 0), 0);
+        const totalRetorno = entradasManuais.reduce((acc, r) => acc + (Number(r.amount || r.value || 0)), 0);
+        const totalSaida = novosEmprestimos.reduce((acc, l) => acc + Number(l.amount || 0), 0) + saidasManuais.reduce((acc, r) => acc + Number(r.amount || 0), 0) + estornosDoMes.reduce((acc, r) => acc + Number(r.amount || r.value || 0), 0);
 
         if (totalRetorno > 0 || totalSaida > 0 || (month === today.getMonth() && year === today.getFullYear())) {
-          data.push({ id: `${year}-${month}`, name: monthsFull[month], year, entradas: [...entradasManuais, ...recebimentosParcelas], saidasManuais, novosEmprestimos, totalSaida, totalRetorno });
+          data.push({ id: `${year}-${month}`, name: monthsFull[month], year, entradas: entradasManuais, saidasManuais, novosEmprestimos, totalSaida, totalRetorno });
         }
       }
     }
@@ -156,7 +142,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
         <StatCard title="Contratos Ativos" value={stats.activeContracts.toString()} icon={<Briefcase size={20} className="text-[#BF953F]" />} description="Em andamento" />
         <StatCard title="Clientes na Base" value={stats.activeCustomers.toString()} icon={<Users size={20} className="text-blue-500" />} description="Cadastrados" />
         <StatCard 
-          title="Inadimpl√™ncia" 
+          title="InadimplÍncia" 
           value={stats.overdueContracts.toString()} 
           icon={<AlertCircle size={20} className={stats.overdueContracts > 0 ? "text-red-500" : "text-zinc-600"} />} 
           description="Contratos com atraso real" 
@@ -181,7 +167,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
                   <h4 className="text-lg font-black text-white uppercase">{month.name} <span className="text-zinc-800 ml-1">{month.year}</span></h4>
                   <div className="flex gap-4 mt-1">
                     <span className="text-[9px] font-black text-emerald-500 uppercase">Entradas: {month.totalRetorno.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    <span className="text-[9px] font-black text-red-500 uppercase">Sa√≠das: {month.totalSaida.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    <span className="text-[9px] font-black text-red-500 uppercase">SaÌdas: {month.totalSaida.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   </div>
                 </div>
               </div>
@@ -198,7 +184,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
                     </div>
                   </div>
                   <div>
-                    <h5 className="text-[9px] font-black text-red-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowDownRight size={14} /> Sa√≠das</h5>
+                    <h5 className="text-[9px] font-black text-red-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowDownRight size={14} /> SaÌdas</h5>
                     <div className="space-y-3">
                       {month.novosEmprestimos.map(l => (
                          <div key={l.id} className="bg-white/[0.01] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between">
@@ -206,7 +192,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
                                <div className="p-2 bg-red-500/10 rounded-xl text-red-500"><Users size={14} /></div>
                                <div>
                                   <p className="text-[10px] font-black text-zinc-200 uppercase">{l.customerName}</p>
-                                  <p className="text-[8px] text-zinc-600 font-bold uppercase">Empr√©stimo</p>
+                                  <p className="text-[8px] text-zinc-600 font-bold uppercase">EmprÈstimo</p>
                                </div>
                             </div>
                             <span className="text-xs font-black text-red-500">-{Number(l.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
@@ -243,7 +229,7 @@ const ListItem = ({ m, color }: any) => (
         {color === 'emerald' ? <PlusCircle size={14} /> : <MinusCircle size={14} />}
       </div>
       <div>
-        <p className="text-[10px] font-black text-zinc-300 uppercase">{m.description || 'Movimenta√ß√£o'}</p>
+        <p className="text-[10px] font-black text-zinc-300 uppercase">{m.description || 'MovimentaÁ„o'}</p>
         <p className="text-[8px] text-zinc-600 font-bold uppercase">{m.date ? new Date(m.date).toLocaleDateString('pt-BR') : 'Data Indefinida'}</p>
       </div>
     </div>

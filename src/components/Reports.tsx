@@ -195,7 +195,7 @@ const Reports: React.FC<ReportsProps> = ({
       await onAddTransaction('PAGAMENTO', valorRestante, `PAG: ${loan.customerName} (P${inst.number})`);
       showToast('Pagamento registrado!', 'success');
     } catch {
-      showToast('Erro ao processar.', 'error');
+      // onUpdateLoan/onAddTransaction ja exibem erros no App.
     } finally {
       setActionLock(null);
     }
@@ -355,7 +355,7 @@ const Reports: React.FC<ReportsProps> = ({
 
       showToast('Estorno realizado!', 'info');
     } catch {
-      showToast('Erro ao estornar.', 'error');
+      // onUpdateLoanAndAddTransaction/onAddTransaction ja exibem erros no App.
     }
   };
 

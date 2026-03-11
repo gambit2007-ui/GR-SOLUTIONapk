@@ -110,7 +110,10 @@ const App: React.FC = () => {
   const handleUpdateLoan = async (loanId: string, newData: Partial<Loan>) => {
     try {
       await updateDoc(doc(db, 'loans', loanId), newData);
-    } catch (e) { showToast("Erro ao atualizar contrato", "error"); }
+    } catch (e) {
+      showToast("Erro ao atualizar contrato", "error");
+      throw e;
+    }
   };
 
   const handleAddTransaction = async (type: MovementType, amount: number, description: string) => {
