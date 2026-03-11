@@ -360,15 +360,15 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-20 max-w-[1400px] mx-auto">
-      <div className="flex flex-col xl:flex-row gap-4">
-        <div className="xl:w-[300px] p-6 rounded-[2rem] bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 shadow-2xl relative overflow-hidden group flex flex-col justify-between">
-          <div>
+    <div className="space-y-5 sm:space-y-6 pb-16 sm:pb-20 max-w-[1400px] mx-auto">
+      <div className="flex flex-col xl:flex-row gap-3 sm:gap-4">
+        <div className="w-full xl:w-[300px] p-4 sm:p-6 rounded-3xl sm:rounded-[2rem] bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 shadow-2xl relative overflow-hidden group flex flex-col justify-between">
+          <div className="min-w-0">
             <div className="flex items-center gap-3 mb-4">
               <div className="p-2.5 rounded-2xl bg-emerald-500 text-black shadow-lg"><Wallet size={20} /></div>
-              <span className="text-[9px] font-black uppercase text-emerald-500 tracking-[0.28em]">Caixa Geral</span>
+              <span className="text-[8px] sm:text-[9px] font-black uppercase text-emerald-500 tracking-[0.24em] sm:tracking-[0.28em]">Caixa Geral</span>
             </div>
-            <h2 className="text-4xl font-black text-white tracking-tighter mb-6">
+            <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tighter mb-5 sm:mb-6">
               R$ {Number(caixa || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
             </h2>
           </div>
@@ -414,7 +414,7 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </div>
 
-        <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
+        <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
           <StatCard title="A Receber Total" value={stats.totalAReceber} color="text-red-500" icon={<History size={20}/>} desc="Inclui juros previstos" />
           <StatCard title="Valor na Rua" value={stats.valorEmRua} color="text-orange-400" icon={<ArrowUpRightIcon size={20}/>} desc="Capital puro pendente" />
           <StatCard title="Lucro Estimado" value={Math.max(0, Number((stats.totalAReceber - stats.valorEmRua).toFixed(2)))} color="text-emerald-300" icon={<CheckCircle size={20}/>} desc="A receber menos valor na rua" />
@@ -425,12 +425,12 @@ const Reports: React.FC<ReportsProps> = ({
         </div>
       </div>
 
-      <div className="bg-[#0a0a0a] border border-white/5 rounded-[2.5rem] p-8 shadow-xl">
-        <div className="flex flex-col md:flex-row gap-4 mb-8">
-          <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="PESQUISAR CLIENTE..." className="flex-1 bg-black border border-white/10 rounded-2xl px-6 py-4 text-[11px] text-white outline-none font-bold uppercase tracking-wider" />
-          <div className="flex bg-black p-1.5 rounded-2xl border border-white/5">
+      <div className="bg-[#0a0a0a] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 lg:p-8 shadow-xl">
+        <div className="flex flex-col md:flex-row gap-3 sm:gap-4 mb-6 sm:mb-8">
+          <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="PESQUISAR CLIENTE..." className="flex-1 bg-black border border-white/10 rounded-xl sm:rounded-2xl px-4 sm:px-6 py-3 sm:py-4 text-[10px] sm:text-[11px] text-white outline-none font-bold uppercase tracking-wider" />
+          <div className="flex bg-black p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-white/5 w-full md:w-auto overflow-x-auto">
             {(['ATIVOS', 'ATRASADOS', 'FINALIZADOS'] as const).map(s => (
-              <button key={s} onClick={() => setFilterStatus(s)} className={`px-8 py-3 rounded-xl text-[10px] font-black transition-all ${filterStatus === s ? (s === 'ATRASADOS' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'bg-white text-black shadow-lg') : 'text-zinc-500 hover:text-zinc-300'}`}>
+              <button key={s} onClick={() => setFilterStatus(s)} className={`whitespace-nowrap px-4 sm:px-8 py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-[9px] sm:text-[10px] font-black transition-all ${filterStatus === s ? (s === 'ATRASADOS' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'bg-white text-black shadow-lg') : 'text-zinc-500 hover:text-zinc-300'}`}>
                 {s === 'FINALIZADOS' ? 'QUITADOS' : s}
               </button>
             ))}
@@ -440,14 +440,14 @@ const Reports: React.FC<ReportsProps> = ({
         <div className="grid grid-cols-1 gap-4">
           {filteredLoans.map(loan => (
             <div key={loan.id} className="group border border-white/5 rounded-3xl bg-white/[0.01] hover:bg-white/[0.03] transition-all overflow-hidden">
-              <div className="p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-5">
-                  <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border ${isLoanLate(loan) ? 'bg-red-500/10 border-red-500/20 text-red-500' : 'bg-white/5 border-white/10 text-zinc-400'}`}>
+              <div className="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3 sm:gap-5 min-w-0">
+                  <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center border shrink-0 ${isLoanLate(loan) ? 'bg-red-500/10 border-red-500/20 text-red-500' : 'bg-white/5 border-white/10 text-zinc-400'}`}>
                     <CheckCircle size={24} />
                   </div>
-                  <div>
-                    <div className="flex items-center gap-3">
-                      <h4 className="text-sm font-black text-white uppercase">{loan.customerName}</h4>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                      <h4 className="text-xs sm:text-sm font-black text-white uppercase truncate max-w-[48vw] sm:max-w-none">{loan.customerName}</h4>
                       <button
                         onClick={() => {
                           const msg = encodeURIComponent(
@@ -508,26 +508,26 @@ const Reports: React.FC<ReportsProps> = ({
                     <p className="text-[10px] text-zinc-500 font-bold uppercase">Saldo Devedor: R$ {(Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0)).toFixed(2)}</p>
                   </div>
                 </div>
-                <button onClick={() => setExpandedLoan(expandedLoan === loan.id ? null : loan.id)} className="px-5 py-3 bg-white/5 text-zinc-400 rounded-2xl hover:text-white transition-all border border-white/5 flex items-center justify-center gap-2">
+                <button onClick={() => setExpandedLoan(expandedLoan === loan.id ? null : loan.id)} className="w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-white/5 text-zinc-400 rounded-2xl hover:text-white transition-all border border-white/5 flex items-center justify-center gap-2">
                   <span className="text-[9px] font-black uppercase tracking-widest">Ver Parcelas</span>
                   <ChevronDown size={18} className={expandedLoan === loan.id ? 'rotate-180' : ''} />
                 </button>
               </div>
 
               {expandedLoan === loan.id && (
-                <div className="p-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 border-t border-white/5 bg-black/40">
+                <div className="p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 border-t border-white/5 bg-black/40">
                   {loan.installments.map((inst, idx) => {
                     const valorAtualizado = getValueWithJuros(inst);
                     const temJuros = valorAtualizado > getValue(inst) && inst.status !== 'PAGO';
                     const parcialPago = Number(inst.partialPaid || 0);
                     const restanteParcial = Math.max(0, Number((valorAtualizado - parcialPago).toFixed(2))); 
                     return (
-                      <div key={idx} className={`p-5 rounded-2xl border transition-all ${inst.status === 'PAGO' ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-white/5 bg-white/[0.02]'}`}>
+                      <div key={idx} className={`p-4 sm:p-5 rounded-2xl border transition-all ${inst.status === 'PAGO' ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-white/5 bg-white/[0.02]'}`}>
                         <div className="flex justify-between items-center mb-2">
                           <span className="text-[8px] font-black text-zinc-500 uppercase">P{inst.number}</span>
                           <span className={`text-[9px] font-bold ${temJuros ? 'text-red-500' : 'text-zinc-400'}`}>{inst.dueDate.split('-').reverse().join('/')}</span>
                         </div>
-                        <p className={`text-lg font-black ${inst.status === 'PAGO' ? 'text-emerald-500' : (temJuros ? 'text-red-500' : 'text-white')}`}>
+                        <p className={`text-base sm:text-lg font-black ${inst.status === 'PAGO' ? 'text-emerald-500' : (temJuros ? 'text-red-500' : 'text-white')}`}>
                           R$ {valorAtualizado.toFixed(2)}
                         </p>
                         <div className="mt-4 space-y-2">
@@ -564,7 +564,7 @@ const Reports: React.FC<ReportsProps> = ({
 
       {cashActionType && (
         <div className="fixed inset-0 z-[210] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-3xl border border-zinc-800 bg-[#0b0b0b] p-6 space-y-5 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl sm:rounded-3xl border border-zinc-800 bg-[#0b0b0b] p-4 sm:p-6 space-y-5 shadow-2xl">
             <h3 className="text-sm font-black uppercase tracking-widest text-white">
               {cashActionType === 'APORTE' ? 'Registrar Aporte' : 'Registrar Retirada'}
             </h3>
@@ -615,26 +615,16 @@ const Reports: React.FC<ReportsProps> = ({
 };
 
 const StatCard = ({ title, value, color, icon, desc }: any) => (
-  <div className="h-full min-h-[152px] p-6 rounded-[2rem] bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all shadow-lg flex flex-col justify-between">
+  <div className="h-full min-h-[132px] sm:min-h-[152px] p-4 sm:p-6 rounded-3xl sm:rounded-[2rem] bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all shadow-lg flex flex-col justify-between">
     <div className="flex justify-between items-start mb-4">
-      <div className={`p-3 rounded-xl bg-black border border-white/5 shadow-inner ${color}`}>{icon}</div>
+      <div className={`p-2.5 sm:p-3 rounded-xl bg-black border border-white/5 shadow-inner ${color}`}>{icon}</div>
       <div className="text-right">
-        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">{title}</p>
-        <h3 className="text-2xl font-black text-white tracking-tight">R$ {Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
+        <p className="text-[8px] sm:text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">{title}</p>
+        <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">R$ {Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
       </div>
     </div>
-    <p className="text-[8px] font-bold text-zinc-600 uppercase tracking-tighter">{desc}</p>
+    <p className="text-[8px] font-bold text-zinc-600 uppercase tracking-tight">{desc}</p>
   </div>
 );
 
 export default Reports;
-
-
-
-
-
-
-
-
-
-

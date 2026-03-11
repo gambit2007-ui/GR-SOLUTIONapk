@@ -39,7 +39,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
     }).length;
 
     const overdueContracts = (loans || []).filter(l => {
-      // REGRA DE OURO: Se o saldo devedor é zero, ele nunca está inadimplente
+      // REGRA DE OURO: Se o saldo devedor e zero, ele nunca esta inadimplente
       const saldoDevedor = Number(l.totalToReturn || 0) - Number(l.paidAmount || 0);
       if (saldoDevedor <= 0.5) return false;
 
@@ -63,7 +63,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
   }, [loans, customers, todayStr]);
 
   const monthlyHistory = useMemo(() => {
-    const monthsFull = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const monthsFull = ['Janeiro', 'Fevereiro', 'Mar\u00E7o', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
     const data = [];
     const today = new Date();
     
@@ -137,12 +137,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
   if (!isMounted) return null;
 
   return (
-    <div className="space-y-10 animate-in fade-in duration-700 pb-10 px-2">
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+    <div className="space-y-6 sm:space-y-10 animate-in fade-in duration-700 pb-8 sm:pb-10 px-0 sm:px-2">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6">
         <StatCard title="Contratos Ativos" value={stats.activeContracts.toString()} icon={<Briefcase size={20} className="text-[#BF953F]" />} description="Em andamento" />
         <StatCard title="Clientes na Base" value={stats.activeCustomers.toString()} icon={<Users size={20} className="text-blue-500" />} description="Cadastrados" />
         <StatCard 
-          title="Inadimplência" 
+          title="Inadimpl\u00EAncia" 
           value={stats.overdueContracts.toString()} 
           icon={<AlertCircle size={20} className={stats.overdueContracts > 0 ? "text-red-500" : "text-zinc-600"} />} 
           description="Contratos com atraso real" 
@@ -157,25 +157,25 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
         </div>
 
         {monthlyHistory.map((month) => (
-          <div key={month.id} className={`bg-[#0a0a0a] rounded-[2.5rem] border transition-all duration-500 ${expandedMonth === month.id ? 'border-[#BF953F]/40 shadow-2xl scale-[1.01]' : 'border-zinc-900 hover:border-zinc-800'}`}>
-            <button onClick={() => setExpandedMonth(expandedMonth === month.id ? null : month.id)} className="w-full px-6 py-6 flex items-center justify-between">
-              <div className="flex items-center gap-5">
-                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border font-black text-[11px] ${expandedMonth === month.id ? 'bg-[#BF953F] text-black border-[#BF953F]' : 'bg-black text-zinc-600 border-zinc-800'}`}>
+          <div key={month.id} className={`bg-[#0a0a0a] rounded-3xl sm:rounded-[2.5rem] border transition-all duration-500 ${expandedMonth === month.id ? 'border-[#BF953F]/40 shadow-2xl scale-[1.01]' : 'border-zinc-900 hover:border-zinc-800'}`}>
+            <button onClick={() => setExpandedMonth(expandedMonth === month.id ? null : month.id)} className="w-full px-4 sm:px-6 py-4 sm:py-6 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3 sm:gap-5">
+                <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center border font-black text-[10px] sm:text-[11px] ${expandedMonth === month.id ? 'bg-[#BF953F] text-black border-[#BF953F]' : 'bg-black text-zinc-600 border-zinc-800'}`}>
                   {month.name.slice(0, 3).toUpperCase()}
                 </div>
                 <div className="text-left">
-                  <h4 className="text-lg font-black text-white uppercase">{month.name} <span className="text-zinc-800 ml-1">{month.year}</span></h4>
-                  <div className="flex gap-4 mt-1">
+                  <h4 className="text-base sm:text-lg font-black text-white uppercase">{month.name} <span className="text-zinc-800 ml-1">{month.year}</span></h4>
+                  <div className="flex flex-wrap gap-2 sm:gap-4 mt-1">
                     <span className="text-[9px] font-black text-emerald-500 uppercase">Entradas: {month.totalRetorno.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                    <span className="text-[9px] font-black text-red-500 uppercase">Saídas: {month.totalSaida.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                    <span className="text-[9px] font-black text-red-500 uppercase">Sa\u00EDdas: {month.totalSaida.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                   </div>
                 </div>
               </div>
               <ChevronDown size={18} className={`transition-transform ${expandedMonth === month.id ? 'rotate-180 text-[#BF953F]' : 'text-zinc-700'}`} />
             </button>
             {expandedMonth === month.id && (
-              <div className="px-6 pb-10 border-t border-white/5 pt-8 animate-in slide-in-from-top-4">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+              <div className="px-4 sm:px-6 pb-6 sm:pb-10 border-t border-white/5 pt-6 sm:pt-8 animate-in slide-in-from-top-4">
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 sm:gap-10">
                   <div>
                     <h5 className="text-[9px] font-black text-emerald-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowUpRight size={14} /> Receitas</h5>
                     <div className="space-y-3">
@@ -184,18 +184,18 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
                     </div>
                   </div>
                   <div>
-                    <h5 className="text-[9px] font-black text-red-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowDownRight size={14} /> Saídas</h5>
+                    <h5 className="text-[9px] font-black text-red-500 uppercase mb-5 flex items-center gap-2 tracking-[0.2em]"><ArrowDownRight size={14} /> Sa\u00EDdas</h5>
                     <div className="space-y-3">
                       {month.novosEmprestimos.map(l => (
-                         <div key={l.id} className="bg-white/[0.01] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between">
-                            <div className="flex items-center gap-3">
+                         <div key={l.id} className="bg-white/[0.01] border border-zinc-900 rounded-2xl p-3 sm:p-4 flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
                                <div className="p-2 bg-red-500/10 rounded-xl text-red-500"><Users size={14} /></div>
                                <div>
-                                  <p className="text-[10px] font-black text-zinc-200 uppercase">{l.customerName}</p>
-                                  <p className="text-[8px] text-zinc-600 font-bold uppercase">Empréstimo</p>
+                                  <p className="text-[10px] font-black text-zinc-200 uppercase truncate max-w-[44vw] sm:max-w-none">{l.customerName}</p>
+                                  <p className="text-[8px] text-zinc-600 font-bold uppercase">Empr\u00E9stimo</p>
                                </div>
                             </div>
-                            <span className="text-xs font-black text-red-500">-{Number(l.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                            <span className="text-[11px] sm:text-xs font-black text-red-500 shrink-0">-{Number(l.amount).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                          </div>
                       ))}
                       {month.saidasManuais.map((m, i) => <ListItem key={i} m={m} color="red" />)}
@@ -212,28 +212,28 @@ const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashM
 };
 
 const StatCard = ({ title, value, icon, border, description }: any) => (
-  <div className={`bg-[#0a0a0a] p-8 rounded-[2.5rem] border ${border || 'border-zinc-900'} shadow-xl group transition-all`}>
+  <div className={`bg-[#0a0a0a] p-5 sm:p-8 rounded-3xl sm:rounded-[2.5rem] border ${border || 'border-zinc-900'} shadow-xl group transition-all`}>
     <div className="flex items-center justify-between mb-6">
-      <span className="text-[9px] font-black uppercase text-zinc-600 tracking-[0.2em] group-hover:text-zinc-400">{title}</span>
-      <div className="p-3 bg-black rounded-2xl border border-zinc-800">{icon}</div>
+      <span className="text-[8px] sm:text-[9px] font-black uppercase text-zinc-600 tracking-[0.2em] group-hover:text-zinc-400">{title}</span>
+      <div className="p-2.5 sm:p-3 bg-black rounded-2xl border border-zinc-800">{icon}</div>
     </div>
-    <p className="text-5xl font-black text-white tracking-tighter mb-2">{value}</p>
-    <p className="text-[9px] text-zinc-600 font-black uppercase tracking-widest">{description}</p>
+    <p className="text-3xl sm:text-5xl font-black text-white tracking-tighter mb-2">{value}</p>
+    <p className="text-[8px] sm:text-[9px] text-zinc-600 font-black uppercase tracking-widest">{description}</p>
   </div>
 );
 
 const ListItem = ({ m, color }: any) => (
-  <div className={`bg-white/[0.01] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between hover:border-${color}-500/20 transition-all`}>
-    <div className="flex items-center gap-3">
+  <div className={`bg-white/[0.01] border border-zinc-900 rounded-2xl p-3 sm:p-4 flex items-center justify-between gap-3 hover:border-${color}-500/20 transition-all`}>
+    <div className="flex items-center gap-3 min-w-0">
       <div className={`p-2 rounded-xl ${color === 'emerald' ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}`}>
         {color === 'emerald' ? <PlusCircle size={14} /> : <MinusCircle size={14} />}
       </div>
       <div>
-        <p className="text-[10px] font-black text-zinc-300 uppercase">{m.description || 'Movimentação'}</p>
+        <p className="text-[10px] font-black text-zinc-300 uppercase truncate max-w-[50vw] sm:max-w-none">{m.description || 'Movimenta\u00E7\u00E3o'}</p>
         <p className="text-[8px] text-zinc-600 font-bold uppercase">{m.date ? new Date(m.date).toLocaleDateString('pt-BR') : 'Data Indefinida'}</p>
       </div>
     </div>
-    <span className={`text-xs font-black ${color === 'emerald' ? 'text-emerald-500' : 'text-red-500'}`}>
+    <span className={`text-[11px] sm:text-xs font-black shrink-0 ${color === 'emerald' ? 'text-emerald-500' : 'text-red-500'}`}>
       {color === 'emerald' ? '+' : '-'}{(m.amount || m.value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
     </span>
   </div>
@@ -246,13 +246,3 @@ const Empty = ({ msg }: any) => (
 );
 
 export default Dashboard;
-
-
-
-
-
-
-
-
-
-

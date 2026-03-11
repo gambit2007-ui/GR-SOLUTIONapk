@@ -4,7 +4,7 @@ import {
   Activity, X, Menu, Lock, LogOut, Loader2
 } from 'lucide-react';
 
-// ✅ Firebase Imports
+// Firebase imports
 import { db, auth } from "./firebase";
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
 import {
@@ -29,18 +29,19 @@ interface Toast {
 type MovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
 
 const App: React.FC = () => {
-  // --- ESTADOS DE AUTENTICAÇÃO ---
+  // --- ESTADOS DE AUTENTICACAO ---
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
-
-  // --- ESTADOS DA APLICAÇÃO ---
+  // --- ESTADOS DA APLICACAO ---
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [caixa, setCaixa] = useState<number>(0);
   const [transactions, setTransactions] = useState<any[]>([]);
@@ -54,7 +55,27 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // --- FUNÇÕES DE AUTH ---
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const mediaQuery = window.matchMedia('(max-width: 1023px)');
+
+    const syncViewport = () => {
+      const isMobile = mediaQuery.matches;
+      setIsMobileViewport(isMobile);
+      if (!isMobile) setIsMobileSidebarOpen(false);
+    };
+
+    syncViewport();
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', syncViewport);
+      return () => mediaQuery.removeEventListener('change', syncViewport);
+    }
+
+    mediaQuery.addListener(syncViewport);
+    return () => mediaQuery.removeListener(syncViewport);
+  }, []);
+  // --- FUNCOES DE AUTH ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginLoading(true);
@@ -70,10 +91,9 @@ const App: React.FC = () => {
 
   const handleLogout = async () => {
     await signOut(auth);
-    showToast("Sessão encerrada", "info");
+    showToast("Sess\u00E3o encerrada", "info");
   };
-
-  // --- SISTEMA DE NOTIFICAÇÕES ---
+  // --- SISTEMA DE NOTIFICACOES ---
   const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
     const id = Math.random().toString(36).substr(2, 9);
     setToasts(prev => [...prev, { id, message, type }]);
@@ -81,8 +101,7 @@ const App: React.FC = () => {
   };
 
   const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
-
-  // --- SINCRONIZAÇÃO EM TEMPO REAL ---
+  // --- SINCRONIZACAO EM TEMPO REAL ---
   useEffect(() => {
     if (!user) return;
 
@@ -104,8 +123,7 @@ const App: React.FC = () => {
 
     return () => { unsubCust(); unsubLoans(); unsubCaixa(); unsubTrans(); };
   }, [user]);
-
-  // --- FUNÇÕES DE OPERAÇÃO (CRUD) ---
+  // --- FUNCOES DE OPERACAO (CRUD) ---
 
   const handleUpdateLoan = async (loanId: string, newData: Partial<Loan>) => {
     try {
@@ -246,7 +264,7 @@ const App: React.FC = () => {
     } catch (e) { showToast('Erro ao salvar cliente', 'error'); }
   };
 
-  // ✅ CORREÇÃO: Função que estava faltando
+  // Correcao: funcao que estava faltando
   const handleUpdateCustomer = async (updated: Customer) => {
     try {
       const { id, ...data } = updated;
@@ -312,7 +330,7 @@ const App: React.FC = () => {
 
   if (authLoading) {
     return (
-      <div className="h-screen bg-black flex items-center justify-center">
+      <div className="min-h-dvh bg-black flex items-center justify-center">
         <Activity size={40} className="text-[#BF953F] animate-pulse" />
       </div>
     );
@@ -320,7 +338,7 @@ const App: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="h-screen bg-black flex items-center justify-center p-6">
+      <div className="min-h-dvh bg-black flex items-center justify-center p-6">
         <div className="w-full max-w-sm bg-[#050505] border border-zinc-900 p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 gold-gradient opacity-50" />
           <div className="mb-10 text-center">
@@ -361,8 +379,15 @@ const App: React.FC = () => {
     { id: 'REPORTS', label: 'Financeiro', icon: PieChart },
   ];
 
+  const handleSelectView = (view: View) => {
+    setCurrentView(view);
+    if (isMobileViewport) {
+      setIsMobileSidebarOpen(false);
+    }
+  };
+
   return (
-    <div className="flex h-screen bg-black overflow-hidden text-white font-sans">
+    <div className="flex min-h-screen h-dvh bg-black overflow-hidden text-white font-sans">
       <style>
         {`
           .gold-text { background: linear-gradient(to right, #BF953F, #FCF6BA, #B38728); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
@@ -372,51 +397,87 @@ const App: React.FC = () => {
         `}
       </style>
 
+      {isMobileViewport && isMobileSidebarOpen && (
+        <button
+          type="button"
+          onClick={() => setIsMobileSidebarOpen(false)}
+          aria-label="Fechar menu"
+          className="fixed inset-0 z-[170] bg-black/70 backdrop-blur-[1px]"
+        />
+      )}
+
       {/* SIDEBAR */}
-      <aside className={`flex flex-col z-[70] ${isSidebarOpen ? 'w-72' : 'w-24'} bg-[#050505] border-r border-zinc-900 transition-all duration-300`}>
+      <aside
+        className={`flex flex-col bg-[#050505] border-r border-zinc-900 transition-all duration-300 ${
+          isMobileViewport
+            ? `fixed inset-y-0 left-0 z-[180] w-72 transform ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
+            : `relative z-[70] ${isSidebarOpen ? 'w-72' : 'w-24'}`
+        }`}
+      >
         <div className="h-24 flex items-center justify-between px-6 border-b border-zinc-900">
-           {isSidebarOpen && <span className="font-black text-lg gold-text tracking-tighter">GR SOLUTION</span>}
-           <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 hover:bg-zinc-900 rounded-xl transition-colors">
-              <Menu size={20} className="text-[#BF953F]" />
-           </button>
+          {(isSidebarOpen || isMobileViewport) && <span className="font-black text-lg gold-text tracking-tighter">GR SOLUTION</span>}
+          <button
+            onClick={() => {
+              if (isMobileViewport) {
+                setIsMobileSidebarOpen(false);
+                return;
+              }
+              setIsSidebarOpen(!isSidebarOpen);
+            }}
+            className="p-2 hover:bg-zinc-900 rounded-xl transition-colors"
+          >
+            {isMobileViewport ? <X size={20} className="text-[#BF953F]" /> : <Menu size={20} className="text-[#BF953F]" />}
+          </button>
         </div>
-        <nav className="flex-1 py-8 px-4 space-y-2">
+        <nav className="flex-1 py-8 px-4 space-y-2 overflow-y-auto">
           {navItems.map((item) => (
             <button
               key={item.id}
-              onClick={() => setCurrentView(item.id as View)}
+              onClick={() => handleSelectView(item.id as View)}
               className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all ${
                 currentView === item.id ? 'gold-gradient text-black font-black' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900/50'
               }`}
             >
               <item.icon size={22} />
-              {isSidebarOpen && <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>}
+              {(isSidebarOpen || isMobileViewport) && <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>}
             </button>
           ))}
         </nav>
         <div className="p-4 border-t border-zinc-900">
-            <button onClick={handleLogout} className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-red-500 hover:bg-red-500/10 transition-all">
-              <LogOut size={22} />
-              {isSidebarOpen && <span className="text-[10px] font-black uppercase tracking-widest">Sair</span>}
-            </button>
+          <button onClick={handleLogout} className="w-full flex items-center gap-4 px-4 py-4 rounded-2xl text-red-500 hover:bg-red-500/10 transition-all">
+            <LogOut size={22} />
+            {(isSidebarOpen || isMobileViewport) && <span className="text-[10px] font-black uppercase tracking-widest">Sair</span>}
+          </button>
         </div>
       </aside>
 
       {/* MAIN CONTENT */}
-      <main className="flex-1 flex flex-col overflow-hidden relative">
-        <header className="h-20 bg-[#020202] border-b border-zinc-900 flex items-center justify-between px-10 flex-shrink-0">
-            <h2 className="text-xs font-black text-zinc-100 uppercase tracking-widest">
-              {navItems.find(item => item.id === currentView)?.label}
-            </h2>
-            <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 px-4 py-1.5 bg-zinc-950 border border-zinc-900 rounded-full">
-                  <Activity size={12} className="text-emerald-500 animate-pulse" />
-                  <span className="text-[9px] font-black text-zinc-500 uppercase">Online: {user?.email}</span>
+      <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
+        <header className="h-16 md:h-20 bg-[#020202] border-b border-zinc-900 flex items-center justify-between px-3 sm:px-4 md:px-8 lg:px-10 flex-shrink-0 gap-3">
+            <div className="flex items-center gap-2 min-w-0">
+              <button
+                type="button"
+                onClick={() => setIsMobileSidebarOpen(true)}
+                className="lg:hidden p-2 hover:bg-zinc-900 rounded-xl transition-colors"
+                aria-label="Abrir menu"
+              >
+                <Menu size={18} className="text-[#BF953F]" />
+              </button>
+              <h2 className="text-[10px] sm:text-xs font-black text-zinc-100 uppercase tracking-[0.22em] truncate">
+                {navItems.find(item => item.id === currentView)?.label}
+              </h2>
+            </div>
+            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+                <div className="flex items-center gap-2 px-2.5 sm:px-4 py-1.5 bg-zinc-950 border border-zinc-900 rounded-full max-w-[72vw] sm:max-w-none">
+                  <Activity size={12} className="text-emerald-500 animate-pulse shrink-0" />
+                  <span className="text-[8px] sm:text-[9px] font-black text-zinc-500 uppercase truncate">
+                    <span className="hidden sm:inline">Online: </span>{user?.email}
+                  </span>
                 </div>
             </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar bg-black p-6">
+        <div className="flex-1 overflow-y-auto custom-scrollbar bg-black p-3 sm:p-4 md:p-6">
             {currentView === 'DASHBOARD' && <Dashboard loans={loans} customers={customers} cashMovements={transactions} />}
             {currentView === 'CUSTOMERS' && (
               <CustomerSection
@@ -435,11 +496,13 @@ const App: React.FC = () => {
         </div>
 
         {/* TOASTS */}
-        <div className="fixed top-6 right-6 z-[200] flex flex-col gap-3">
+        <div className="fixed top-3 sm:top-6 left-3 right-3 sm:left-auto sm:right-6 z-[200] flex flex-col gap-2 sm:gap-3 pointer-events-none">
           {toasts.map(t => (
-            <div key={t.id} className="flex items-center gap-4 px-6 py-4 rounded-2xl border bg-zinc-950 border-[#BF953F]/50 text-[#BF953F] shadow-2xl animate-in slide-in-from-right">
-              <span className="text-[10px] font-black uppercase tracking-widest">{t.message}</span>
-              <X size={14} className="cursor-pointer hover:text-white" onClick={() => removeToast(t.id)} />
+            <div key={t.id} className="pointer-events-auto flex items-start gap-2 sm:gap-4 px-3 sm:px-6 py-3 sm:py-4 rounded-xl sm:rounded-2xl border bg-zinc-950 border-[#BF953F]/50 text-[#BF953F] shadow-2xl animate-in slide-in-from-right">
+              <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] sm:tracking-widest break-words leading-snug">{t.message}</span>
+              <button type="button" onClick={() => removeToast(t.id)} className="mt-0.5 text-[#BF953F] hover:text-white" aria-label="Fechar aviso">
+                <X size={14} />
+              </button>
             </div>
           ))}
         </div>
@@ -449,7 +512,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-
-
-
-
