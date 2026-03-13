@@ -27,6 +27,19 @@ interface LoanSectionProps {
   ) => Promise<void>;
 }
 
+interface EarlySettlementEntry {
+  installmentIndex: number;
+  remaining: number;
+}
+
+interface EarlySettlementQuote {
+  loanId: string;
+  totalOutstanding: number;
+  discount: number;
+  payoffAmount: number;
+  entries: EarlySettlementEntry[];
+}
+
 const LoanSection: React.FC<LoanSectionProps> = ({ 
   customers, 
   loans, 
@@ -54,6 +67,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(initialExpandedLoanId || null);
   const [processingPayment, setProcessingPayment] = useState<string | null>(null);
   const [paymentModal, setPaymentModal] = useState<{ isOpen: boolean; loanId: string; installmentIndex: number; amount: string } | null>(null);
+  const [settlementModal, setSettlementModal] = useState<EarlySettlementQuote | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'>('ALL');
 
@@ -116,6 +130,60 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       return Number((baseInstallmentAmount * 0.015 * diffDays).toFixed(2));
     }
     return 0;
+  };
+
+  const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+
+  const getRemainingInstallmentValue = (inst: Installment | null | undefined) => {
+    if (!inst || normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
+    const remaining = roundMoney(installmentAmount(inst) - installmentPaidAmount(inst));
+    return remaining > 0 ? remaining : 0;
+  };
+
+  const buildEarlySettlementQuote = (loan: Loan): EarlySettlementQuote | null => {
+    const normalizedInterestType = fromLegacyInterestType((loan as any).interestType);
+    if (normalizedInterestType !== 'PRICE') {
+      return null;
+    }
+
+    const installments = Array.isArray(loan.installments) ? loan.installments : [];
+    const entries = installments.reduce<EarlySettlementEntry[]>((acc, inst, idx) => {
+      const remaining = getRemainingInstallmentValue(inst);
+      if (remaining > 0) {
+        acc.push({ installmentIndex: idx, remaining });
+      }
+      return acc;
+    }, []);
+
+    if (entries.length === 0) {
+      return null;
+    }
+
+    const totalOutstanding = roundMoney(entries.reduce((sum, entry) => sum + entry.remaining, 0));
+    const periodicRate = Number(loan.interestRate || 0) / 100;
+
+    let payoffAmount = totalOutstanding;
+    if (periodicRate > 0) {
+      payoffAmount = roundMoney(
+        entries.reduce((sum, entry, index) => {
+          const periodsAhead = index + 1;
+          return sum + (entry.remaining / Math.pow(1 + periodicRate, periodsAhead));
+        }, 0)
+      );
+    }
+
+    if (!Number.isFinite(payoffAmount) || payoffAmount <= 0) {
+      payoffAmount = totalOutstanding;
+    }
+
+    const discount = roundMoney(Math.max(totalOutstanding - payoffAmount, 0));
+    return {
+      loanId: loan.id,
+      totalOutstanding,
+      discount,
+      payoffAmount: roundMoney(totalOutstanding - discount),
+      entries,
+    };
   };
 
   const filteredLoans = loans.filter(loan => {
@@ -291,6 +359,83 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       }
     } catch (e) {
       showToast('Erro ao excluir contrato', 'error');
+    }
+  };
+
+  const openEarlySettlementModal = (loan: Loan) => {
+    const quote = buildEarlySettlementQuote(loan);
+    if (!quote) {
+      showToast('Quitacao antecipada disponivel somente para contratos PRICE com saldo pendente', 'error');
+      return;
+    }
+    setSettlementModal(quote);
+  };
+
+  const handleConfirmEarlySettlement = async () => {
+    if (!settlementModal) return;
+
+    const loan = loans.find((item) => item.id === settlementModal.loanId);
+    if (!loan) {
+      showToast('Contrato nao encontrado para quitacao', 'error');
+      return;
+    }
+
+    const installments = Array.isArray(loan.installments) ? [...loan.installments] : [];
+    if (installments.length === 0 || settlementModal.entries.length === 0) {
+      showToast('Nao ha parcelas pendentes para quitacao', 'error');
+      return;
+    }
+
+    setProcessingPayment(`${loan.id}-early`);
+    try {
+      const nowIso = new Date().toISOString();
+      const totalOutstanding = settlementModal.totalOutstanding;
+      let allocated = 0;
+      const lastEntryIndex = settlementModal.entries.length - 1;
+
+      settlementModal.entries.forEach((entry, idx) => {
+        const originalInstallment = installments[entry.installmentIndex];
+        if (!originalInstallment) return;
+
+        const inst = { ...originalInstallment };
+        const proportionalShare =
+          idx === lastEntryIndex
+            ? roundMoney(settlementModal.payoffAmount - allocated)
+            : roundMoney(settlementModal.payoffAmount * (entry.remaining / totalOutstanding));
+        const share = roundMoney(Math.max(proportionalShare, 0));
+        allocated = roundMoney(allocated + share);
+
+        (inst as any).paidAmount = installmentAmount(inst);
+        (inst as any).partialPaid = 0;
+        (inst as any).status = 'PAGO';
+        (inst as any).paymentDate = nowIso;
+        (inst as any).lastPaidValue = share;
+        installments[entry.installmentIndex] = inst;
+      });
+
+      const allPaid = installments.filter(Boolean).every((inst) => normalizeInstallmentStatus(inst.status) === 'PAID');
+      const discountLabel = settlementModal.discount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
+
+      await onUpdateLoanAndAddTransaction(
+        loan.id,
+        {
+          installments,
+          status: (allPaid ? 'QUITADO' : 'ATIVO') as any,
+        },
+        'PAGAMENTO',
+        settlementModal.payoffAmount,
+        `QUITACAO ANTECIPADA: ${loan.customerName} (DESCONTO R$ ${discountLabel})`
+      );
+
+      showToast(
+        `Quitacao registrada! Desconto: R$ ${discountLabel} | Total pago: R$ ${settlementModal.payoffAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        'success'
+      );
+      setSettlementModal(null);
+    } catch (error) {
+      showToast('Erro ao processar quitacao antecipada', 'error');
+    } finally {
+      setProcessingPayment(null);
     }
   };
 
@@ -587,6 +732,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             today.setHours(0, 0, 0, 0);
             return dueDate < today;
           });
+          const canEarlySettle =
+            normalizeLoanStatus(loan.status) === 'ACTIVE' &&
+            fromLegacyInterestType((loan as any).interestType) === 'PRICE' &&
+            loanInstallments.some((inst) => getRemainingInstallmentValue(inst) > 0);
 
           return (
             <div key={loan.id} id={`loan-${loan.id}`} className={`bg-[#050505] border rounded-[2rem] overflow-hidden transition-all ${
@@ -613,6 +762,18 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
+                {canEarlySettle && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEarlySettlementModal(loan);
+                    }}
+                    className="px-3 py-2 bg-emerald-500/10 text-emerald-400 rounded-xl hover:bg-emerald-500 hover:text-black transition-all text-[8px] font-black uppercase tracking-widest"
+                    title="Calcular e registrar quitacao antecipada"
+                  >
+                    Quitar Restante
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -841,6 +1002,81 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   Confirmar
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE QUITACAO ANTECIPADA */}
+      {settlementModal && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-[#000000]/90 backdrop-blur-md">
+          <div className="bg-[#050505] border border-zinc-900 w-full max-w-md rounded-[2.5rem] p-8 relative shadow-2xl">
+            <button
+              onClick={() => setSettlementModal(null)}
+              className="absolute top-6 right-6 text-zinc-500 hover:text-white"
+              disabled={processingPayment === `${settlementModal.loanId}-early`}
+            >
+              <XCircle size={24} />
+            </button>
+
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-emerald-500/10 rounded-2xl">
+                <Calculator size={24} className="text-emerald-500" />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-white uppercase tracking-widest">Quitacao Antecipada</h2>
+                <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">Calculo de desconto para contrato PRICE</p>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="bg-[#000000] border border-zinc-900 rounded-2xl p-4 flex items-center justify-between">
+                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Saldo em aberto</span>
+                <span className="text-sm font-black text-white">
+                  R$ {settlementModal.totalOutstanding.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              <div className="bg-[#000000] border border-emerald-500/20 rounded-2xl p-4 flex items-center justify-between">
+                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Desconto calculado</span>
+                <span className="text-sm font-black text-emerald-500">
+                  R$ {settlementModal.discount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+
+              <div className="bg-[#000000] border border-[#BF953F]/30 rounded-2xl p-4 flex items-center justify-between">
+                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total para quitar hoje</span>
+                <span className="text-lg font-black text-[#BF953F]">
+                  R$ {settlementModal.payoffAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+              </div>
+            </div>
+
+            <p className="mt-4 text-[8px] text-zinc-600 uppercase tracking-widest">
+              O valor considera desconto de juros futuros nas parcelas pendentes.
+            </p>
+
+            <div className="mt-6 flex gap-3">
+              <button
+                onClick={() => setSettlementModal(null)}
+                disabled={processingPayment === `${settlementModal.loanId}-early`}
+                className="flex-1 py-4 bg-zinc-900 text-zinc-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-zinc-800 transition-all disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleConfirmEarlySettlement}
+                disabled={processingPayment === `${settlementModal.loanId}-early`}
+                className="flex-1 py-4 bg-emerald-500 text-black rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20 disabled:opacity-70 flex items-center justify-center gap-2"
+              >
+                {processingPayment === `${settlementModal.loanId}-early` ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" /> Processando
+                  </>
+                ) : (
+                  'Confirmar Quitacao'
+                )}
+              </button>
             </div>
           </div>
         </div>
