@@ -13,7 +13,7 @@ import {
 } from "firebase/firestore";
 
 // Tipos e Componentes
-import { Customer, Loan, View } from './types';
+import { Customer, Loan, View, CashMovement } from './types';
 import Dashboard from './components/Dashboard';
 import CustomerSection from './components/CustomerSection';
 import SimulationTab from './components/SimulationTab';
@@ -44,7 +44,7 @@ const App: React.FC = () => {
   const [isMobileViewport, setIsMobileViewport] = useState(false);
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [caixa, setCaixa] = useState<number>(0);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<CashMovement[]>([]);
 
   // --- MONITORAMENTO DE AUTH ---
   useEffect(() => {
@@ -295,7 +295,7 @@ const App: React.FC = () => {
     } catch (e) { showToast('Erro ao remover cliente', 'error'); }
   };
 
-  const handleAddLoan = async (l: Loan) => {
+  const handleAddLoan = async (l: Loan): Promise<void> => {
     try {
       const { id, ...data } = l;
 
@@ -323,6 +323,7 @@ const App: React.FC = () => {
       showToast('Contrato efetivado!');
     } catch (e) {
       showToast('Erro ao salvar contrato', 'error');
+      throw e;
     }
   };
 

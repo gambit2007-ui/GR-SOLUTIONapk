@@ -25,7 +25,7 @@ interface LoanSectionProps {
 
   loans: Loan[];
 
-  onAddLoan: (loan: Loan) => void;
+  onAddLoan: (loan: Loan) => Promise<void>;
 
   showToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 
@@ -59,7 +59,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
  
 
-  // ✅ Novo: Estado para Frequência
+  // Ã¢Å“â€¦ Novo: Estado para FrequÃƒÂªncia
 
   const [frequency, setFrequency] = useState<'MENSAL' | 'QUINZENAL' | 'SEMANAL' | 'DIARIO'>('MENSAL');
 
@@ -117,7 +117,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
   } else {
 
-    // Juros Simples Fixo (Adiciona a % uma única vez no total)
+    // Juros Simples Fixo (Adiciona a % uma ÃƒÂºnica vez no total)
 
     const totalInterest = principal * rate;
 
@@ -133,17 +133,17 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
  
 
-  // ✅ CORREÇÃO DAS DATAS:
+  // Ã¢Å“â€¦ CORREÃƒâ€¡ÃƒÆ’O DAS DATAS:
 
   for (let i = 1; i <= count; i++) {
 
-    // Criamos uma nova data baseada na startDate para cada iteração
+    // Criamos uma nova data baseada na startDate para cada iteraÃƒÂ§ÃƒÂ£o
 
-    // Usamos o split e o map para garantir que o fuso horário local não interfira
+    // Usamos o split e o map para garantir que o fuso horÃƒÂ¡rio local nÃƒÂ£o interfira
 
     const [year, month, day] = startDate.split('-').map(Number);
 
-    const d = new Date(year, month - 1, day); // month é 0-indexed no JS
+    const d = new Date(year, month - 1, day); // month ÃƒÂ© 0-indexed no JS
 
 
 
@@ -205,11 +205,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
    
 
-    // Proteção contra valores vazios ou zerados
+    // ProteÃƒÂ§ÃƒÂ£o contra valores vazios ou zerados
 
     if (!customer || !amount || parseFloat(amount) <= 0) {
 
-      showToast?.("Selecione o cliente e um valor válido.", "error");
+      showToast?.("Selecione o cliente e um valor valido.", "error");
 
       return;
 
@@ -231,7 +231,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
       customerId: selectedCustomerId,
 
-      customerName: customer.name || 'Não informado',
+      customerName: customer.name || 'Nao informado',
 
       customerPhone: customer.phone || '',
 
@@ -249,7 +249,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
       startDate: startDate, // Data que o dinheiro saiu
 
-      // O vencimento principal é a data da primeira parcela
+      // O vencimento principal ÃƒÂ© a data da primeira parcela
 
       dueDate: calculation.schedule[0]?.date || startDate,
 
@@ -261,7 +261,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
       createdAt: Date.now(),
 
-      // ✅ MAPEAMENTO DAS PARCELAS PARA CONFERÊNCIA DE MULTA
+      // Ã¢Å“â€¦ MAPEAMENTO DAS PARCELAS PARA CONFERÃƒÅ NCIA DE MULTA
 
       installments: calculation.schedule.map(s => ({
 
@@ -269,7 +269,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
         number: s.number,
 
-        dueDate: s.date, // Formato YYYY-MM-DD para cálculo de dias de atraso
+        dueDate: s.date, // Formato YYYY-MM-DD para cÃƒÂ¡lculo de dias de atraso
 
         value: Number(s.value.toFixed(2)),
 
@@ -284,13 +284,16 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     try {
       await onAddLoan(newLoan);
 
-      if (generateContractPDF) {
+      try {
         generateContractPDF(customer, newLoan);
+      } catch (pdfError) {
+        console.error("Contrato salvo, mas houve falha ao gerar PDF:", pdfError);
+        showToast?.("Contrato salvo, mas falhou ao gerar o PDF.", "info");
       }
 
       setLastCreated({ customer, loan: newLoan });
       setIsSuccess(true);
-      showToast?.("Contrato gerado com sucesso!", "success");
+      showToast?.("Contrato efetivado e PDF gerado!", "success");
     } catch (error) {
       console.error("Erro ao efetivar:", error);
       showToast?.("Erro tecnico ao salvar no banco de dados.", "error");
@@ -370,7 +373,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
                <div className="space-y-2">
 
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Início</label>
+                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Inicio</label>
 
                   <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
 
@@ -380,11 +383,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
 
 
-            {/* ✅ NOVO: SELETOR DE FREQUÊNCIA */}
+            {/* NOVO: SELETOR DE FREQUENCIA */}
 
             <div className="space-y-2">
 
-              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Frequência de Pagamento</label>
+              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Frequencia de Pagamento</label>
 
               <div className="flex flex-wrap bg-black p-1 rounded-2xl border border-zinc-800 w-fit gap-1">
 
