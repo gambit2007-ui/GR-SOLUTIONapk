@@ -1,8 +1,26 @@
-export type Frequency = 'DIARIO' | 'SEMANAL' | 'QUINZENAL' | 'MENSAL';
-export type InterestType = 'SIMPLES' | 'PRICE';
-export type PaymentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO';
+export type Frequency =
+  | 'DIARIO'
+  | 'SEMANAL'
+  | 'QUINZENAL'
+  | 'MENSAL'
+  | 'DAILY'
+  | 'WEEKLY'
+  | 'BIWEEKLY'
+  | 'MONTHLY';
 
-// Padronizado para bater com as funções handleAddTransaction do App.tsx
+export type InterestType = 'SIMPLES' | 'PRICE' | 'SIMPLE' | 'SPLIT';
+
+export type PaymentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO' | 'PENDING' | 'PAID' | 'OVERDUE';
+
+export type LoanStatus =
+  | 'ATIVO'
+  | 'QUITADO'
+  | 'ATRASADO'
+  | 'CANCELADO'
+  | 'ACTIVE'
+  | 'COMPLETED'
+  | 'CANCELLED';
+
 export type CashMovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
 
 export interface AuthUser {
@@ -16,67 +34,79 @@ export interface AuthUser {
 export interface CashMovement {
   id?: string;
   type: CashMovementType;
-  amount: number; // ✅ Corrigido de 'amout' para 'amount'
+  amount: number;
   description: string;
   date: string;
   loanId?: string;
-  value?: number; // Fallback para compatibilidade com Dashboard antigo
+  value?: number;
 }
 
 export interface CustomerDocument {
+  id?: string;
   name: string;
   type: string;
-  data: string; // base64
+  data?: string;
+  url?: string;
+  uploadedAt?: string;
 }
 
 export interface Customer {
   id: string;
   name: string;
-  cpf: string;
-  rg: string;
-  email: string;
-  phone: string;
-  address: string;
+  cpf?: string;
+  rg?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
   notes?: string;
+  observations?: string;
   avatar?: string;
+  photoUrl?: string;
+  birthDate?: string;
   documents?: CustomerDocument[];
-  createdAt: number;
+  createdAt?: number;
 }
 
 export interface Installment {
   id?: string;
   number: number;
-  value: number; // ✅ Use 'value' ou 'amount', mas garanta que o Dashboard use o mesmo
-  amount?: number; // ✅ Adicionado como opcional para evitar quebra de tipos
+  value?: number;
+  amount?: number;
   dueDate: string;
-  status: 'PENDENTE' | 'PAGO' | 'ATRASADO'; // ✅ Adicionado ATRASADO
-  paymentDate?: string; // ✅ Adicionado: essencial para o histórico do Dashboard
-  lastPaymentDate?: string; 
+  status: PaymentStatus;
+  paymentDate?: string;
+  paidAt?: string;
+  lastPaymentDate?: string;
   partialPaid?: number;
+  paidAmount?: number;
   lastPaidValue?: number;
   originalValue?: number;
 }
 
 export interface Loan {
   id: string;
-  contractNumber: string;
+  contractNumber?: string;
   customerId: string;
   customerName: string;
   customerPhone?: string;
   amount: number;
   interestRate: number;
-  installmentCount: number;
+  installmentCount?: number;
+  installmentsCount?: number;
   frequency: Frequency;
   interestType: InterestType;
-  totalToReturn: number;
-  installmentValue: number;
+  monthlyPaidInterestRate?: number;
+  monthlyAccruedInterestRate?: number;
+  totalToReturn?: number;
+  installmentValue?: number;
   startDate: string;
-  dueDate: string;
-  createdAt: any; // ✅ Alterado para 'any' pois o Firebase usa Timestamp ou ServerTimestamp
+  dueDate?: string;
+  createdAt?: any;
   notes?: string;
   installments: Installment[];
-  status: 'ATIVO' | 'QUITADO' | 'ATRASADO' | 'CANCELADO';
-  paidAmount: number;
+  status: LoanStatus;
+  paidAmount?: number;
 }
 
 export type View = 'DASHBOARD' | 'CUSTOMERS' | 'LOANS' | 'SIMULATION' | 'REPORTS';
+

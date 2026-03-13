@@ -1,613 +1,494 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useState } from 'react';
+import { Loan, CashMovement } from '../types';
+import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
 import {
-  Wallet, CheckCircle, History, ArrowUpRight, ChevronDown,
-  RotateCcw, ArrowDownLeft, ArrowUpRight as ArrowUpRightIcon, MessageCircle
-} from 'lucide-react';
-import { Loan, Installment, CashMovement } from '../types';
-
-type MovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO';
+  BarChart, 
+  Bar, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend,
+  ResponsiveContainer, 
+  Cell,
+  LabelList,
+  LineChart,
+  Line,
+  AreaChart,
+  Area
+} from 'recharts';
+import {
+  installmentAmount,
+  loanInstallmentsCount,
+  normalizeInstallmentStatus,
+} from '../utils/loanCompat';
 
 interface ReportsProps {
   loans: Loan[];
   cashMovements: CashMovement[];
   caixa: number;
-  onAddTransaction: (type: MovementType, amount: number, description: string) => Promise<void>;
-  onUpdateLoan: (loanId: string, newData: any) => Promise<void>;
-  onUpdateLoanAndAddTransaction?: (
-    loanId: string,
-    newData: Partial<Loan>,
-    type: MovementType,
-    amount: number,
-    description: string,
-  ) => Promise<void>;
+  onAddTransaction: (type: any, amount: number, description: string) => Promise<void>;
+  onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
+  onUpdateLoanAndAddTransaction: (loanId: string, newData: Partial<Loan>, type: any, amount: number, description: string) => Promise<void>;
   onRecalculateCash: () => Promise<void>;
-  onDownloadBackup?: () => Promise<void>;
-  showToast: (message: string, type: 'success' | 'info' | 'error') => void;
+  onDownloadBackup: () => Promise<void>;
+  showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-const JUROS_DIA = 0.015;
-
-const parseISODate = (iso?: string) => {
-  if (!iso) return null;
-  const parts = iso.split('-');
-  const dt = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-  dt.setHours(0, 0, 0, 0);
-  return dt;
-};
-
 const Reports: React.FC<ReportsProps> = ({
-  loans = [],
-  cashMovements = [],
-  caixa = 0,
-  onAddTransaction,
-  onUpdateLoan,
-  onUpdateLoanAndAddTransaction,
-  onRecalculateCash,
-  showToast,
+  loans, cashMovements, caixa, onAddTransaction, onRecalculateCash, onDownloadBackup, showToast
 }) => {
-  const [filterStatus, setFilterStatus] = useState<'ATIVOS' | 'ATRASADOS' | 'FINALIZADOS'>('ATIVOS');
-  const [searchTerm, setSearchTerm] = useState('');
-  const [expandedLoan, setExpandedLoan] = useState<string | null>(null);
-  const [actionLock, setActionLock] = useState<string | null>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
+  const [formData, setFormData] = useState({
+    type: 'ENTRADA',
+    amount: '',
+    description: ''
+  });
 
-  const [cashActionType, setCashActionType] = useState<'APORTE' | 'RETIRADA' | null>(null);
-  const [cashValue, setCashValue] = useState('');
-  const [cashReason, setCashReason] = useState('');
-  const [cashSubmitting, setCashSubmitting] = useState(false);
-  const [recalcLoading, setRecalcLoading] = useState(false);
+  // Calculos Financeiros
+  const totalAportes = cashMovements
+    .filter((m) => ['APORTE', 'ENTRADA'].includes(String(m.type || '').toUpperCase()))
+    .reduce((acc, m) => acc + Number(m.amount || 0), 0);
 
-  const getValue = (inst: any) => Number(inst.amount || inst.value || inst.baseValue || 0);
+  const totalRetiradas = cashMovements
+    .filter((m) => {
+      const type = String(m.type || '').toUpperCase();
+      const desc = String(m.description || '').toUpperCase();
+      const isManualWithdrawal = type === 'RETIRADA' && (desc.startsWith('RETIRADA:') || desc.includes('RETIRADA VIA CAIXA'));
+      return isManualWithdrawal || type === 'SAIDA';
+    })
+    .reduce((acc, m) => acc + Number(m.amount || 0), 0);
 
-  const getValueWithJuros = (inst: Installment) => {
-    const base = getValue(inst);
-    if (inst.status === 'PAGO') return inst.lastPaidValue || base;
-    const vencimento = parseISODate(inst.dueDate);
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
-    if (vencimento && hoje > vencimento) {
-      const diasAtraso = Math.floor((hoje.getTime() - vencimento.getTime()) / (1000 * 60 * 60 * 24));
-      return Number((base + (base * JUROS_DIA * diasAtraso)).toFixed(2));
-    }
-    return base;
-  };
+  const totalEmprestado = loans.reduce((acc, l) => acc + Number(l.amount || 0), 0);
 
-  const stats = useMemo(() => {
-    return (loans || []).reduce((acc, l) => {
-      const emprestado = Number(l.amount || 0);
-      const pago = Number(l.paidAmount || 0);
-      const totalToReturn = Number(l.totalToReturn || 0);
-      acc.totalEmprestado += emprestado;
-      acc.totalRecebido += pago;
-      acc.totalAReceber += Math.max(0, totalToReturn - pago);
-      acc.valorEmRua += Math.max(0, emprestado - pago);
+  const totalRecebido = cashMovements
+    .reduce((acc, m) => {
+      if (m.type === 'PAGAMENTO') return acc + m.amount;
+      if (m.type === 'ESTORNO') return acc - m.amount;
       return acc;
-    }, { totalRecebido: 0, totalAReceber: 0, totalEmprestado: 0, valorEmRua: 0 });
-  }, [loans, cashMovements]);
+    }, 0);
 
-  const cashTotals = useMemo(() => {
-    return (cashMovements || []).reduce((acc, movement) => {
-      const type = String(movement.type || '').toUpperCase();
-      const description = String(movement.description || '').toUpperCase();
-      const amount = Math.abs(Number(movement.amount || movement.value || 0));
-      if (!Number.isFinite(amount)) return acc;
+  const totalAReceber = loans.reduce((acc, loan) => {
+    const unpaid = loan.installments
+      .filter((i) => normalizeInstallmentStatus(i.status) !== 'PAID')
+      .reduce((sum, i) => sum + installmentAmount(i), 0);
+    return acc + unpaid;
+  }, 0);
 
-      if (type === 'APORTE') acc.totalAportes += amount;
-      const isManualRetirada =
-        type === 'RETIRADA' &&
-        (description.startsWith('RETIRADA:') || description.includes('RETIRADA VIA CAIXA'));
-      if (isManualRetirada) acc.totalRetiradas += amount;
-      return acc;
-    }, { totalAportes: 0, totalRetiradas: 0 });
-  }, [cashMovements]);
+  const getLoanExpectedTotal = (loan: Loan) => {
+    const installmentsTotal = (Array.isArray(loan.installments) ? loan.installments : [])
+      .reduce((acc, inst) => acc + Number(inst?.amount || 0), 0);
 
-  const isLoanLate = useCallback((loan: Loan) => {
-    const saldo = Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0);
-    if (saldo <= 0.1) return false;
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
-    return (loan.installments || []).some(inst => {
-      if (inst.status === 'PAGO') return false;
-      const venc = parseISODate(inst.dueDate);
-      return venc ? venc < hoje : false;
-    });
-  }, []);
+    if (installmentsTotal > 0) {
+      return installmentsTotal;
+    }
 
-  const filteredLoans = useMemo(() => {
-    return (loans || []).filter(l => {
-      const saldo = Number(l.totalToReturn || 0) - Number(l.paidAmount || 0);
-      const isLiq = saldo <= 0.5;
-      const matchesSearch = l.customerName.toLowerCase().includes(searchTerm.toLowerCase());
-      if (!matchesSearch) return false;
-      if (filterStatus === 'FINALIZADOS') return isLiq;
-      if (filterStatus === 'ATRASADOS') return !isLiq && isLoanLate(l);
-      return !isLiq;
-    });
-  }, [loans, filterStatus, searchTerm, isLoanLate]);
-
-  const closeCashModal = () => {
-    setCashActionType(null);
-    setCashValue('');
-    setCashReason('');
-    setCashSubmitting(false);
+    return loan.amount * (1 + (loan.interestRate / 100));
   };
 
-  const handleCashAction = async () => {
-    if (!cashActionType) return;
+  // Valor em Rua (Principal Pendente)
+  const valorEmRua = loans.reduce((acc, loan) => {
+    const paidCount = loan.installments.filter((i) => normalizeInstallmentStatus(i.status) === 'PAID').length;
+    const installmentsCount = loanInstallmentsCount(loan) || 1;
+    const principalPerInstallment = Number(loan.amount || 0) / installmentsCount;
+    const principalPaid = paidCount * principalPerInstallment;
+    return acc + (Number(loan.amount || 0) - principalPaid);
+  }, 0);
 
-    const value = Number(String(cashValue).replace(',', '.'));
-    const reason = cashReason.trim();
+  const lucroEstimado = loans.reduce((acc, loan) => {
+    const totalExpected = getLoanExpectedTotal(loan);
+    const profit = Math.max(totalExpected - loan.amount, 0);
+    return acc + profit;
+  }, 0);
 
-    if (!Number.isFinite(value) || value <= 0) {
-      showToast('Informe um valor valido maior que zero.', 'error');
-      return;
-    }
+  // Agrupamento mensal para o grafico e gavetas
+  const getMonthlyData = () => {
+    const months: { [key: string]: { 
+      month: string, 
+      lucro: number, 
+      recebido: number, 
+      emprestado: number, 
+      entradas: number, 
+      saidas: number
+    } } = {};
+    const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-    if (!reason) {
-      showToast('Motivo obrigatorio: informe o motivo da movimentacao.', 'error');
-      return;
-    }
+    // Processar Movimentacoes
+    cashMovements.forEach(m => {
+      const date = new Date(m.date);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+      const label = `${monthNames[date.getMonth()]}/${String(date.getFullYear()).slice(2)}`;
 
-    try {
-      setCashSubmitting(true);
-      await onAddTransaction(cashActionType, value, `${cashActionType}: ${reason}`);
-      closeCashModal();
-    } catch {
-      setCashSubmitting(false);
-      showToast('Nao foi possivel registrar a movimentacao.', 'error');
-    }
-  };
-
-  const handlePayInstallment = async (loan: Loan, idx: number) => {
-    if (actionLock) return;
-    setActionLock(`${loan.id}-${idx}`);
-
-    try {
-      const installments = [...loan.installments];
-      const inst = installments[idx];
-      if (!inst || inst.status === 'PAGO') {
-        showToast('Parcela ja quitada.', 'info');
-        return;
+      if (!months[key]) {
+        months[key] = { month: label, lucro: 0, recebido: 0, emprestado: 0, entradas: 0, saidas: 0 };
       }
 
-      const valorComJuros = getValueWithJuros(inst);
-      const parcialPagoAtual = Number(inst.partialPaid || 0);
-      const valorRestante = Math.max(0, Number((valorComJuros - parcialPagoAtual).toFixed(2)));
-
-      if (valorRestante <= 0.01) {
-        showToast('Parcela ja quitada.', 'info');
-        return;
+      const movementType = String(m.type || '').toUpperCase();
+      const isEntrada = ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(movementType);
+      if (isEntrada) {
+        months[key].entradas += Number(m.amount || 0);
+      } else {
+        months[key].saidas += Number(m.amount || 0);
       }
 
-      if (!window.confirm(`Receber R$ ${valorRestante.toFixed(2)}?`)) return;
-
-      const { partialPaid, ...baseInstallment } = inst;
-      installments[idx] = {
-        ...baseInstallment,
-        status: 'PAGO',
-        lastPaidValue: valorComJuros,
-        paymentDate: new Date().toISOString(),
-      };
-
-      const novoPago = Number(((loan.paidAmount || 0) + valorRestante).toFixed(2));
-      const saldoRestante = Number(loan.totalToReturn || 0) - novoPago;
-      const novoStatus = saldoRestante <= 0.5 ? 'QUITADO' : 'ATIVO';
-
-      await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: novoStatus });
-      await onAddTransaction('PAGAMENTO', valorRestante, `PAG: ${loan.customerName} (P${inst.number})`);
-      showToast('Pagamento registrado!', 'success');
-    } catch {
-      // onUpdateLoan/onAddTransaction ja exibem erros no App.
-    } finally {
-      setActionLock(null);
-    }
-  };
-  const handlePartialPayInstallment = async (loan: Loan, idx: number) => {
-    if (actionLock) return;
-    setActionLock(`${loan.id}-${idx}-partial`);
-
-    try {
-      const installments = [...loan.installments];
-      const inst = installments[idx];
-
-      if (!inst || inst.status === 'PAGO') {
-        showToast('Parcela ja quitada.', 'info');
-        return;
-      }
-
-      const valorComJuros = getValueWithJuros(inst);
-      const parcialPagoAtual = Number(inst.partialPaid || 0);
-      const valorRestante = Number((valorComJuros - parcialPagoAtual).toFixed(2));
-
-      if (valorRestante <= 0) {
-        showToast('Parcela ja quitada.', 'info');
-        return;
-      }
-
-      const parcialInput = window.prompt(`Valor parcial (restante R$ ${valorRestante.toFixed(2)}):`);
-      if (!parcialInput) return;
-
-      const valorParcial = Number(String(parcialInput).replace(',', '.'));
-      if (!Number.isFinite(valorParcial) || valorParcial <= 0) {
-        showToast('Informe um valor parcial valido.', 'error');
-        return;
-      }
-
-      let valorParaDistribuir = Number(valorParcial.toFixed(2));
-      let valorAplicado = 0;
-      const parcelasAfetadas: number[] = [];
-      const nowIso = new Date().toISOString();
-
-      for (let i = idx; i < installments.length && valorParaDistribuir > 0.009; i += 1) {
-        const parcelaAtual = installments[i];
-        if (!parcelaAtual || parcelaAtual.status === 'PAGO') continue;
-
-        const valorAtualComJuros = getValueWithJuros(parcelaAtual);
-        const parcialAtual = Number(parcelaAtual.partialPaid || 0);
-        const restanteAtual = Number((valorAtualComJuros - parcialAtual).toFixed(2));
-        if (restanteAtual <= 0) continue;
-
-        const valorNestePagamento = Math.min(valorParaDistribuir, restanteAtual);
-        const novoParcialPago = Number((parcialAtual + valorNestePagamento).toFixed(2));
-        const quitada = novoParcialPago >= valorAtualComJuros - 0.01;
-
-        parcelasAfetadas.push(parcelaAtual.number);
-
-        if (quitada) {
-          const { partialPaid, ...baseInstallment } = parcelaAtual;
-          installments[i] = {
-            ...baseInstallment,
-            status: 'PAGO',
-            lastPaidValue: valorAtualComJuros,
-            paymentDate: nowIso,
-          };
-        } else {
-          const { paymentDate, lastPaidValue, ...baseInstallment } = parcelaAtual;
-          installments[i] = {
-            ...baseInstallment,
-            status: parcelaAtual.status === 'ATRASADO' ? 'ATRASADO' : 'PENDENTE',
-            partialPaid: novoParcialPago,
-          };
+      if (movementType === 'PAGAMENTO' || movementType === 'ESTORNO') {
+        const isEstorno = movementType === 'ESTORNO';
+        months[key].recebido += isEstorno ? -Number(m.amount || 0) : Number(m.amount || 0);
+        
+        // Calcular Lucro (Juros) proporcional
+        if (m.loanId) {
+          const loan = loans.find(l => l.id === m.loanId);
+          if (loan) {
+            const totalExpected = getLoanExpectedTotal(loan);
+            const totalInterest = Math.max(totalExpected - loan.amount, 0);
+            const profitPortion = totalExpected > 0 ? (Number(m.amount || 0) / totalExpected) * totalInterest : 0;
+            months[key].lucro += isEstorno ? -profitPortion : profitPortion;
+          }
         }
-
-        valorAplicado = Number((valorAplicado + valorNestePagamento).toFixed(2));
-        valorParaDistribuir = Number((valorParaDistribuir - valorNestePagamento).toFixed(2));
       }
 
-      if (valorAplicado <= 0) {
-        showToast('Nao foi possivel aplicar o pagamento parcial.', 'error');
-        return;
+      if (movementType === 'RETIRADA' && String(m.description || '').toUpperCase().includes('EMPRESTIMO')) {
+        months[key].emprestado += Number(m.amount || 0);
       }
+    });
 
-      const novoPago = Number(((loan.paidAmount || 0) + valorAplicado).toFixed(2));
-      const saldoRestante = Number(loan.totalToReturn || 0) - novoPago;
-      const novoStatus = saldoRestante <= 0.5 ? 'QUITADO' : 'ATIVO';
-
-      await onUpdateLoan(loan.id, { installments, paidAmount: novoPago, status: novoStatus });
-
-      const primeiraParcela = parcelasAfetadas[0];
-      const ultimaParcela = parcelasAfetadas[parcelasAfetadas.length - 1];
-      const faixaParcelas = parcelasAfetadas.length > 1
-        ? `P${primeiraParcela} a P${ultimaParcela}`
-        : `P${primeiraParcela}`;
-
-      await onAddTransaction('PAGAMENTO', valorAplicado, `PAG PARCIAL: ${loan.customerName} (${faixaParcelas})`);
-
-      if (valorParaDistribuir > 0.01) {
-        showToast(`Pagamento aplicado. Excedente de R$ ${valorParaDistribuir.toFixed(2)} ignorado por falta de saldo.`, 'info');
-        return;
-      }
-
-      if (parcelasAfetadas.length > 1) {
-        showToast(`Pagamento parcial distribuido ate ${faixaParcelas}.`, 'success');
-        return;
-      }
-
-      const parcelaAtualizada = installments[idx];
-      if (parcelaAtualizada.status === 'PAGO') {
-        showToast('Parcela quitada com pagamento parcial final!', 'success');
-      } else {
-        const valorAtualizado = getValueWithJuros(parcelaAtualizada);
-        const parcialAtualizado = Number(parcelaAtualizada.partialPaid || 0);
-        const restante = Math.max(0, Number((valorAtualizado - parcialAtualizado).toFixed(2)));
-        showToast(`Pagamento parcial registrado. Restante: R$ ${restante.toFixed(2)}`, 'info');
-      }
-    } catch {
-      showToast('Erro ao registrar pagamento parcial.', 'error');
-    } finally {
-      setActionLock(null);
-    }
+    return Object.keys(months)
+      .sort()
+      .reverse() // Mais recentes primeiro para a lista
+      .map(key => months[key]);
   };
 
-  const handleRefundInstallment = async (loan: Loan, idx: number) => {
-    const inst = loan.installments[idx];
-    if (!inst || inst.status !== 'PAGO') {
-      showToast('Parcela nao esta paga.', 'info');
-      return;
-    }
+  const monthlyData = getMonthlyData();
+  const chartData = [...monthlyData].reverse().slice(-6); // Ultimos 6 meses para o grafico
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
 
-    const valorParaEstornar = Number(inst.lastPaidValue || getValue(inst));
-    if (!Number.isFinite(valorParaEstornar) || valorParaEstornar <= 0) {
-      showToast('Valor invalido para estorno.', 'error');
-      return;
-    }
-
-    if (!window.confirm(`Estornar pagamento de R$ ${valorParaEstornar.toFixed(2)}?`)) return;
-
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     try {
-      const installments = [...loan.installments];
-      const installmentBase: Installment = { ...inst };
-      delete installmentBase.paymentDate;
-      delete installmentBase.lastPaidValue;
-      delete installmentBase.partialPaid;
-      installments[idx] = { ...installmentBase, status: 'PENDENTE' };
-
-      const novoPago = Math.max(0, Number((Number(loan.paidAmount || 0) - valorParaEstornar).toFixed(2)));
-      const saldoRestante = Number(loan.totalToReturn || 0) - novoPago;
-      const novoStatus = saldoRestante <= 0.5 ? 'QUITADO' : 'ATIVO';
-      const updatePayload = { installments, paidAmount: novoPago, status: novoStatus };
-      const estornoDesc = `ESTORNO: ${loan.customerName} (P${inst.number})`;
-
-      if (onUpdateLoanAndAddTransaction) {
-        await onUpdateLoanAndAddTransaction(loan.id, updatePayload, 'ESTORNO', valorParaEstornar, estornoDesc);
-      } else {
-        await onUpdateLoan(loan.id, updatePayload);
-        await onAddTransaction('ESTORNO', valorParaEstornar, estornoDesc);
-      }
-
-      showToast('Estorno realizado!', 'info');
-    } catch {
-      // onUpdateLoanAndAddTransaction/onAddTransaction ja exibem erros no App.
+      await onAddTransaction(formData.type as any, Number(formData.amount), formData.description);
+      setIsModalOpen(false);
+      setFormData({ type: 'ENTRADA', amount: '', description: '' });
+    } catch (e) {
+      // Erro tratado no App.tsx
     }
   };
+
+  const handleBackupDownload = async () => {
+    setIsDownloadingBackup(true);
+    try {
+      await onDownloadBackup();
+    } finally {
+      setIsDownloadingBackup(false);
+    }
+  };
+
+  const financialCards = [
+    { label: 'Total a Receber', value: totalAReceber, color: 'text-[#BF953F]' },
+    { label: 'Valor em Rua', value: valorEmRua, color: 'text-blue-500' },
+    { label: 'Lucro Estimado', value: lucroEstimado, color: 'text-purple-500' },
+    { label: 'Total Emprestado', value: totalEmprestado, color: 'text-zinc-400' },
+    { label: 'Total Recebido', value: totalRecebido, color: 'text-emerald-500' },
+    { label: 'Total Aportes', value: totalAportes, color: 'text-cyan-500' },
+    { label: 'Total Retiradas', value: totalRetiradas, color: 'text-red-500' },
+  ];
 
   return (
-    <div className="space-y-5 sm:space-y-6 pb-16 sm:pb-20 max-w-[1400px] mx-auto">
-      <div className="flex flex-col xl:flex-row gap-3 sm:gap-4">
-        <div className="w-full xl:w-[300px] p-4 sm:p-6 rounded-3xl sm:rounded-[2rem] bg-gradient-to-br from-emerald-500/10 to-transparent border border-emerald-500/20 shadow-2xl relative overflow-hidden group flex flex-col justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3 mb-4">
-              <div className="p-2.5 rounded-2xl bg-emerald-500 text-black shadow-lg"><Wallet size={20} /></div>
-              <span className="text-[8px] sm:text-[9px] font-black uppercase text-emerald-500 tracking-[0.24em] sm:tracking-[0.28em]">Caixa Geral</span>
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-black text-white tracking-tighter mb-5 sm:mb-6">
-              R$ {Number(caixa || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-            </h2>
-          </div>
-
-          <div className="space-y-2 relative z-10">
-            <div className="flex gap-2">
-              <button
-                onClick={() => {
-                  setCashActionType('APORTE');
-                  setCashValue('');
-                  setCashReason('');
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-emerald-500 text-black text-[9px] font-black uppercase hover:bg-emerald-400 transition-all flex items-center justify-center gap-2 shadow-lg"
-              >
-                <ArrowDownLeft size={14} /> Aporte
-              </button>
-              <button
-                onClick={() => {
-                  setCashActionType('RETIRADA');
-                  setCashValue('');
-                  setCashReason('');
-                }}
-                className="flex-1 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-[9px] font-black uppercase hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2 shadow-lg"
-              >
-                <ArrowUpRight size={14} /> Retirada
-              </button>
-            </div>
-            <button
-              onClick={async () => {
-                if (!window.confirm('Recalcular o caixa com base em todo o historico de movimentacoes?')) return;
-                try {
-                  setRecalcLoading(true);
-                  await onRecalculateCash();
-                } finally {
-                  setRecalcLoading(false);
-                }
-              }}
-              disabled={recalcLoading}
-              className="w-full py-2.5 rounded-xl bg-zinc-900 border border-zinc-700 text-zinc-200 text-[9px] font-black uppercase hover:bg-zinc-800 transition-all disabled:opacity-60"
+    <div className="space-y-8">
+      {/* Cartao principal de caixa */}
+      <div className="bg-[#0b1730] border border-zinc-900 p-6 sm:p-8 md:p-12 rounded-[3rem] relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-8">
+        <div className="absolute top-0 right-0 p-8 opacity-5">
+          <Wallet size={160} className="text-[#BF953F]" />
+        </div>
+        <div className="relative z-10">
+          <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] mb-4">Saldo Consolidado em Caixa</p>
+          <h2 className="text-3xl sm:text-4xl md:text-6xl font-black gold-text tracking-tighter break-words">
+            R$ {caixa.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+          </h2>
+          <div className="flex items-center gap-6 mt-6">
+            <button 
+              onClick={onRecalculateCash}
+              className="flex items-center gap-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest hover:text-[#BF953F] transition-colors"
             >
-              {recalcLoading ? 'Recalculando...' : 'Recalcular Caixa'}
+              <RefreshCcw size={12} /> Sincronizar Saldo
             </button>
+            <div className="h-4 w-[1px] bg-zinc-800" />
+            <div className="flex items-center gap-2">
+              <TrendingUp size={12} className="text-emerald-500" />
+              <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Operacao Ativa</span>
+            </div>
           </div>
         </div>
-
-        <div className="xl:flex-1 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4">
-          <StatCard title="A Receber Total" value={stats.totalAReceber} color="text-red-500" icon={<History size={20}/>} desc="Inclui juros previstos" />
-          <StatCard title="Valor na Rua" value={stats.valorEmRua} color="text-orange-400" icon={<ArrowUpRightIcon size={20}/>} desc="Capital puro pendente" />
-          <StatCard title="Lucro Estimado" value={Math.max(0, Number((stats.totalAReceber - stats.valorEmRua).toFixed(2)))} color="text-emerald-300" icon={<CheckCircle size={20}/>} desc="A receber menos valor na rua" />
-          <StatCard title="Total Emprestado" value={stats.totalEmprestado} color="text-zinc-400" icon={<ArrowDownLeft size={20}/>} desc="Historico de saidas" />
-          <StatCard title="Total Recebido" value={stats.totalRecebido} color="text-blue-400" icon={<CheckCircle size={20}/>} desc="Historico de entradas" />
-          <StatCard title="Total de Aportes" value={cashTotals.totalAportes} color="text-emerald-400" icon={<ArrowDownLeft size={20}/>} desc="Somente movimentacoes APORTE" />
-          <StatCard title="Total de Retiradas" value={cashTotals.totalRetiradas} color="text-rose-400" icon={<ArrowUpRight size={20}/>} desc="Movimentacoes RETIRADA/SAIDA" />
+        
+        <div className="relative z-10 shrink-0 flex flex-col sm:flex-row gap-3">
+          <button 
+            onClick={() => { setFormData({ ...formData, type: 'ENTRADA' }); setIsModalOpen(true); }}
+            className="px-6 sm:px-10 py-4 sm:py-6 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.2em] hover:scale-105 transition-all shadow-[0_0_40px_rgba(191,149,63,0.15)] flex items-center gap-2 sm:gap-3"
+          >
+            <Plus size={18} /> Novo Lancamento
+          </button>
+          <button
+            onClick={handleBackupDownload}
+            disabled={isDownloadingBackup}
+            className="px-6 sm:px-8 py-4 sm:py-6 bg-zinc-900 border border-zinc-800 text-white rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.15em] hover:border-[#BF953F]/50 transition-all flex items-center gap-2 sm:gap-3 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <Download size={18} /> {isDownloadingBackup ? 'Gerando Backup...' : 'Backup Completo'}
+          </button>
         </div>
       </div>
 
-      <div className="bg-[#0a0a0a] border border-white/5 rounded-3xl sm:rounded-[2.5rem] p-4 sm:p-6 lg:p-8 shadow-xl">
-        <div className="flex flex-col md:flex-row gap-3 sm:gap-4 mb-6 sm:mb-8">
-          <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="PESQUISAR CLIENTE..." className="flex-1 bg-black border border-white/10 rounded-xl sm:rounded-2xl px-4 sm:px-6 py-3 sm:py-4 text-[10px] sm:text-[11px] text-white outline-none font-bold uppercase tracking-wider" />
-          <div className="flex bg-black p-1 sm:p-1.5 rounded-xl sm:rounded-2xl border border-white/5 w-full md:w-auto overflow-x-auto">
-            {(['ATIVOS', 'ATRASADOS', 'FINALIZADOS'] as const).map(s => (
-              <button key={s} onClick={() => setFilterStatus(s)} className={`whitespace-nowrap px-4 sm:px-8 py-2.5 sm:py-3 rounded-lg sm:rounded-xl text-[9px] sm:text-[10px] font-black transition-all ${filterStatus === s ? (s === 'ATRASADOS' ? 'bg-red-600 text-white shadow-lg shadow-red-600/20' : 'bg-white text-black shadow-lg') : 'text-zinc-500 hover:text-zinc-300'}`}>
-                {s === 'FINALIZADOS' ? 'QUITADOS' : s}
-              </button>
+      {/* Grade de indicadores financeiros */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        {financialCards.map((card, i) => (
+          <div key={i} className="bg-[#0b1730] border border-zinc-900 p-5 rounded-2xl hover:border-[#BF953F]/30 transition-all group">
+            <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest mb-2 group-hover:text-zinc-400 transition-colors break-words">{card.label}</p>
+            <p className={`text-sm font-black ${card.color}`}>
+              R$ {card.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {/* Resumo de lucratividade */}
+      <div className="bg-[#0b1730] border border-zinc-900 rounded-[2.5rem] p-8">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-12">
+          <div className="shrink-0">
+            <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Resumo de Lucratividade</h3>
+            <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">Indicadores de desempenho real</p>
+          </div>
+          
+          <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-6">
+            <div className="p-5 border-l-2 border-[#BF953F] bg-zinc-900/10 relative group cursor-help rounded-r-2xl">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Media Mensal de Lucro</p>
+                <Info size={10} className="text-zinc-700" />
+              </div>
+              <p className="text-xl font-black text-white">
+                R$ {(chartData.reduce((acc, curr) => acc + curr.lucro, 0) / (chartData.length || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
+              
+              {/* Tooltip */}
+              <div className="absolute bottom-full left-0 mb-2 w-56 p-4 bg-[#0a0a0a] border border-zinc-800 rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl transform translate-y-2 group-hover:translate-y-0">
+                <p className="text-[8px] font-black text-[#BF953F] uppercase tracking-widest mb-2">Analise de Media</p>
+                <p className="text-[10px] text-zinc-500 leading-relaxed">
+                  Media aritmetica do lucro real (juros recebidos) nos ultimos {chartData.length} meses.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-5 border-l-2 border-emerald-500 bg-zinc-900/10 relative group cursor-help rounded-r-2xl">
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Recorde de Faturamento</p>
+                <Info size={10} className="text-zinc-700" />
+              </div>
+              <p className="text-xl font-black text-white">
+                {chartData.length > 0 ? chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).month : '---'}
+              </p>
+
+              {/* Tooltip */}
+              <div className="absolute bottom-full left-0 mb-2 w-56 p-4 bg-[#0a0a0a] border border-zinc-800 rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl transform translate-y-2 group-hover:translate-y-0">
+                <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest mb-2">Pico de Desempenho</p>
+                {chartData.length > 0 ? (
+                  <p className="text-[10px] text-zinc-500 leading-relaxed">
+                    Mes com maior volume de juros recebidos: {chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).month} (R$ {chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).lucro.toLocaleString('pt-BR')})
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-zinc-500">Dados insuficientes para analise.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Desempenho mensal */}
+      <div className="bg-[#0b1730] border border-zinc-900 rounded-[3rem] p-6 sm:p-8 md:p-10">
+        <div className="flex items-center justify-between mb-12">
+          <div>
+            <h3 className="text-sm font-black gold-text uppercase tracking-[0.3em]">Desempenho Mensal</h3>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] mt-2">Historico detalhado de fluxo e rentabilidade</p>
+          </div>
+          <div className="p-4 bg-zinc-900/50 rounded-2xl border border-zinc-800">
+            <BarChart3 size={24} className="text-[#BF953F]" />
+          </div>
+        </div>
+        
+        <div className="space-y-6">
+            {monthlyData.map((data) => (
+              <div key={data.month} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#071226]/20">
+                <button 
+                  onClick={() => setExpandedMonth(expandedMonth === data.month ? null : data.month)}
+                  className="w-full p-6 flex items-center justify-between hover:bg-zinc-900/30 transition-colors"
+                >
+                  <div className="flex items-center gap-6">
+                    <span className="text-xs font-black text-white uppercase tracking-widest w-20">{data.month}</span>
+                    <div className="hidden sm:flex items-center gap-4">
+                      <div className="flex flex-col items-start">
+                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Entradas</span>
+                        <span className="text-[10px] font-black text-emerald-500">R$ {data.entradas.toLocaleString('pt-BR')}</span>
+                      </div>
+                      <div className="flex flex-col items-start">
+                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Saidas</span>
+                        <span className="text-[10px] font-black text-red-500">R$ {data.saidas.toLocaleString('pt-BR')}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Lucro Real</span>
+                      <span className={`text-xs font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
+                        R$ {data.lucro.toLocaleString('pt-BR')}
+                      </span>
+                    </div>
+                    <ChevronDown size={16} className={`text-zinc-500 transition-transform ${expandedMonth === data.month ? 'rotate-180' : ''}`} />
+                  </div>
+                </button>
+                
+                {expandedMonth === data.month && (
+                  <div className="p-6 border-t border-zinc-900 bg-zinc-950/30 animate-in slide-in-from-top duration-200">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total de Entradas</span>
+                          <span className="text-xs font-black text-emerald-500">R$ {data.entradas.toLocaleString('pt-BR')}</span>
+                        </div>
+                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total de Saidas</span>
+                          <span className="text-xs font-black text-red-500">R$ {data.saidas.toLocaleString('pt-BR')}</span>
+                        </div>
+                      </div>
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total Recebido</span>
+                          <span className="text-xs font-black text-zinc-300">R$ {data.recebido.toLocaleString('pt-BR')}</span>
+                        </div>
+                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Capital Emprestado</span>
+                          <span className="text-xs font-black text-zinc-300">R$ {data.emprestado.toLocaleString('pt-BR')}</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="mt-8 h-[350px] w-full bg-[#071226]/40 p-6 rounded-[2rem] border border-zinc-900/50">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={[data]} margin={{ top: 30, right: 30, left: 20, bottom: 20 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} opacity={0.5} />
+                          <XAxis 
+                            dataKey="month" 
+                            axisLine={false} 
+                            tickLine={false}
+                            tick={{ fill: '#52525b', fontSize: 10, fontWeight: 900 }}
+                          />
+                          <YAxis 
+                            axisLine={false} 
+                            tickLine={false}
+                            tick={{ fill: '#52525b', fontSize: 10, fontWeight: 900 }}
+                            tickFormatter={(value) => `R$ ${value >= 1000 ? (value/1000).toFixed(0) + 'k' : value}`}
+                          />
+                          <Tooltip 
+                            cursor={{ fill: 'transparent' }}
+                            contentStyle={{ 
+                              backgroundColor: '#050505', 
+                              border: '1px solid #27272a', 
+                              borderRadius: '1.5rem',
+                              padding: '12px 16px',
+                              boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)'
+                            }}
+                            itemStyle={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', padding: '2px 0' }}
+                            formatter={(value: number) => [`R$ ${value.toLocaleString('pt-BR')}`, '']}
+                          />
+                          <Legend 
+                            verticalAlign="top" 
+                            align="right"
+                            iconType="circle"
+                            iconSize={8}
+                            wrapperStyle={{ paddingBottom: '20px', fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}
+                          />
+                          <Bar dataKey="entradas" name="Entradas" fill="#10b981" radius={[6, 6, 0, 0]} barSize={45}>
+                            <LabelList 
+                              dataKey="entradas" 
+                              position="top" 
+                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
+                              style={{ fill: '#10b981', fontSize: '9px', fontWeight: 900 }}
+                            />
+                          </Bar>
+                          <Bar dataKey="saidas" name="Saidas" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={45}>
+                            <LabelList 
+                              dataKey="saidas" 
+                              position="top" 
+                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
+                              style={{ fill: '#ef4444', fontSize: '9px', fontWeight: 900 }}
+                            />
+                          </Bar>
+                          <Bar dataKey="lucro" name="Lucro Real" fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
+                            <LabelList 
+                              dataKey="lucro" 
+                              position="top" 
+                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
+                              style={{ fill: '#BF953F', fontSize: '9px', fontWeight: 900 }}
+                            />
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                )}
+              </div>
             ))}
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4">
-          {filteredLoans.map(loan => (
-            <div key={loan.id} className="group border border-white/5 rounded-3xl bg-white/[0.01] hover:bg-white/[0.03] transition-all overflow-hidden">
-              <div className="p-4 sm:p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3 sm:gap-5 min-w-0">
-                  <div className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl flex items-center justify-center border shrink-0 ${isLoanLate(loan) ? 'bg-red-500/10 border-red-500/20 text-red-500' : 'bg-white/5 border-white/10 text-zinc-400'}`}>
-                    <CheckCircle size={24} />
-                  </div>
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
-                      <h4 className="text-xs sm:text-sm font-black text-white uppercase truncate max-w-[48vw] sm:max-w-none">{loan.customerName}</h4>
-                      <button
-                        onClick={() => {
-                          const msg = encodeURIComponent(
-                            `Ola ${loan.customerName}, entrando em contato sobre seu contrato com a GR SOLUTION.`
-                          );
-                          window.open(`https://wa.me/?text=${msg}`, '_blank');
-                        }}
-                        className="p-1.5 bg-green-500/10 text-green-500 rounded-lg hover:bg-green-500 hover:text-white transition-all"
-                        title="Cobrar via WhatsApp"
-                      >
-                        <MessageCircle size={14} />
-                      </button>
-
-                      {loan.paidAmount > 0 && (
-                        <button
-                          onClick={async () => {
-                            if (!window.confirm('ESTORNAR TODOS os pagamentos deste cliente?')) return;
-
-                            const valorTotalEstorno = Number(loan.paidAmount || 0);
-                            if (!Number.isFinite(valorTotalEstorno) || valorTotalEstorno <= 0) {
-                              showToast('Nao ha valor pago para estornar.', 'info');
-                              return;
-                            }
-
-                            const reset = loan.installments.map(i => {
-                              const installmentBase: Installment = { ...i };
-                              delete installmentBase.paymentDate;
-                              delete installmentBase.lastPaidValue;
-                              delete installmentBase.partialPaid;
-                              return { ...installmentBase, status: 'PENDENTE' as const };
-                            });
-
-                            try {
-                              if (onUpdateLoanAndAddTransaction) {
-                                await onUpdateLoanAndAddTransaction(
-                                  loan.id,
-                                  { installments: reset, paidAmount: 0, status: 'ATIVO' },
-                                  'ESTORNO',
-                                  valorTotalEstorno,
-                                  `ESTORNO TOTAL: ${loan.customerName}`,
-                                );
-                              } else {
-                                await onUpdateLoan(loan.id, { installments: reset, paidAmount: 0, status: 'ATIVO' });
-                                await onAddTransaction('ESTORNO', valorTotalEstorno, `ESTORNO TOTAL: ${loan.customerName}`);
-                              }
-
-                              showToast('Contrato resetado!', 'info');
-                            } catch {
-                              showToast('Erro ao estornar contrato.', 'error');
-                            }
-                          }}
-                          className="p-1.5 bg-red-500/10 text-red-500 rounded-lg hover:bg-red-500 hover:text-white transition-all"
-                        >
-                          <RotateCcw size={14} />
-                        </button>
-                      )}
-                    </div>
-                    <p className="text-[10px] text-zinc-500 font-bold uppercase">Saldo Devedor: R$ {(Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0)).toFixed(2)}</p>
-                  </div>
-                </div>
-                <button onClick={() => setExpandedLoan(expandedLoan === loan.id ? null : loan.id)} className="w-full sm:w-auto px-4 sm:px-5 py-2.5 sm:py-3 bg-white/5 text-zinc-400 rounded-2xl hover:text-white transition-all border border-white/5 flex items-center justify-center gap-2">
-                  <span className="text-[9px] font-black uppercase tracking-widest">Ver Parcelas</span>
-                  <ChevronDown size={18} className={expandedLoan === loan.id ? 'rotate-180' : ''} />
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#071226]/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-[#0b1730] border border-zinc-900 w-full max-w-lg rounded-[2.5rem] p-5 sm:p-8 relative max-h-[92dvh] overflow-y-auto">
+            <button onClick={() => setIsModalOpen(false)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
+              <Plus className="rotate-45" size={24} />
+            </button>
+            <h2 className="text-xl font-black gold-text uppercase tracking-tighter mb-8">Movimentacao de Caixa</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Tipo</label>
+                <select
+                  required
+                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+                  value={formData.type}
+                  onChange={e => setFormData({ ...formData, type: e.target.value })}
+                >
+                  <option value="ENTRADA">ENTRADA / APORTE</option>
+                  <option value="SAIDA">SAIDA / RETIRADA</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>
+                <input
+                  type="number" placeholder="0.00" required
+                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                  value={formData.amount}
+                  onChange={e => setFormData({ ...formData, amount: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Descricao / Motivo</label>
+                <input
+                  type="text" placeholder="EX: APORTE INICIAL" required
+                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                  value={formData.description}
+                  onChange={e => setFormData({ ...formData, description: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
+                <button 
+                  type="button"
+                  onClick={() => setIsModalOpen(false)}
+                  className="py-5 bg-zinc-900 border border-zinc-800 text-zinc-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:text-white transition-all"
+                >
+                  Cancelar
+                </button>
+                <button className="py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-[0_0_20px_rgba(191,149,63,0.1)]">
+                  Confirmar
                 </button>
               </div>
-
-              {expandedLoan === loan.id && (
-                <div className="p-4 sm:p-6 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 border-t border-white/5 bg-black/40">
-                  {loan.installments.map((inst, idx) => {
-                    const valorAtualizado = getValueWithJuros(inst);
-                    const temJuros = valorAtualizado > getValue(inst) && inst.status !== 'PAGO';
-                    const parcialPago = Number(inst.partialPaid || 0);
-                    const restanteParcial = Math.max(0, Number((valorAtualizado - parcialPago).toFixed(2))); 
-                    return (
-                      <div key={idx} className={`p-4 sm:p-5 rounded-2xl border transition-all ${inst.status === 'PAGO' ? 'border-emerald-500/20 bg-emerald-500/5' : 'border-white/5 bg-white/[0.02]'}`}>
-                        <div className="flex justify-between items-center mb-2">
-                          <span className="text-[8px] font-black text-zinc-500 uppercase">P{inst.number}</span>
-                          <span className={`text-[9px] font-bold ${temJuros ? 'text-red-500' : 'text-zinc-400'}`}>{inst.dueDate.split('-').reverse().join('/')}</span>
-                        </div>
-                        <p className={`text-base sm:text-lg font-black ${inst.status === 'PAGO' ? 'text-emerald-500' : (temJuros ? 'text-red-500' : 'text-white')}`}>
-                          R$ {valorAtualizado.toFixed(2)}
-                        </p>
-                        <div className="mt-4 space-y-2">
-                          {inst.status !== 'PAGO' ? (
-                            <>
-                              {parcialPago > 0 && (
-                                <div className="text-[8px] font-black text-amber-500 uppercase text-center">
-                                  Pago parcial: R$ {parcialPago.toFixed(2)} | Restante: R$ {restanteParcial.toFixed(2)}
-                                </div>
-                              )}
-                              <button onClick={() => handlePayInstallment(loan, idx)} className="w-full py-3 bg-white text-black text-[10px] font-black rounded-xl hover:bg-emerald-500 transition-all uppercase">Receber Agora</button>
-                              <button onClick={() => handlePartialPayInstallment(loan, idx)} className="w-full py-2 bg-amber-500/10 text-amber-400 text-[9px] font-black rounded-lg hover:bg-amber-500 hover:text-black transition-all uppercase">
-                                Pagamento Parcial
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <div className="text-[8px] font-black text-emerald-600 uppercase flex items-center gap-2 justify-center"><CheckCircle size={10}/> Pago em {new Date(inst.paymentDate!).toLocaleDateString()}</div>
-                              <button onClick={() => handleRefundInstallment(loan, idx)} className="w-full py-2 bg-red-500/10 text-red-500 text-[9px] font-black rounded-lg hover:bg-red-600 hover:text-white transition-all uppercase flex items-center justify-center gap-2">
-                                <RotateCcw size={12}/> Estornar Parcela
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {cashActionType && (
-        <div className="fixed inset-0 z-[210] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl sm:rounded-3xl border border-zinc-800 bg-[#0b0b0b] p-4 sm:p-6 space-y-5 shadow-2xl">
-            <h3 className="text-sm font-black uppercase tracking-widest text-white">
-              {cashActionType === 'APORTE' ? 'Registrar Aporte' : 'Registrar Retirada'}
-            </h3>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Valor (R$)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={cashValue}
-                onChange={(e) => setCashValue(e.target.value)}
-                className="w-full px-4 py-3 rounded-xl bg-black border border-zinc-800 text-white outline-none focus:border-[#BF953F]"
-              />
-            </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-widest text-zinc-500">Motivo</label>
-              <p className="text-[10px] text-zinc-400">Campo obrigatorio.</p>
-              <textarea
-                value={cashReason}
-                onChange={(e) => setCashReason(e.target.value)}
-                rows={3}
-                className="w-full px-4 py-3 rounded-xl bg-black border border-zinc-800 text-white outline-none focus:border-[#BF953F] resize-none"
-                placeholder="Descreva o motivo"
-              />
-            </div>
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                type="button"
-                onClick={closeCashModal}
-                className="px-4 py-2 rounded-xl border border-zinc-700 text-zinc-300 text-[10px] font-black uppercase"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                disabled={cashSubmitting}
-                onClick={handleCashAction}
-                className="px-5 py-2 rounded-xl gold-gradient text-black text-[10px] font-black uppercase disabled:opacity-50"
-              >
-                Confirmar
-              </button>
-            </div>
+            </form>
           </div>
         </div>
       )}
@@ -615,17 +496,9 @@ const Reports: React.FC<ReportsProps> = ({
   );
 };
 
-const StatCard = ({ title, value, color, icon, desc }: any) => (
-  <div className="h-full min-h-[132px] sm:min-h-[152px] p-4 sm:p-6 rounded-3xl sm:rounded-[2rem] bg-white/[0.02] border border-white/5 hover:border-white/10 transition-all shadow-lg flex flex-col justify-between">
-    <div className="flex justify-between items-start mb-4">
-      <div className={`p-2.5 sm:p-3 rounded-xl bg-black border border-white/5 shadow-inner ${color}`}>{icon}</div>
-      <div className="text-right">
-        <p className="text-[8px] sm:text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">{title}</p>
-        <h3 className="text-xl sm:text-2xl font-black text-white tracking-tight">R$ {Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</h3>
-      </div>
-    </div>
-    <p className="text-[8px] font-bold text-zinc-600 uppercase tracking-tight">{desc}</p>
-  </div>
-);
-
 export default Reports;
+
+
+
+
+

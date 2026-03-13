@@ -1,518 +1,1042 @@
-import React, { useState, useMemo } from 'react';
-
-import {
-
-  FileText,
-
-  ShieldCheck,
-
-  Save,
-
-  CalendarDays
-
-} from 'lucide-react';
-
-
+﻿import React, { useState } from 'react';
 import { Customer, Loan, Installment } from '../types';
-
+import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban } from 'lucide-react';
 import { generateContractPDF } from '../utils/contractGenerator';
-
-type MovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
-
+import {
+  installmentAmount,
+  installmentPaidAmount,
+  loanInstallmentsCount,
+  normalizeInstallmentStatus,
+  normalizeLoanStatus,
+} from '../utils/loanCompat';
 
 interface LoanSectionProps {
-
   customers: Customer[];
-
   loans: Loan[];
-
-  onAddLoan: (loan: Loan) => Promise<void>;
-  onUpdateLoan?: (loanId: string, newData: Partial<Loan>) => Promise<void>;
-  onDeleteLoan?: (loanId: string) => Promise<void>;
+  onAddLoan: (l: Loan) => Promise<void> | void;
+  onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
+  onDeleteLoan: (loanId: string) => Promise<void>;
+  showToast: (msg: string, type?: 'success' | 'error') => void;
   initialExpandedLoanId?: string | null;
-  onUpdateLoanAndAddTransaction?: (
+  onUpdateLoanAndAddTransaction: (
     loanId: string,
     newData: Partial<Loan>,
-    type: MovementType,
+    type: 'PAGAMENTO' | 'ESTORNO',
     amount: number,
-    description: string,
+    description: string
   ) => Promise<void>;
-
-  showToast?: (message: string, type: 'success' | 'error' | 'info') => void;
-
 }
 
-
-
-const LoanSection: React.FC<LoanSectionProps> = ({
-
-  customers = [],
-
-  loans = [],
-
-  onAddLoan,
-
-  showToast
-
+const LoanSection: React.FC<LoanSectionProps> = ({ 
+  customers, 
+  loans, 
+  onAddLoan, 
+  onUpdateLoan,
+  onDeleteLoan,
+  showToast, 
+  initialExpandedLoanId,
+  onUpdateLoanAndAddTransaction
 }) => {
+  const buildDefaultFormData = () => ({
+    customerId: '',
+    amount: '',
+    interestRate: '',
+    monthlyPaidInterestRate: '',
+    monthlyAccruedInterestRate: '',
+    interestType: 'SIMPLE' as 'SIMPLE' | 'PRICE' | 'SPLIT',
+    frequency: 'MONTHLY' as 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY',
+    installmentsCount: '',
+    startDate: new Date().toISOString().split('T')[0]
+  });
 
-  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingLoanId, setEditingLoanId] = useState<string | null>(null);
+  const [expandedLoanId, setExpandedLoanId] = useState<string | null>(initialExpandedLoanId || null);
+  const [processingPayment, setProcessingPayment] = useState<string | null>(null);
+  const [paymentModal, setPaymentModal] = useState<{ isOpen: boolean; loanId: string; installmentIndex: number; amount: string } | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'>('ALL');
 
-  const [amount, setAmount] = useState('');
+  const fromLegacyInterestType = (value: unknown): 'SIMPLE' | 'PRICE' | 'SPLIT' => {
+    const normalized = String(value || '').toUpperCase();
+    if (normalized === 'PRICE') return 'PRICE';
+    if (normalized === 'SPLIT') return 'SPLIT';
+    return 'SIMPLE';
+  };
 
-  const [interestRate, setInterestRate] = useState('10');
+  const toLegacyInterestType = (value: 'SIMPLE' | 'PRICE' | 'SPLIT'): 'SIMPLES' | 'PRICE' | 'SPLIT' => {
+    if (value === 'PRICE') return 'PRICE';
+    if (value === 'SPLIT') return 'SPLIT';
+    return 'SIMPLES';
+  };
 
-  const [installmentsCount, setInstallmentsCount] = useState('1');
+  const fromLegacyFrequency = (value: unknown): 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' => {
+    const normalized = String(value || '').toUpperCase();
+    if (normalized === 'DAILY' || normalized === 'DIARIO') return 'DAILY';
+    if (normalized === 'WEEKLY' || normalized === 'SEMANAL') return 'WEEKLY';
+    if (normalized === 'BIWEEKLY' || normalized === 'QUINZENAL') return 'BIWEEKLY';
+    return 'MONTHLY';
+  };
 
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-
-  const [interestType, setInterestType] = useState<'SIMPLES' | 'PRICE'>('SIMPLES');
-
- 
-
-  // Ã¢Å“â€¦ Novo: Estado para FrequÃƒÂªncia
-
-  const [frequency, setFrequency] = useState<'MENSAL' | 'QUINZENAL' | 'SEMANAL' | 'DIARIO'>('MENSAL');
-
- 
-
-  const [isSuccess, setIsSuccess] = useState(false);
-
-  const [lastCreated, setLastCreated] = useState<{customer: Customer, loan: Loan} | null>(null);
-
-
+  const toLegacyFrequency = (value: 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY'): 'DIARIO' | 'SEMANAL' | 'QUINZENAL' | 'MENSAL' => {
+    if (value === 'DAILY') return 'DIARIO';
+    if (value === 'WEEKLY') return 'SEMANAL';
+    if (value === 'BIWEEKLY') return 'QUINZENAL';
+    return 'MENSAL';
+  };
 
   const getNextContractNumber = () => {
-
     const base = 2026001;
-
-    if (!loans || loans.length === 0) return base.toString();
-
-    const numbers = loans.map(l => l?.contractNumber ? parseInt(l.contractNumber) : 0).filter(n => !isNaN(n));
-
-    const max = numbers.length > 0 ? Math.max(...numbers) : base;
-
-    return (max + 1).toString();
-
+    if (!Array.isArray(loans) || loans.length === 0) return String(base);
+    const values = loans
+      .map((loan) => Number((loan as any).contractNumber || 0))
+      .filter((value) => Number.isFinite(value) && value > 0);
+    const max = values.length > 0 ? Math.max(...values) : base;
+    return String(max + 1);
   };
 
-
-
-  const calculation = useMemo(() => {
-
-  const principal = parseFloat(amount) || 0;
-
-  const rate = (parseFloat(interestRate) || 0) / 100;
-
-  const count = parseInt(installmentsCount) || 1;
-
-
-
-  if (principal === 0) return { totalReturn: 0, installmentValue: 0, totalInterest: 0, schedule: [] };
-
-
-
-  let totalReturn = 0;
-
-  let installmentValue = 0;
-
- 
-
-  if (interestType === 'PRICE') {
-
-    const factor = Math.pow(1 + rate, count);
-
-    installmentValue = principal * (rate * factor) / (factor - 1);
-
-    totalReturn = installmentValue * count;
-
-  } else {
-
-    // Juros Simples Fixo (Adiciona a % uma ÃƒÂºnica vez no total)
-
-    const totalInterest = principal * rate;
-
-    totalReturn = principal + totalInterest;
-
-    installmentValue = totalReturn / count;
-
-  }
-
-
-
-  const schedule = [];
-
- 
-
-  // Ã¢Å“â€¦ CORREÃƒâ€¡ÃƒÆ’O DAS DATAS:
-
-  for (let i = 1; i <= count; i++) {
-
-    // Criamos uma nova data baseada na startDate para cada iteraÃƒÂ§ÃƒÂ£o
-
-    // Usamos o split e o map para garantir que o fuso horÃƒÂ¡rio local nÃƒÂ£o interfira
-
-    const [year, month, day] = startDate.split('-').map(Number);
-
-    const d = new Date(year, month - 1, day); // month ÃƒÂ© 0-indexed no JS
-
-
-
-    if (frequency === 'MENSAL') {
-
-      d.setMonth(d.getMonth() + i);
-
-    } else if (frequency === 'QUINZENAL') {
-
-      d.setDate(d.getDate() + (i * 15));
-
-    } else if (frequency === 'SEMANAL') {
-
-      d.setDate(d.getDate() + (i * 7));
-
-    } else if (frequency === 'DIARIO') {
-
-      d.setDate(d.getDate() + i);
-
+  const calculateLateFee = (inst: Installment | null | undefined) => {
+    if (!inst || normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
+    const baseInstallmentAmount = installmentAmount(inst);
+    if (!Number.isFinite(baseInstallmentAmount) || baseInstallmentAmount <= 0 || !inst.dueDate) {
+      return 0;
     }
 
+    const dueDate = new Date(inst.dueDate + 'T00:00:00');
+    if (Number.isNaN(dueDate.getTime())) {
+      return 0;
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (dueDate < today) {
+      const diffTime = today.getTime() - dueDate.getTime();
+      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+      if (diffDays <= 0) return 0;
+      return Number((baseInstallmentAmount * 0.015 * diffDays).toFixed(2));
+    }
+    return 0;
+  };
 
-
-    schedule.push({
-
-      number: i,
-
-      date: d.toISOString().split('T')[0], // Retorna YYYY-MM-DD
-
-      value: Number(installmentValue.toFixed(2))
-
+  const filteredLoans = loans.filter(loan => {
+    const matchesSearch = loan.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || loan.id.toLowerCase().includes(searchTerm.toLowerCase());
+    const installments = Array.isArray(loan.installments) ? loan.installments : [];
+    
+    const isOverdue = normalizeLoanStatus(loan.status) === 'ACTIVE' && installments.some(inst => {
+      if (!inst?.dueDate || normalizeInstallmentStatus(inst.status) === 'PAID') return false;
+      const dueDate = new Date(inst.dueDate + 'T00:00:00');
+      if (Number.isNaN(dueDate.getTime())) return false;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      return dueDate < today;
     });
 
-  }
+    if (statusFilter === 'ALL') return matchesSearch;
+    if (statusFilter === 'ACTIVE') return matchesSearch && normalizeLoanStatus(loan.status) === 'ACTIVE' && !isOverdue;
+    if (statusFilter === 'COMPLETED') return matchesSearch && normalizeLoanStatus(loan.status) === 'COMPLETED';
+    if (statusFilter === 'CANCELLED') return matchesSearch && normalizeLoanStatus(loan.status) === 'CANCELLED';
+    if (statusFilter === 'OVERDUE') return matchesSearch && isOverdue;
+    return matchesSearch;
+  });
 
+  React.useEffect(() => {
+    if (initialExpandedLoanId) {
+      setExpandedLoanId(initialExpandedLoanId);
+      // Scroll to the element if needed
+      setTimeout(() => {
+        const element = document.getElementById(`loan-${initialExpandedLoanId}`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
+  }, [initialExpandedLoanId]);
+  const [formData, setFormData] = useState(buildDefaultFormData);
 
+  const calculateInstallments = () => {
+    const amount = Number(formData.amount);
+    const rate = Number(formData.interestRate) / 100;
+    const monthlyPaidRate = Number(formData.monthlyPaidInterestRate) / 100;
+    const monthlyAccruedRate = Number(formData.monthlyAccruedInterestRate) / 100;
+    const count = Number(formData.installmentsCount);
+    if (!amount || !count) return [];
 
-  return {
+    const installments: Installment[] = [];
+    const baseDate = new Date(formData.startDate + 'T12:00:00'); // Use noon to avoid timezone shifts
+    const effectiveFrequency = formData.interestType === 'SPLIT' ? 'MONTHLY' : formData.frequency;
 
-    totalReturn: Number(totalReturn.toFixed(2)),
+    const buildDueDate = (index: number) => {
+      const dueDate = new Date(baseDate);
+      if (effectiveFrequency === 'DAILY') {
+        dueDate.setDate(baseDate.getDate() + index);
+      } else if (effectiveFrequency === 'WEEKLY') {
+        dueDate.setDate(baseDate.getDate() + (index * 7));
+      } else if (effectiveFrequency === 'BIWEEKLY') {
+        dueDate.setDate(baseDate.getDate() + (index * 15));
+      } else {
+        dueDate.setMonth(baseDate.getMonth() + index);
+      }
+      return dueDate.toISOString().split('T')[0];
+    };
 
-    installmentValue: Number(installmentValue.toFixed(2)),
+    if (formData.interestType === 'SPLIT') {
+      if (!Number.isFinite(monthlyPaidRate) || !Number.isFinite(monthlyAccruedRate) || monthlyPaidRate < 0 || monthlyAccruedRate < 0) {
+        return [];
+      }
 
-    totalInterest: Number((totalReturn - principal).toFixed(2)),
+      const monthlyPaidAmount = amount * monthlyPaidRate;
+      const accruedTotalAmount = amount * monthlyAccruedRate * count;
 
-    schedule
+      for (let i = 1; i <= count; i++) {
+        let installmentAmount = monthlyPaidAmount;
+        if (i === count) {
+          installmentAmount += amount + accruedTotalAmount;
+        }
 
-  };
+        installments.push({
+          number: i,
+          dueDate: buildDueDate(i),
+          amount: Number(installmentAmount.toFixed(2)),
+          paidAmount: 0,
+          status: 'PENDENTE'
+        });
+      }
 
-}, [amount, interestRate, installmentsCount, interestType, startDate, frequency]);
-
-
-
-  const handleSubmit = async (e: React.SyntheticEvent) => {
-
-    e.preventDefault();
-
-    const customer = customers.find(c => c.id === selectedCustomerId);
-
-   
-
-    // ProteÃƒÂ§ÃƒÂ£o contra valores vazios ou zerados
-
-    if (!customer || !amount || parseFloat(amount) <= 0) {
-
-      showToast?.("Selecione o cliente e um valor valido.", "error");
-
-      return;
-
+      return installments;
     }
 
+    let installmentValue = 0;
+    if (formData.interestType === 'SIMPLE') {
+      // Juros simples sobre o total
+      const totalWithInterest = amount * (1 + rate);
+      installmentValue = totalWithInterest / count;
+    } else {
+      // Tabela Price
+      // PMT = P * [i(1+i)^n] / [(1+i)^n - 1]
+      if (rate === 0) {
+        installmentValue = amount / count;
+      } else {
+        installmentValue = amount * (rate * Math.pow(1 + rate, count)) / (Math.pow(1 + rate, count) - 1);
+      }
+    }
 
+    for (let i = 1; i <= count; i++) {
+      installments.push({
+        number: i,
+        dueDate: buildDueDate(i),
+        amount: Number(installmentValue.toFixed(2)),
+        paidAmount: 0,
+        status: 'PENDENTE'
+      });
+    }
+    return installments;
+  };
 
-    const contractNumber = getNextContractNumber();
+  const resetLoanForm = () => {
+    setFormData(buildDefaultFormData());
+    setEditingLoanId(null);
+  };
 
-    const loanId = Math.random().toString(36).substr(2, 9);
+  const openNewLoanModal = () => {
+    resetLoanForm();
+    setIsModalOpen(true);
+  };
 
+  const openEditLoanModal = (loan: Loan) => {
+    const hasPaidInstallment = (Array.isArray(loan.installments) ? loan.installments : [])
+      .some(inst => installmentPaidAmount(inst) > 0 || normalizeInstallmentStatus(inst?.status) === 'PAID');
 
+    if (hasPaidInstallment) {
+      showToast('Nao e possivel editar contrato com parcelas pagas', 'error');
+      return;
+    }
 
-    const newLoan: Loan = {
+    setEditingLoanId(loan.id);
+    setFormData({
+      customerId: loan.customerId,
+      amount: String(loan.amount ?? ''),
+      interestRate: String(loan.interestRate ?? ''),
+      monthlyPaidInterestRate: String(loan.monthlyPaidInterestRate ?? ''),
+      monthlyAccruedInterestRate: String(loan.monthlyAccruedInterestRate ?? ''),
+      interestType: fromLegacyInterestType((loan as any).interestType),
+      frequency: fromLegacyFrequency((loan as any).frequency),
+      installmentsCount: String(loanInstallmentsCount(loan)),
+      startDate: loan.startDate || new Date().toISOString().split('T')[0]
+    });
+    setIsModalOpen(true);
+  };
 
-      id: loanId,
+  const handleCancelLoan = async (loan: Loan) => {
+    if (normalizeLoanStatus(loan.status) === 'CANCELLED') {
+      showToast('Contrato ja esta cancelado', 'error');
+      return;
+    }
+    if (!window.confirm(`Deseja cancelar o contrato ${loan.id}?`)) return;
 
-      contractNumber: contractNumber,
+    try {
+      await onUpdateLoan(loan.id, { status: 'CANCELADO' as any });
+      showToast('Contrato cancelado com sucesso!', 'success');
+    } catch (e) {
+      showToast('Erro ao cancelar contrato', 'error');
+    }
+  };
 
-      customerId: selectedCustomerId,
+  const handleDeleteLoan = async (loan: Loan) => {
+    if (!window.confirm(`Deseja excluir o contrato ${loan.id}? Esta acao nao pode ser desfeita.`)) return;
 
-      customerName: customer.name || 'Nao informado',
+    try {
+      await onDeleteLoan(loan.id);
+      if (expandedLoanId === loan.id) {
+        setExpandedLoanId(null);
+      }
+    } catch (e) {
+      showToast('Erro ao excluir contrato', 'error');
+    }
+  };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const customer = customers.find(c => c.id === formData.customerId);
+    if (!customer) return showToast('Selecione um cliente', 'error');
+
+    if (formData.interestType === 'SPLIT') {
+      const totalMonthlyRate = Number(formData.interestRate);
+      const paidMonthlyRate = Number(formData.monthlyPaidInterestRate);
+      const accruedMonthlyRate = Number(formData.monthlyAccruedInterestRate);
+
+      if (!Number.isFinite(totalMonthlyRate) || totalMonthlyRate < 0 || !Number.isFinite(paidMonthlyRate) || paidMonthlyRate < 0 || !Number.isFinite(accruedMonthlyRate) || accruedMonthlyRate < 0) {
+        showToast('Preencha os percentuais do contrato de juros divididos', 'error');
+        return;
+      }
+
+      const expectedTotal = Number((paidMonthlyRate + accruedMonthlyRate).toFixed(4));
+      const informedTotal = Number(totalMonthlyRate.toFixed(4));
+      if (Math.abs(expectedTotal - informedTotal) > 0.0001) {
+        showToast('A soma de % pago mensal + % acumulado deve ser igual ao juros total mensal', 'error');
+        return;
+      }
+    }
+
+    const installments = calculateInstallments();
+    if (!installments.length) {
+      showToast('Nao foi possivel calcular as parcelas. Revise os dados.', 'error');
+      return;
+    }
+
+    const isSplitContract = formData.interestType === 'SPLIT';
+    const totalToReturn = installments.reduce((acc, curr) => acc + installmentAmount(curr), 0);
+    const installmentValue = installmentAmount(installments[0]);
+    const dueDate = installments[installments.length - 1]?.dueDate || formData.startDate;
+    const payload: Partial<Loan> = {
+      customerId: customer.id,
+      customerName: customer.name,
+      amount: Number(formData.amount),
+      interestRate: Number(formData.interestRate),
       customerPhone: customer.phone || '',
-
-      amount: parseFloat(amount),
-
-      interestRate: parseFloat(interestRate),
-
-      installmentCount: parseInt(installmentsCount),
-
-      totalToReturn: calculation.totalReturn,
-
-      installmentValue: calculation.installmentValue,
-
+      interestType: toLegacyInterestType(formData.interestType) as any,
+      monthlyPaidInterestRate: isSplitContract ? Number(formData.monthlyPaidInterestRate) : undefined,
+      monthlyAccruedInterestRate: isSplitContract ? Number(formData.monthlyAccruedInterestRate) : undefined,
+      frequency: (isSplitContract ? 'MENSAL' : toLegacyFrequency(formData.frequency)) as any,
+      installmentCount: Number(formData.installmentsCount),
+      installmentsCount: Number(formData.installmentsCount) as any,
+      totalToReturn,
+      installmentValue,
+      dueDate,
+      startDate: formData.startDate,
       paidAmount: 0,
-
-      startDate: startDate, // Data que o dinheiro saiu
-
-      // O vencimento principal ÃƒÂ© a data da primeira parcela
-
-      dueDate: calculation.schedule[0]?.date || startDate,
-
-      status: 'ATIVO',
-
-      interestType: interestType,
-
-      frequency: frequency,
-
-      createdAt: Date.now(),
-
-      // Ã¢Å“â€¦ MAPEAMENTO DAS PARCELAS PARA CONFERÃƒÅ NCIA DE MULTA
-
-      installments: calculation.schedule.map(s => ({
-
-        id: Math.random().toString(36).substr(2, 9),
-
-        number: s.number,
-
-        dueDate: s.date, // Formato YYYY-MM-DD para cÃƒÂ¡lculo de dias de atraso
-
-        value: Number(s.value.toFixed(2)),
-
-        status: 'PENDENTE',
-
-        originalValue: Number(s.value.toFixed(2)) // Guardamos o valor original sem multa
-
-      }))
-
+      installments
     };
 
     try {
-      await onAddLoan(newLoan);
-
-      try {
-        generateContractPDF(customer, newLoan);
-      } catch (pdfError) {
-        console.error("Contrato salvo, mas houve falha ao gerar PDF:", pdfError);
-        showToast?.("Contrato salvo, mas falhou ao gerar o PDF.", "info");
+      if (editingLoanId) {
+        const currentLoan = loans.find(l => l.id === editingLoanId);
+        await onUpdateLoan(editingLoanId, {
+          ...payload,
+          status: normalizeLoanStatus(currentLoan?.status) === 'CANCELLED' ? ('CANCELADO' as any) : ('ATIVO' as any)
+        });
+        showToast('Contrato atualizado com sucesso!', 'success');
+      } else {
+        const newLoan: Loan = {
+          id: Math.random().toString(36).substr(2, 9),
+          contractNumber: getNextContractNumber(),
+          customerId: payload.customerId || customer.id,
+          customerName: payload.customerName || customer.name,
+          customerPhone: customer.phone || '',
+          amount: Number(payload.amount || 0),
+          interestRate: Number(payload.interestRate || 0),
+          interestType: (payload.interestType || 'SIMPLES') as any,
+          monthlyPaidInterestRate: payload.monthlyPaidInterestRate,
+          monthlyAccruedInterestRate: payload.monthlyAccruedInterestRate,
+          frequency: (payload.frequency || 'MENSAL') as any,
+          installmentCount: Number((payload as any).installmentCount || payload.installmentsCount || 0),
+          installmentsCount: Number(payload.installmentsCount || (payload as any).installmentCount || 0) as any,
+          totalToReturn: Number(totalToReturn.toFixed(2)),
+          installmentValue: Number(installmentValue.toFixed(2)),
+          startDate: payload.startDate || new Date().toISOString().split('T')[0],
+          dueDate,
+          status: 'ATIVO' as any,
+          paidAmount: 0,
+          notes: '',
+          installments: payload.installments || [],
+          createdAt: Date.now(),
+        };
+        await Promise.resolve(onAddLoan(newLoan));
+        try {
+          generateContractPDF(customer as any, newLoan as any);
+          showToast('Contrato efetivado e PDF gerado!', 'success');
+        } catch (pdfError) {
+          console.error('Contrato salvo, mas falhou ao gerar PDF:', pdfError);
+          showToast('Contrato salvo, mas falhou ao gerar PDF.', 'error');
+        }
       }
 
-      setLastCreated({ customer, loan: newLoan });
-      setIsSuccess(true);
-      showToast?.("Contrato efetivado e PDF gerado!", "success");
+      setIsModalOpen(false);
+      resetLoanForm();
     } catch (error) {
-      console.error("Erro ao efetivar:", error);
-      showToast?.("Erro tecnico ao salvar no banco de dados.", "error");
+      if (editingLoanId) {
+        showToast('Erro ao atualizar contrato', 'error');
+      }
+    }
+  };
+
+  const handlePayment = async (amount?: string | React.MouseEvent, directLoanId?: string, directInstIdx?: number) => {
+    const overrideAmount = typeof amount === 'string' ? amount : undefined;
+    const activeModal = paymentModal;
+    if (!activeModal && !overrideAmount) return;
+
+    const loanId = directLoanId || activeModal?.loanId;
+    const instIdx = directInstIdx !== undefined ? directInstIdx : activeModal?.installmentIndex;
+
+    if (!loanId || instIdx === undefined) return;
+
+    const loan = loans.find(l => l.id === loanId);
+    if (!loan) return;
+
+    const loanInstallments = Array.isArray(loan.installments) ? [...loan.installments] : [];
+    if (!loanInstallments[instIdx]) {
+      showToast('Parcela invalida para pagamento', 'error');
+      return;
     }
 
-};
+    const parsedAmount = Number(overrideAmount || activeModal?.amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      showToast('Valor invalido', 'error');
+      return;
+    }
 
-  // ... (Parte do Sucesso permanece igual)
+    setProcessingPayment(`${loanId}-${instIdx}`);
+    try {
+      const newInstallments = [...loanInstallments];
+      let currentIdx = instIdx;
+      let remainingToApply = Number(parsedAmount.toFixed(2));
+      const totalPaid = remainingToApply;
+      let changedInstallment = false;
 
+      while (remainingToApply > 0 && currentIdx < newInstallments.length) {
+        const originalInstallment = newInstallments[currentIdx];
+        if (!originalInstallment) {
+          currentIdx++;
+          continue;
+        }
 
+        const inst = { ...originalInstallment };
+        const lateFee = calculateLateFee(inst);
+        const totalWithFee = Number((installmentAmount(inst) + lateFee).toFixed(2));
+        const alreadyPaid = Number(installmentPaidAmount(inst));
+        const remaining = Number((totalWithFee - alreadyPaid).toFixed(2));
+
+        if (!Number.isFinite(remaining) || remaining <= 0) {
+          currentIdx++;
+          continue;
+        }
+
+        changedInstallment = true;
+        if (remainingToApply + 0.000001 >= remaining) {
+          remainingToApply = Number((remainingToApply - remaining).toFixed(2));
+          (inst as any).paidAmount = totalWithFee;
+          (inst as any).status = 'PAGO';
+          (inst as any).paymentDate = new Date().toISOString();
+          (inst as any).partialPaid = 0;
+          (inst as any).lastPaidValue = totalWithFee;
+        } else {
+          const partialValue = Number((alreadyPaid + remainingToApply).toFixed(2));
+          (inst as any).paidAmount = partialValue;
+          (inst as any).partialPaid = partialValue;
+          remainingToApply = 0;
+          if (normalizeInstallmentStatus(inst.status) !== 'PAID') {
+            (inst as any).status = 'PENDENTE';
+          }
+        }
+
+        newInstallments[currentIdx] = inst;
+        currentIdx++;
+      }
+
+      if (!changedInstallment) {
+        showToast('Nenhuma parcela pendente para quitar', 'error');
+        return;
+      }
+
+      const allPaid = newInstallments.filter(Boolean).every(i => normalizeInstallmentStatus(i.status) === 'PAID');
+
+      await onUpdateLoanAndAddTransaction(
+        loan.id,
+        {
+          installments: newInstallments,
+          status: (allPaid ? 'QUITADO' : 'ATIVO') as any
+        },
+        'PAGAMENTO',
+        totalPaid,
+        `PAGAMENTO: ${loan.customerName}`
+      );
+      showToast('Pagamento processado!', 'success');
+      setPaymentModal(null);
+    } catch (e) {
+      showToast('Erro ao processar pagamento', 'error');
+    } finally {
+      setProcessingPayment(null);
+    }
+  };
+
+  const handleReverseInstallment = async (loan: Loan, index: number) => {
+    const newInstallments = [...loan.installments];
+    const inst = { ...newInstallments[index] };
+    const amountToReverse = Number((inst as any).lastPaidValue ?? installmentPaidAmount(inst));
+
+    if (amountToReverse <= 0) return;
+
+    (inst as any).paidAmount = 0;
+    (inst as any).partialPaid = 0;
+    (inst as any).status = 'PENDENTE';
+    (inst as any).paymentDate = undefined;
+    (inst as any).lastPaidValue = undefined;
+    newInstallments[index] = inst;
+
+    try {
+      await onUpdateLoanAndAddTransaction(
+        loan.id,
+        { 
+          installments: newInstallments,
+          status: 'ATIVO' as any // Always active if we are reversing a payment
+        },
+        'ESTORNO',
+        amountToReverse,
+        `ESTORNO PARCELA ${inst.number}: ${loan.customerName}`
+      );
+      showToast('Pagamento estornado!', 'success');
+    } catch (e) {
+      showToast('Erro ao estornar pagamento', 'error');
+    }
+  };
+
+  const handleWhatsApp = (loan: Loan) => {
+    const customer = customers.find(c => c.id === loan.customerId);
+    if (!customer?.phone) {
+      return showToast('Cliente sem telefone cadastrado', 'error');
+    }
+    const phone = customer.phone.replace(/\D/g, '');
+    const text = encodeURIComponent(`Ola ${customer.name}, estou entrando em contato sobre o seu contrato ${loan.id}.`);
+    window.open(`https://wa.me/55${phone}?text=${text}`, '_blank');
+  };
 
   return (
-
-    <div className="max-w-7xl mx-auto animate-in fade-in">
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 text-left">
-
-        <div className="bg-[#0a0a0a] p-8 rounded-[2.5rem] border border-white/5">
-
-          <h2 className="text-xl font-black text-white uppercase tracking-widest mb-8 flex items-center gap-3">
-
-            <FileText size={20} className="text-[#BF953F]" /> Novo Registro
-
-          </h2>
-
-         
-
-          <div className="space-y-6">
-
-            <div className="space-y-2">
-
-              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Cliente</label>
-
-              <select value={selectedCustomerId} onChange={(e) => setSelectedCustomerId(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-zinc-200 text-sm">
-
-                <option value="">Selecione...</option>
-
-                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-
-              </select>
-
-            </div>
-
-
-
-            <div className="grid grid-cols-2 gap-4">
-
-               <div className="space-y-2">
-
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor (R$)</label>
-
-                  <input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
-
-               </div>
-
-               <div className="space-y-2">
-
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Juros Mensal (%)</label>
-
-                  <input type="number" value={interestRate} onChange={(e) => setInterestRate(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
-
-               </div>
-
-            </div>
-
-
-
-            <div className="grid grid-cols-2 gap-4">
-
-               <div className="space-y-2">
-
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Parcelas</label>
-
-                  <input type="number" value={installmentsCount} onChange={(e) => setInstallmentsCount(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
-
-               </div>
-
-               <div className="space-y-2">
-
-                  <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1">Inicio</label>
-
-                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl text-white outline-none focus:border-[#BF953F]" />
-
-               </div>
-
-            </div>
-
-
-
-            {/* NOVO: SELETOR DE FREQUENCIA */}
-
-            <div className="space-y-2">
-
-              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Frequencia de Pagamento</label>
-
-              <div className="flex flex-wrap bg-black p-1 rounded-2xl border border-zinc-800 w-fit gap-1">
-
-                {['MENSAL', 'QUINZENAL', 'SEMANAL', 'DIARIO'].map((f) => (
-
-                  <button
-
-                    key={f}
-
-                    type="button"
-
-                    onClick={() => setFrequency(f as any)}
-
-                    className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase transition-all ${frequency === f ? 'bg-[#BF953F] text-black' : 'text-zinc-600 hover:text-zinc-400'}`}
-
-                  >
-
-                    {f}
-
-                  </button>
-
-                ))}
-
-              </div>
-
-            </div>
-
-
-
-            <div className="space-y-2">
-
-              <label className="text-[10px] font-black text-zinc-500 uppercase tracking-widest ml-1 block">Sistema</label>
-
-              <div className="flex bg-black p-1 rounded-2xl border border-zinc-800 w-fit">
-
-                <button type="button" onClick={() => setInterestType('SIMPLES')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${interestType === 'SIMPLES' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>Simples</button>
-
-                <button type="button" onClick={() => setInterestType('PRICE')} className={`px-6 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${interestType === 'PRICE' ? 'bg-[#BF953F] text-black' : 'text-zinc-600'}`}>Price</button>
-
-              </div>
-
-            </div>
-
+    <div className="space-y-6">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
+        <h2 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Gestao de Contratos</h2>
+        <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
+          <div className="relative flex-1 lg:w-64">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
+            <input
+              type="text"
+              placeholder="BUSCAR CONTRATO..."
+              className="w-full bg-[#0b1730] border border-zinc-900 rounded-xl py-3 pl-10 pr-4 text-[10px] text-white outline-none focus:border-[#BF953F] transition-all"
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+            />
           </div>
-
-        </div>
-
-
-
-        <div className="flex flex-col gap-6">
-
-          <div className="bg-[#050505] p-8 rounded-[2.5rem] border border-[#BF953F]/30 shadow-2xl flex flex-col justify-between h-full">
-
-            <div className="space-y-8">
-
-              <h3 className="text-[10px] font-black text-[#BF953F] uppercase tracking-[0.3em] flex items-center gap-2">
-
-                <CalendarDays size={14}/> Resumo Financeiro
-
-              </h3>
-
-             
-
-              <div className="space-y-6">
-
-                <div className="flex justify-between items-center border-b border-zinc-900 pb-4">
-
-                  <span className="text-[10px] text-zinc-500 font-black uppercase">Total Final</span>
-
-                  <span className="text-2xl font-black text-[#BF953F]">R$ {calculation.totalReturn.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-
-                </div>
-
-                <div className="flex justify-between items-center border-b border-zinc-900 pb-4">
-
-                  <span className="text-[10px] text-zinc-500 font-black uppercase">Valor {frequency}</span>
-
-                  <span className="text-lg font-bold text-white">R$ {calculation.installmentValue.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-
-                </div>
-
-                <div className="flex justify-between items-center">
-
-                  <span className="text-[10px] text-zinc-500 font-black uppercase">Lucro Bruto</span>
-
-                  <span className="text-lg font-bold text-emerald-500">R$ {calculation.totalInterest.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</span>
-
-                </div>
-
-              </div>
-
-            </div>
-
-
-
-            <button onClick={handleSubmit} disabled={!selectedCustomerId || !amount} className={`w-full mt-10 py-5 rounded-2xl flex items-center justify-center gap-3 text-[10px] font-black uppercase tracking-widest transition-all ${(selectedCustomerId && amount) ? 'gold-gradient text-black shadow-xl' : 'bg-zinc-900 text-zinc-700 cursor-not-allowed'}`}>
-
-              <Save size={18} /> Efetivar Contrato
-
-            </button>
-
+          <div className="flex bg-[#0b1730] border border-zinc-900 rounded-xl p-1 overflow-x-auto max-w-full">
+            {(['ALL', 'ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED'] as const).map(f => (
+              <button
+                key={f}
+                onClick={() => setStatusFilter(f)}
+                className={`px-4 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${
+                  statusFilter === f ? 'gold-gradient text-black' : 'text-zinc-500 hover:text-white'
+                }`}
+              >
+                {f === 'ALL' ? 'Todos' : f === 'ACTIVE' ? 'Ativos' : f === 'OVERDUE' ? 'Atrasados' : f === 'COMPLETED' ? 'Concluidos' : 'Cancelados'}
+              </button>
+            ))}
           </div>
-
+          <button
+            onClick={openNewLoanModal}
+            className="px-6 py-3 gold-gradient text-black rounded-xl font-black text-[10px] tracking-widest uppercase flex items-center gap-2 whitespace-nowrap"
+          >
+            <Plus size={16} /> Novo Contrato
+          </button>
         </div>
-
       </div>
 
+      <div className="space-y-4">
+        {filteredLoans.map(loan => {
+          const loanInstallments = Array.isArray(loan.installments) ? loan.installments : [];
+          const isOverdue = normalizeLoanStatus(loan.status) === 'ACTIVE' && loanInstallments.some(inst => {
+            if (!inst?.dueDate || normalizeInstallmentStatus(inst.status) === 'PAID') return false;
+            const dueDate = new Date(inst.dueDate + 'T00:00:00');
+            if (Number.isNaN(dueDate.getTime())) return false;
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            return dueDate < today;
+          });
+
+          return (
+            <div key={loan.id} id={`loan-${loan.id}`} className={`bg-[#0b1730] border rounded-[2rem] overflow-hidden transition-all ${
+              isOverdue ? 'border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.05)]' : 'border-zinc-900'
+            }`}>
+              <div
+                onClick={() => setExpandedLoanId(expandedLoanId === loan.id ? null : loan.id)}
+                className="w-full p-4 sm:p-6 flex flex-wrap items-center justify-between gap-3 sm:gap-4 hover:bg-zinc-900/30 transition-colors text-left cursor-pointer"
+              >
+                <div className="flex-1 min-w-[200px]">
+                  <div className="flex items-center gap-2">
+                    <p className="text-[10px] font-black text-white uppercase break-words">{loan.customerName}</p>
+                  </div>
+                  <p className="text-[9px] text-zinc-500 uppercase tracking-widest break-all">Contrato: {loan.id}</p>
+                </div>
+              <div className="flex-1 min-w-[120px]">
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Valor Total</p>
+                <p className="text-[11px] font-black text-white">R$ {(loan.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+              </div>
+              <div className="flex-1 min-w-[100px]">
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Parcelas</p>
+                <p className="text-[11px] font-black text-white">
+                  {(loan.installments || []).filter(i => normalizeInstallmentStatus(i.status) === 'PAID').length} / {loanInstallmentsCount(loan)}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleWhatsApp(loan);
+                  }}
+                  className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-black transition-all"
+                  title="WhatsApp"
+                >
+                  <MessageCircle size={18} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    openEditLoanModal(loan);
+                  }}
+                  className="p-3 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-black transition-all"
+                  title="Editar contrato"
+                >
+                  <Pencil size={16} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleCancelLoan(loan);
+                  }}
+                  className={`p-3 rounded-xl transition-all ${
+                    normalizeLoanStatus(loan.status) === 'CANCELLED'
+                      ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
+                      : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-black'
+                  }`}
+                  title="Cancelar contrato"
+                  disabled={normalizeLoanStatus(loan.status) === 'CANCELLED'}
+                >
+                  <Ban size={16} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDeleteLoan(loan);
+                  }}
+                  className="p-3 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-black transition-all"
+                  title="Excluir contrato"
+                >
+                  <Trash2 size={16} />
+                </button>
+                <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase ${
+                  normalizeLoanStatus(loan.status) === 'ACTIVE' 
+                    ? (isOverdue ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500') 
+                    : normalizeLoanStatus(loan.status) === 'COMPLETED' 
+                      ? 'bg-blue-500/10 text-blue-500' 
+                      : 'bg-zinc-800 text-zinc-500'
+                }`}>
+                  {normalizeLoanStatus(loan.status) === 'ACTIVE' && isOverdue ? 'Atrasado' : 
+                   normalizeLoanStatus(loan.status) === 'ACTIVE' ? 'Ativo' : 
+                   normalizeLoanStatus(loan.status) === 'COMPLETED' ? 'Concluido' : 'Cancelado'}
+                </span>
+                <Plus size={16} className={`text-[#BF953F] transition-transform ${expandedLoanId === loan.id ? 'rotate-45' : ''}`} />
+              </div>
+            </div>
+
+            {expandedLoanId === loan.id && Array.isArray(loan.installments) && (
+              <div className="px-6 pb-6 border-t border-zinc-900 animate-in slide-in-from-top duration-300">
+                <div className="pt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {loan.installments.map((inst, idx) => {
+                    if (!inst) return null;
+                    const isLocked =
+                      idx > 0 &&
+                      normalizeInstallmentStatus(loan.installments[idx - 1]?.status) !== 'PAID';
+                    const lateFee = calculateLateFee(inst);
+                    const totalWithFee = installmentAmount(inst) + lateFee;
+                    const remaining = totalWithFee - installmentPaidAmount(inst);
+                    const dueDate = inst.dueDate ? new Date(inst.dueDate + 'T12:00:00') : null;
+                    
+                    return (
+                      <div key={idx} className={`bg-[#071226] border border-zinc-900 p-4 rounded-2xl flex flex-col gap-4 ${isLocked ? 'opacity-50' : ''} ${lateFee > 0 ? 'border-red-500/30' : ''}`}>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Parcela {inst.number}</p>
+                            <div className="flex flex-col">
+                              <p className="text-[10px] font-black text-white">R$ {installmentAmount(inst).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                              {lateFee > 0 && (
+                                <p className="text-[8px] font-black text-red-500">
+                                  + R$ {lateFee.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} (Multa)
+                                </p>
+                              )}
+                            </div>
+                            <p className="text-[8px] text-zinc-600 uppercase mt-1">
+                              Venc: {dueDate && !isNaN(dueDate.getTime()) ? dueDate.toLocaleDateString('pt-BR') : '---'}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Pago</p>
+                            <p className={`text-[10px] font-black ${installmentPaidAmount(inst) > 0 ? 'text-emerald-500' : 'text-zinc-700'}`}>
+                              R$ {installmentPaidAmount(inst).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+                            {remaining > 0 && (
+                              <div className="mt-1 pt-1 border-t border-zinc-900/50">
+                                <p className="text-[7px] font-black text-red-500/70 uppercase tracking-widest">Falta</p>
+                                <p className="text-[9px] font-black text-red-500">
+                                  R$ {remaining.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          {normalizeInstallmentStatus(inst.status) !== 'PAID' && (
+                            <div className="flex gap-2">
+                              <button
+                                disabled={isLocked || !!processingPayment}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  // Direct full payment including late fee
+                                  handlePayment(Math.max(remaining, 0).toFixed(2), loan.id, idx);
+                                }}
+                                className={`flex-1 py-2 rounded-xl text-[7px] font-black uppercase tracking-widest flex items-center justify-center gap-1 transition-all ${
+                                  isLocked || !!processingPayment
+                                    ? 'bg-zinc-900 text-zinc-700 cursor-not-allowed' 
+                                    : 'bg-emerald-500 text-black hover:bg-emerald-400 shadow-lg shadow-emerald-500/10'
+                                }`}
+                                title="Pagar valor total da parcela agora (incluindo multa se houver)"
+                              >
+                                {processingPayment === `${loan.id}-${idx}` ? (
+                                  <Loader2 size={10} className="animate-spin" />
+                                ) : (
+                                  <CheckCircle size={10} />
+                                )}
+                                {processingPayment === `${loan.id}-${idx}` ? 'Processando' : 'Quitar'}
+                              </button>
+                              
+                              <button
+                                disabled={isLocked || !!processingPayment}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setPaymentModal({ isOpen: true, loanId: loan.id, installmentIndex: idx, amount: Math.max(remaining, 0).toFixed(2) });
+                                }}
+                                className={`flex-1 py-2 rounded-xl text-[7px] font-black uppercase tracking-widest flex items-center justify-center gap-1 transition-all ${
+                                  isLocked || !!processingPayment
+                                    ? 'bg-zinc-900 text-zinc-700 cursor-not-allowed' 
+                                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
+                                }`}
+                                title="Pagar valor parcial"
+                              >
+                                <DollarSign size={10} /> Parcial
+                              </button>
+                            </div>
+                          )}
+                          
+                          {installmentPaidAmount(inst) > 0 && (
+                            <button
+                              disabled={!!processingPayment}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleReverseInstallment(loan, idx);
+                              }}
+                              className="w-full py-2 rounded-xl text-[7px] font-black uppercase tracking-widest flex items-center justify-center gap-1 border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-all disabled:opacity-50"
+                            >
+                              <RotateCcw size={10} /> Estornar
+                            </button>
+                          )}
+                        </div>
+                        
+                        {isLocked && (
+                          <p className="text-[7px] text-zinc-600 uppercase text-center italic">Aguardando parcela anterior</p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+          );
+        })}
+      </div>
+
+      {/* MODAL DE PAGAMENTO */}
+      {paymentModal?.isOpen && (
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-[#071226]/90 backdrop-blur-md">
+          <div className="bg-[#0b1730] border border-zinc-900 w-full max-w-sm rounded-[2.5rem] p-8 relative shadow-2xl">
+            <button onClick={() => setPaymentModal(null)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
+              <XCircle size={24} />
+            </button>
+            
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-3 bg-emerald-500/10 rounded-2xl">
+                <DollarSign size={24} className="text-emerald-500" />
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-white uppercase tracking-widest">Registrar Pagamento</h2>
+                <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">Informe o valor recebido</p>
+              </div>
+            </div>
+
+            <div className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor do Pagamento</label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-black text-xs">R$</span>
+                  <input
+                    autoFocus
+                    type="number"
+                    step="0.01"
+                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 pl-10 text-white outline-none focus:border-emerald-500 text-sm font-black"
+                    value={paymentModal.amount}
+                    onChange={e => setPaymentModal({ ...paymentModal, amount: e.target.value })}
+                  />
+                </div>
+                <p className="text-[8px] text-zinc-600 uppercase italic ml-1">
+                  * Valores maiores que a parcela serao aplicados as proximas parcelas.
+                </p>
+              </div>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setPaymentModal(null)}
+                  className="flex-1 py-4 bg-zinc-900 text-zinc-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-zinc-800 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handlePayment}
+                  className="flex-1 py-4 bg-emerald-500 text-black rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-emerald-400 transition-all shadow-lg shadow-emerald-500/20"
+                >
+                  Confirmar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isModalOpen && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#071226]/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-[#0b1730] border border-zinc-900 w-full max-w-lg rounded-[2.5rem] p-5 sm:p-8 relative max-h-[92dvh] overflow-y-auto">
+            <button
+              onClick={() => {
+                setIsModalOpen(false);
+                resetLoanForm();
+              }}
+              className="absolute top-6 right-6 text-zinc-500 hover:text-white"
+            >
+              <Plus className="rotate-45" size={24} />
+            </button>
+            <h2 className="text-xl font-black gold-text uppercase tracking-tighter mb-8">{editingLoanId ? 'Editar Contrato' : 'Novo Emprestimo'}</h2>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Cliente</label>
+                <select
+                  required
+                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+                  value={formData.customerId}
+                  onChange={e => setFormData({ ...formData, customerId: e.target.value })}
+                >
+                  <option value="">SELECIONE O CLIENTE</option>
+                  {customers.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Tipo de Juros</label>
+                  <select
+                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+                    value={formData.interestType}
+                    onChange={e => {
+                      const nextInterestType = e.target.value as 'SIMPLE' | 'PRICE' | 'SPLIT';
+                      setFormData({
+                        ...formData,
+                        interestType: nextInterestType,
+                        frequency: nextInterestType === 'SPLIT' ? 'MONTHLY' : formData.frequency
+                      });
+                    }}
+                  >
+                    <option value="SIMPLE">JUROS SIMPLES (TOTAL)</option>
+                    <option value="PRICE">TABELA PRICE (MENSAL)</option>
+                    <option value="SPLIT">JUROS DIVIDIDOS (PAGO + ACUMULADO)</option>
+                  </select>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Frequencia</label>
+                  <select
+                    className={`w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none ${formData.interestType === 'SPLIT' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    value={formData.frequency}
+                    onChange={e => setFormData({ ...formData, frequency: e.target.value as any })}
+                    disabled={formData.interestType === 'SPLIT'}
+                  >
+                    <option value="DAILY">DIARIO</option>
+                    <option value="WEEKLY">SEMANAL</option>
+                    <option value="BIWEEKLY">QUINZENAL</option>
+                    <option value="MONTHLY">MENSAL</option>
+                  </select>
+                  {formData.interestType === 'SPLIT' && (
+                    <p className="text-[8px] text-zinc-600 uppercase mt-1">No contrato dividido, a frequencia e mensal.</p>
+                  )}
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>
+                  <input
+                    type="number" placeholder="0.00" required
+                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    value={formData.amount}
+                    onChange={e => setFormData({ ...formData, amount: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">
+                    {formData.interestType === 'SPLIT' ? 'Juros Total Mensal (%)' : 'Taxa (%)'}
+                  </label>
+                  <input
+                    type="number" placeholder="0" required
+                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    value={formData.interestRate}
+                    onChange={e => setFormData({ ...formData, interestRate: e.target.value })}
+                  />
+                </div>
+              </div>
+              {formData.interestType === 'SPLIT' && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">% Pago Mensal</label>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      required
+                      className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                      value={formData.monthlyPaidInterestRate}
+                      onChange={e => setFormData({ ...formData, monthlyPaidInterestRate: e.target.value })}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">% Acumulado para Final</label>
+                    <input
+                      type="number"
+                      placeholder="0"
+                      required
+                      className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                      value={formData.monthlyAccruedInterestRate}
+                      onChange={e => setFormData({ ...formData, monthlyAccruedInterestRate: e.target.value })}
+                    />
+                  </div>
+                  <div className="sm:col-span-2 rounded-2xl border border-zinc-800 bg-[#071226]/60 px-4 py-3">
+                    <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">
+                      Soma configurada: {(Number(formData.monthlyPaidInterestRate || 0) + Number(formData.monthlyAccruedInterestRate || 0)).toFixed(2)}%
+                    </p>
+                    <p className="text-[8px] text-zinc-600 uppercase mt-1">
+                      Regra: % pago mensal + % acumulado = juros total mensal.
+                    </p>
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Parcelas</label>
+                  <input
+                    type="number" placeholder="1" required
+                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    value={formData.installmentsCount}
+                    onChange={e => setFormData({ ...formData, installmentsCount: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Data Inicio</label>
+                  <input
+                    type="date" required
+                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    value={formData.startDate}
+                    onChange={e => setFormData({ ...formData, startDate: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              {/* RESUMO DO CALCULO */}
+              {formData.amount && formData.installmentsCount && (
+                <div className="space-y-3 p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Valor da Parcela</p>
+                      <p className="text-sm font-black text-white">
+                        R$ {(calculateInstallments()[0]?.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </p>
+                      {formData.interestType === 'SPLIT' && (
+                        <p className="text-[8px] text-zinc-500 mt-2 uppercase">
+                          Parcela Final: R$ {(calculateInstallments()[Math.max(calculateInstallments().length - 1, 0)]?.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </p>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Total de Juros</p>
+                      <p className="text-sm font-black text-[#BF953F]">
+                        R$ {(calculateInstallments().reduce((acc, curr) => acc + curr.amount, 0) - Number(formData.amount)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="pt-3 border-t border-zinc-800">
+                    <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Total a Pagar</p>
+                    <p className="text-lg font-black text-emerald-500">
+                      R$ {calculateInstallments().reduce((acc, curr) => acc + curr.amount, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <button className="w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4">
+                {editingLoanId ? 'Salvar Alteracoes' : 'Efetivar Contrato'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
-
   );
-
 };
 
-
-
 export default LoanSection;
+
+
+
+
+
+
+
+
+
 
