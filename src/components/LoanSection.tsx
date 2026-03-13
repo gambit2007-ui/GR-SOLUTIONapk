@@ -549,12 +549,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             <input
               type="text"
               placeholder="BUSCAR CONTRATO..."
-              className="w-full bg-[#0b1730] border border-zinc-900 rounded-xl py-3 pl-10 pr-4 text-[10px] text-white outline-none focus:border-[#BF953F] transition-all"
+              className="w-full bg-[#050505] border border-zinc-900 rounded-xl py-3 pl-10 pr-4 text-[10px] text-white outline-none focus:border-[#BF953F] transition-all"
               value={searchTerm}
               onChange={e => setSearchTerm(e.target.value)}
             />
           </div>
-          <div className="flex bg-[#0b1730] border border-zinc-900 rounded-xl p-1 overflow-x-auto max-w-full">
+          <div className="flex bg-[#050505] border border-zinc-900 rounded-xl p-1 overflow-x-auto max-w-full">
             {(['ALL', 'ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED'] as const).map(f => (
               <button
                 key={f}
@@ -589,7 +589,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           });
 
           return (
-            <div key={loan.id} id={`loan-${loan.id}`} className={`bg-[#0b1730] border rounded-[2rem] overflow-hidden transition-all ${
+            <div key={loan.id} id={`loan-${loan.id}`} className={`bg-[#050505] border rounded-[2rem] overflow-hidden transition-all ${
               isOverdue ? 'border-red-500/30 shadow-[0_0_20px_rgba(239,68,68,0.05)]' : 'border-zinc-900'
             }`}>
               <div
@@ -687,7 +687,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     const dueDate = inst.dueDate ? new Date(inst.dueDate + 'T12:00:00') : null;
                     
                     return (
-                      <div key={idx} className={`bg-[#071226] border border-zinc-900 p-4 rounded-2xl flex flex-col gap-4 ${isLocked ? 'opacity-50' : ''} ${lateFee > 0 ? 'border-red-500/30' : ''}`}>
+                      <div key={idx} className={`bg-[#000000] border border-zinc-900 p-4 rounded-2xl flex flex-col gap-4 ${isLocked ? 'opacity-50' : ''} ${lateFee > 0 ? 'border-red-500/30' : ''}`}>
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Parcela {inst.number}</p>
@@ -792,8 +792,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
       {/* MODAL DE PAGAMENTO */}
       {paymentModal?.isOpen && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-[#071226]/90 backdrop-blur-md">
-          <div className="bg-[#0b1730] border border-zinc-900 w-full max-w-sm rounded-[2.5rem] p-8 relative shadow-2xl">
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-[#000000]/90 backdrop-blur-md">
+          <div className="bg-[#050505] border border-zinc-900 w-full max-w-sm rounded-[2.5rem] p-8 relative shadow-2xl">
             <button onClick={() => setPaymentModal(null)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
               <XCircle size={24} />
             </button>
@@ -817,7 +817,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     autoFocus
                     type="number"
                     step="0.01"
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 pl-10 text-white outline-none focus:border-emerald-500 text-sm font-black"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 pl-10 text-white outline-none focus:border-emerald-500 text-sm font-black"
                     value={paymentModal.amount}
                     onChange={e => setPaymentModal({ ...paymentModal, amount: e.target.value })}
                   />
@@ -847,8 +847,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       )}
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#071226]/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-[#0b1730] border border-zinc-900 w-full max-w-lg rounded-[2.5rem] p-5 sm:p-8 relative max-h-[92dvh] overflow-y-auto">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-[#050505] border border-zinc-900 w-full max-w-lg rounded-[2.5rem] p-5 sm:p-8 relative max-h-[92dvh] overflow-y-auto">
             <button
               onClick={() => {
                 setIsModalOpen(false);
@@ -864,7 +864,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Cliente</label>
                 <select
                   required
-                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+                  className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
                   value={formData.customerId}
                   onChange={e => setFormData({ ...formData, customerId: e.target.value })}
                 >
@@ -876,7 +876,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Tipo de Juros</label>
                   <select
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
                     value={formData.interestType}
                     onChange={e => {
                       const nextInterestType = e.target.value as 'SIMPLE' | 'PRICE' | 'SPLIT';
@@ -895,7 +895,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Frequencia</label>
                   <select
-                    className={`w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none ${formData.interestType === 'SPLIT' ? 'opacity-60 cursor-not-allowed' : ''}`}
+                    className={`w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none ${formData.interestType === 'SPLIT' ? 'opacity-60 cursor-not-allowed' : ''}`}
                     value={formData.frequency}
                     onChange={e => setFormData({ ...formData, frequency: e.target.value as any })}
                     disabled={formData.interestType === 'SPLIT'}
@@ -915,7 +915,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>
                   <input
                     type="number" placeholder="0.00" required
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                     value={formData.amount}
                     onChange={e => setFormData({ ...formData, amount: e.target.value })}
                   />
@@ -926,7 +926,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   </label>
                   <input
                     type="number" placeholder="0" required
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                     value={formData.interestRate}
                     onChange={e => setFormData({ ...formData, interestRate: e.target.value })}
                   />
@@ -940,7 +940,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                       type="number"
                       placeholder="0"
                       required
-                      className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                       value={formData.monthlyPaidInterestRate}
                       onChange={e => setFormData({ ...formData, monthlyPaidInterestRate: e.target.value })}
                     />
@@ -951,12 +951,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                       type="number"
                       placeholder="0"
                       required
-                      className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                       value={formData.monthlyAccruedInterestRate}
                       onChange={e => setFormData({ ...formData, monthlyAccruedInterestRate: e.target.value })}
                     />
                   </div>
-                  <div className="sm:col-span-2 rounded-2xl border border-zinc-800 bg-[#071226]/60 px-4 py-3">
+                  <div className="sm:col-span-2 rounded-2xl border border-zinc-800 bg-[#000000]/60 px-4 py-3">
                     <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">
                       Soma configurada: {(Number(formData.monthlyPaidInterestRate || 0) + Number(formData.monthlyAccruedInterestRate || 0)).toFixed(2)}%
                     </p>
@@ -971,7 +971,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Parcelas</label>
                   <input
                     type="number" placeholder="1" required
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                     value={formData.installmentsCount}
                     onChange={e => setFormData({ ...formData, installmentsCount: e.target.value })}
                   />
@@ -980,7 +980,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Data Inicio</label>
                   <input
                     type="date" required
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                     value={formData.startDate}
                     onChange={e => setFormData({ ...formData, startDate: e.target.value })}
                   />
@@ -1030,6 +1030,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 };
 
 export default LoanSection;
+
+
 
 
 

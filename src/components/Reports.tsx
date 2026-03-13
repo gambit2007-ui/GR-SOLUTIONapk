@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { Loan, CashMovement } from '../types';
 import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
 import {
@@ -196,7 +196,7 @@ const Reports: React.FC<ReportsProps> = ({
   return (
     <div className="space-y-8">
       {/* Cartao principal de caixa */}
-      <div className="bg-[#0b1730] border border-zinc-900 p-6 sm:p-8 md:p-12 rounded-[3rem] relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-8">
+      <div className="bg-[#050505] border border-zinc-900 p-6 sm:p-8 md:p-12 rounded-[3rem] relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-8">
         <div className="absolute top-0 right-0 p-8 opacity-5">
           <Wallet size={160} className="text-[#BF953F]" />
         </div>
@@ -240,7 +240,7 @@ const Reports: React.FC<ReportsProps> = ({
       {/* Grade de indicadores financeiros */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
         {financialCards.map((card, i) => (
-          <div key={i} className="bg-[#0b1730] border border-zinc-900 p-5 rounded-2xl hover:border-[#BF953F]/30 transition-all group">
+          <div key={i} className="bg-[#050505] border border-zinc-900 p-5 rounded-2xl hover:border-[#BF953F]/30 transition-all group">
             <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest mb-2 group-hover:text-zinc-400 transition-colors break-words">{card.label}</p>
             <p className={`text-sm font-black ${card.color}`}>
               R$ {card.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -250,7 +250,7 @@ const Reports: React.FC<ReportsProps> = ({
       </div>
 
       {/* Resumo de lucratividade */}
-      <div className="bg-[#0b1730] border border-zinc-900 rounded-[2.5rem] p-8">
+      <div className="bg-[#050505] border border-zinc-900 rounded-[2.5rem] p-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-12">
           <div className="shrink-0">
             <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Resumo de Lucratividade</h3>
@@ -302,7 +302,7 @@ const Reports: React.FC<ReportsProps> = ({
       </div>
 
       {/* Desempenho mensal */}
-      <div className="bg-[#0b1730] border border-zinc-900 rounded-[3rem] p-6 sm:p-8 md:p-10">
+      <div className="bg-[#050505] border border-zinc-900 rounded-[3rem] p-6 sm:p-8 md:p-10">
         <div className="flex items-center justify-between mb-12">
           <div>
             <h3 className="text-sm font-black gold-text uppercase tracking-[0.3em]">Desempenho Mensal</h3>
@@ -315,7 +315,7 @@ const Reports: React.FC<ReportsProps> = ({
         
         <div className="space-y-6">
             {monthlyData.map((data) => (
-              <div key={data.month} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#071226]/20">
+              <div key={data.month} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#000000]/20">
                 <button 
                   onClick={() => setExpandedMonth(expandedMonth === data.month ? null : data.month)}
                   className="w-full p-6 flex items-center justify-between hover:bg-zinc-900/30 transition-colors"
@@ -369,7 +369,7 @@ const Reports: React.FC<ReportsProps> = ({
                       </div>
                     </div>
                     
-                    <div className="mt-8 h-[350px] w-full bg-[#071226]/40 p-6 rounded-[2rem] border border-zinc-900/50">
+                    <div className="mt-8 h-[350px] w-full bg-[#000000]/40 p-6 rounded-[2rem] border border-zinc-900/50">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={[data]} margin={{ top: 30, right: 30, left: 20, bottom: 20 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} opacity={0.5} />
@@ -439,8 +439,8 @@ const Reports: React.FC<ReportsProps> = ({
         </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#071226]/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-[#0b1730] border border-zinc-900 w-full max-w-lg rounded-[2.5rem] p-5 sm:p-8 relative max-h-[92dvh] overflow-y-auto">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-[#050505] border border-zinc-900 w-full max-w-lg rounded-[2.5rem] p-5 sm:p-8 relative max-h-[92dvh] overflow-y-auto">
             <button onClick={() => setIsModalOpen(false)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
               <Plus className="rotate-45" size={24} />
             </button>
@@ -450,7 +450,7 @@ const Reports: React.FC<ReportsProps> = ({
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Tipo</label>
                 <select
                   required
-                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+                  className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
                   value={formData.type}
                   onChange={e => setFormData({ ...formData, type: e.target.value })}
                 >
@@ -462,7 +462,7 @@ const Reports: React.FC<ReportsProps> = ({
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>
                 <input
                   type="number" placeholder="0.00" required
-                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                  className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                   value={formData.amount}
                   onChange={e => setFormData({ ...formData, amount: e.target.value })}
                 />
@@ -471,7 +471,7 @@ const Reports: React.FC<ReportsProps> = ({
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Descricao / Motivo</label>
                 <input
                   type="text" placeholder="EX: APORTE INICIAL" required
-                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                  className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                   value={formData.description}
                   onChange={e => setFormData({ ...formData, description: e.target.value })}
                 />
@@ -497,6 +497,8 @@ const Reports: React.FC<ReportsProps> = ({
 };
 
 export default Reports;
+
+
 
 
 

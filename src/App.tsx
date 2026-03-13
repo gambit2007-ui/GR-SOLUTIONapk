@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Users, FileText, PieChart, Calculator,
   Activity, X, Menu, Lock, LogOut, Loader2
@@ -375,7 +375,7 @@ const App: React.FC = () => {
 
   if (authLoading) {
     return (
-      <div className="min-h-dvh bg-[#071226] flex items-center justify-center">
+      <div className="min-h-dvh bg-[#000000] flex items-center justify-center">
         <Activity size={40} className="text-[#BF953F] animate-pulse" />
       </div>
     );
@@ -383,25 +383,25 @@ const App: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="min-h-dvh bg-[#071226] flex items-center justify-center p-6">
-        <div className="w-full max-w-sm bg-[#0b1730] border border-zinc-900 p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
+      <div className="min-h-dvh bg-[#000000] flex items-center justify-center p-6">
+        <div className="w-full max-w-sm bg-[#050505] border border-zinc-900 p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 gold-gradient opacity-50" />
           <div className="mb-10 text-center">
             <div className="inline-flex p-4 bg-zinc-900 rounded-2xl mb-4 border border-zinc-800">
               <Lock size={32} className="text-[#BF953F]" />
             </div>
-            <h1 className="text-2xl font-black gold-text tracking-tighter">GESTAO DE EMPRESTIMOS</h1>
+            <h1 className="text-2xl font-black gold-text tracking-tighter">GR SULTION</h1>
             <p className="text-[9px] text-zinc-500 uppercase tracking-[0.4em] mt-2 text-center">Acesso ao Painel de Controle</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
             <input 
               type="email" placeholder="E-MAIL" required
-              className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
+              className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
               onChange={e => setEmail(e.target.value)}
             />
             <input 
               type="password" placeholder="CHAVE DE ACESSO" required
-              className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
+              className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
               onChange={e => setPassword(e.target.value)}
             />
             <button 
@@ -446,7 +446,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex min-h-dvh bg-[#071226] overflow-x-hidden text-white font-sans">
+    <div className="flex min-h-dvh bg-[#000000] overflow-x-hidden text-white font-sans">
       <style>
         {`
           .gold-text { background: linear-gradient(to right, #BF953F, #FCF6BA, #B38728); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
@@ -461,20 +461,20 @@ const App: React.FC = () => {
           type="button"
           onClick={() => setIsMobileSidebarOpen(false)}
           aria-label="Fechar menu"
-          className="fixed inset-0 z-[170] bg-[#071226]/70 backdrop-blur-[1px]"
+          className="fixed inset-0 z-[170] bg-[#000000]/70 backdrop-blur-[1px]"
         />
       )}
 
       {/* SIDEBAR */}
       <aside
-        className={`flex flex-col bg-[#0b1730] border-r border-zinc-900 transition-all duration-300 ${
+        className={`flex flex-col bg-[#050505] border-r border-zinc-900 transition-all duration-300 ${
           isMobileViewport
             ? `fixed inset-y-0 left-0 z-[180] w-72 transform ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
             : `relative z-[70] ${isSidebarOpen ? 'w-72' : 'w-24'}`
         }`}
       >
         <div className="h-24 flex items-center justify-between px-6 border-b border-zinc-900">
-          {(isSidebarOpen || isMobileViewport) && <span className="font-black text-lg gold-text tracking-tighter">GESTAO DE EMPRESTIMOS</span>}
+          {(isSidebarOpen || isMobileViewport) && <span className="font-black text-lg gold-text tracking-tighter">GR SULTION</span>}
           <button
             onClick={() => {
               if (isMobileViewport) {
@@ -524,7 +524,7 @@ const App: React.FC = () => {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
-        <header className="h-16 md:h-20 bg-[#08152b] border-b border-zinc-900 flex items-center justify-between px-3 sm:px-4 md:px-8 lg:px-10 flex-shrink-0 gap-3">
+        <header className="h-16 md:h-20 bg-[#050505] border-b border-zinc-900 flex items-center justify-between px-3 sm:px-4 md:px-8 lg:px-10 flex-shrink-0 gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <button
                 type="button"
@@ -548,7 +548,7 @@ const App: React.FC = () => {
             </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#071226] p-3 sm:p-4 md:p-6">
+        <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#000000] p-3 sm:p-4 md:p-6">
             {currentView === 'DASHBOARD' && (
               <Dashboard
                 loans={loans}
@@ -607,3 +607,5 @@ const App: React.FC = () => {
 };
 
 export default App;
+
+

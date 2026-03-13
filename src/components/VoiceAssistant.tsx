@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState, useRef } from 'react';
 import { Mic, MicOff, Sparkles } from 'lucide-react';
 import { GoogleGenAI, Type } from '@google/genai';
@@ -36,7 +36,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
       setIsRecording(true);
     } catch (err) {
       console.error("Erro ao acessar microfone:", err);
-      alert("Não foi possível acessar o microfone. Verifique as permissões.");
+      alert("NÃ£o foi possÃ­vel acessar o microfone. Verifique as permissÃµes.");
     }
   };
 
@@ -65,15 +65,15 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
       
       const systemInstruction = context === 'NOTE' 
-        ? "Você é um transcritor profissional. Transcreva o áudio fielmente para texto."
-        : `Você é um assistente de entrada de dados para a GR SOLUTION. Sua tarefa é ouvir o áudio e extrair informações estruturadas. 
-           Trate CPFs e RGs com atenção: remova pontos e traços, mantendo apenas números. 
-           Identifique nomes próprios, e-mails, endereços e valores financeiros.`;
+        ? "VocÃª Ã© um transcritor profissional. Transcreva o Ã¡udio fielmente para texto."
+        : `VocÃª Ã© um assistente de entrada de dados para a GR SULTION. Sua tarefa Ã© ouvir o Ã¡udio e extrair informaÃ§Ãµes estruturadas. 
+           Trate CPFs e RGs com atenÃ§Ã£o: remova pontos e traÃ§os, mantendo apenas nÃºmeros. 
+           Identifique nomes prÃ³prios, e-mails, endereÃ§os e valores financeiros.`;
 
       const prompt = context === 'NOTE' 
-        ? "Transcreva este áudio."
-        : `Extraia os dados para um formulário de ${context === 'CUSTOMER' ? 'cliente' : 'contrato'}. 
-           Se for cliente, procure por: nome, cpf, rg, email, telefone, endereço. 
+        ? "Transcreva este Ã¡udio."
+        : `Extraia os dados para um formulÃ¡rio de ${context === 'CUSTOMER' ? 'cliente' : 'contrato'}. 
+           Se for cliente, procure por: nome, cpf, rg, email, telefone, endereÃ§o. 
            Se for contrato, procure por: valor (amount), taxa (interestRate), parcelas (installmentsCount).`;
 
       const config: any = {
@@ -85,12 +85,12 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
           type: Type.OBJECT,
           properties: {
             name: { type: Type.STRING },
-            cpf: { type: Type.STRING, description: "Apenas os 11 dígitos do CPF" },
+            cpf: { type: Type.STRING, description: "Apenas os 11 dÃ­gitos do CPF" },
             rg: { type: Type.STRING },
             email: { type: Type.STRING },
-            phone: { type: Type.STRING, description: "Apenas números com DDD" },
+            phone: { type: Type.STRING, description: "Apenas nÃºmeros com DDD" },
             address: { type: Type.STRING },
-            notes: { type: Type.STRING, description: "Outras informações ditas" }
+            notes: { type: Type.STRING, description: "Outras informaÃ§Ãµes ditas" }
           }
         } : {
           type: Type.OBJECT,
@@ -156,7 +156,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
            </div>
            <h2 className="text-xl font-black gold-text uppercase tracking-[0.3em] mb-4">Escutando...</h2>
            <p className="text-zinc-500 text-xs font-bold uppercase tracking-widest mb-10 text-center px-10">
-             {context === 'CUSTOMER' ? "Fale o nome, CPF, RG, endereço e email do cliente" : "Diga os valores e detalhes do contrato"}
+             {context === 'CUSTOMER' ? "Fale o nome, CPF, RG, endereÃ§o e email do cliente" : "Diga os valores e detalhes do contrato"}
            </p>
            <button 
             onClick={stopRecording}
@@ -172,7 +172,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
            <div className="w-16 h-16 border-4 border-zinc-900 border-t-[#BF953F] rounded-full animate-spin mb-8"></div>
            <div className="flex items-center gap-3">
               <Sparkles className="text-[#BF953F] animate-pulse" size={18} />
-              <h2 className="text-sm font-black gold-text uppercase tracking-widest text-center">IA GR SOLUTION Analisando...</h2>
+              <h2 className="text-sm font-black gold-text uppercase tracking-widest text-center">IA GR SULTION Analisando...</h2>
            </div>
            <p className="text-[9px] text-zinc-600 font-bold uppercase mt-3 tracking-widest">Formatando dados brasileiros</p>
         </div>
@@ -186,7 +186,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
           ? 'bg-red-500 text-white border-red-400' 
           : 'bg-zinc-900 text-[#BF953F] border-zinc-800 hover:border-[#BF953F]/50'
         }`}
-        title="Adicionar por Áudio"
+        title="Adicionar por Ãudio"
       >
         {isRecording ? <MicOff size={16} /> : <Mic size={16} />}
         <span className="text-[9px] font-black uppercase tracking-widest hidden sm:inline">{label || "Voz Inteligente"}</span>
@@ -196,3 +196,5 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
 };
 
 export default VoiceAssistant;
+
+

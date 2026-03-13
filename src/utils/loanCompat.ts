@@ -1,4 +1,4 @@
-import { Installment, Loan } from '../types';
+﻿import { Installment, Loan } from '../types';
 
 type NormalizedLoanStatus = 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 type NormalizedInstallmentStatus = 'PENDING' | 'PAID' | 'OVERDUE';
@@ -56,4 +56,5 @@ export const loanInstallmentsCount = (loan?: Partial<Loan> | null): number => {
   const installments = Array.isArray((loan as any).installments) ? (loan as any).installments : [];
   return installments.length;
 };
+
 

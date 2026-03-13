@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { Plus, Search, User, Phone, Mail, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
 import { Customer, Loan, CustomerDocument } from '../types';
 import {
@@ -172,7 +172,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
           <input
             type="text"
             placeholder="BUSCAR CLIENTE..."
-            className="w-full bg-[#0b1730] border border-zinc-900 rounded-2xl py-4 pl-12 pr-4 text-xs text-white outline-none focus:border-[#BF953F] transition-all"
+            className="w-full bg-[#050505] border border-zinc-900 rounded-2xl py-4 pl-12 pr-4 text-xs text-white outline-none focus:border-[#BF953F] transition-all"
             value={searchTerm}
             onChange={e => setSearchTerm(e.target.value)}
           />
@@ -192,7 +192,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
           return (
             <div 
               key={customer.id} 
-              className={`bg-[#0b1730] border p-6 rounded-3xl group transition-all ${
+              className={`bg-[#050505] border p-6 rounded-3xl group transition-all ${
                 hasOverdue ? 'border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.05)]' : 'border-zinc-900 hover:border-[#BF953F]/30'
               }`}
             >
@@ -256,8 +256,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       </div>
 
       {isModalOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#071226]/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-[#0b1730] border border-zinc-900 w-full max-w-2xl rounded-[2.5rem] p-5 sm:p-8 relative my-4 sm:my-8 max-h-[92dvh] overflow-y-auto">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/80 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-[#050505] border border-zinc-900 w-full max-w-2xl rounded-[2.5rem] p-5 sm:p-8 relative my-4 sm:my-8 max-h-[92dvh] overflow-y-auto">
             <button onClick={() => setIsModalOpen(false)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
               <X size={24} />
             </button>
@@ -298,7 +298,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 <div className="flex-1 space-y-4">
                   <input
                     type="text" placeholder="NOME COMPLETO" required
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                     value={formData.name || ''}
                     onChange={e => setFormData({ ...formData, name: e.target.value })}
                   />
@@ -306,7 +306,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                     <input
                       type="text" placeholder="CPF OU CNPJ (SO NUMEROS)" required
                       maxLength={14}
-                      className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                       value={formData.cpf || ''}
                       onChange={e => {
                         const value = e.target.value.replace(/\D/g, '');
@@ -317,7 +317,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                     />
                     <input
                       type="text" placeholder="RG"
-                      className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                       value={formData.rg || ''}
                       onChange={e => setFormData({ ...formData, rg: e.target.value })}
                     />
@@ -325,26 +325,26 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <input
                       type="date" placeholder="DATA DE NASCIMENTO"
-                      className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                       value={(formData as any).birthDate || ''}
                       onChange={e => setFormData({ ...formData, birthDate: e.target.value } as any)}
                     />
                     <input
                       type="text" placeholder="TELEFONE (SO NUMEROS)" required
-                      className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                       value={formData.phone || ''}
                       onChange={e => setFormData({ ...formData, phone: e.target.value })}
                     />
                   </div>
                   <input
                     type="email" placeholder="E-MAIL"
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                     value={formData.email || ''}
                     onChange={e => setFormData({ ...formData, email: e.target.value })}
                   />
                   <input
                     type="text" placeholder="ENDERECO"
-                    className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                     value={formData.address || ''}
                     onChange={e => setFormData({ ...formData, address: e.target.value })}
                   />
@@ -355,7 +355,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 <textarea
                   placeholder="OBSERVACOES"
                   rows={3}
-                  className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs resize-none"
+                  className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs resize-none"
                   value={(formData as any).observations ?? formData.notes ?? ''}
                   onChange={e => setFormData({ ...formData, observations: e.target.value, notes: e.target.value } as any)}
                 />
@@ -374,7 +374,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                         </button>
                       </div>
                     ))}
-                    <label className="flex items-center justify-center gap-2 p-3 bg-[#071226] border-2 border-dashed border-zinc-800 rounded-xl cursor-pointer hover:border-[#BF953F] transition-all group">
+                    <label className="flex items-center justify-center gap-2 p-3 bg-[#000000] border-2 border-dashed border-zinc-800 rounded-xl cursor-pointer hover:border-[#BF953F] transition-all group">
                       <Paperclip size={14} className="text-zinc-600 group-hover:text-[#BF953F]" />
                       <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest group-hover:text-[#BF953F]">Anexar Arquivo</span>
                       <input 
@@ -398,8 +398,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         </div>
       )}
       {viewingDetails && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#071226]/90 backdrop-blur-md overflow-y-auto">
-          <div className="bg-[#0b1730] border border-zinc-900 w-full max-w-4xl rounded-[2.5rem] p-5 sm:p-8 relative my-4 sm:my-8 max-h-[92dvh] overflow-y-auto">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/90 backdrop-blur-md overflow-y-auto">
+          <div className="bg-[#050505] border border-zinc-900 w-full max-w-4xl rounded-[2.5rem] p-5 sm:p-8 relative my-4 sm:my-8 max-h-[92dvh] overflow-y-auto">
             <button onClick={() => setViewingDetails(null)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
               <X size={24} />
             </button>
@@ -481,7 +481,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                       }).length;
 
                       return (
-                        <div key={loan.id} className="p-4 bg-[#071226] border border-zinc-900 rounded-2xl flex items-center justify-between">
+                        <div key={loan.id} className="p-4 bg-[#000000] border border-zinc-900 rounded-2xl flex items-center justify-between">
                           <div>
                             <p className="text-[10px] font-black text-white uppercase">Contrato {loan.id}</p>
                             <p className="text-[9px] text-zinc-500 mt-1">R$ {loan.amount.toLocaleString('pt-BR')}  -  {loanInstallmentsCount(loan)} Parc.</p>
@@ -544,8 +544,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       )}
 
       {deleteConfirmation && (
-        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-[#071226]/90 backdrop-blur-md">
-          <div className="bg-[#0b1730] border border-red-500/30 w-full max-w-sm rounded-[2.5rem] p-8 text-center">
+        <div className="fixed inset-0 z-[300] flex items-center justify-center p-4 bg-[#000000]/90 backdrop-blur-md">
+          <div className="bg-[#050505] border border-red-500/30 w-full max-w-sm rounded-[2.5rem] p-8 text-center">
             <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
               <AlertTriangle size={32} className="text-red-500" />
             </div>
@@ -578,6 +578,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
 };
 
 export default CustomerSection;
+
+
 
 
 

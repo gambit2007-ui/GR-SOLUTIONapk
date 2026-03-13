@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { Customer } from '../types';
 import { Calculator, Percent, Calendar, Wallet, Download, MessageCircle, User, Phone } from 'lucide-react';
 import jsPDF from 'jspdf';
@@ -125,7 +125,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8">
-      <div className="bg-[#0b1730] border border-zinc-900 p-5 sm:p-8 md:p-10 rounded-[3rem]">
+      <div className="bg-[#050505] border border-zinc-900 p-5 sm:p-8 md:p-10 rounded-[3rem]">
         <div className="flex items-center gap-3 sm:gap-4 mb-8 sm:mb-10">
           <div className="p-4 bg-zinc-900 rounded-2xl border border-zinc-800">
             <Calculator size={32} className="text-[#BF953F]" />
@@ -144,7 +144,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
               <input
                 type="text"
                 placeholder="NOME COMPLETO"
-                className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
+                className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
                 value={formData.name}
                 onChange={e => setFormData({ ...formData, name: e.target.value })}
               />
@@ -157,7 +157,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
               <input
                 type="text"
                 placeholder="(00) 00000-0000"
-                className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
+                className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
                 value={formData.phone}
                 onChange={e => setFormData({ ...formData, phone: e.target.value })}
               />
@@ -169,7 +169,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
           <div className="space-y-2">
             <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Tipo de Juros</label>
             <select
-              className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+              className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
               value={formData.interestType}
               onChange={e => setFormData({ ...formData, interestType: e.target.value as 'SIMPLE' | 'PRICE' })}
             >
@@ -180,7 +180,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
           <div className="space-y-2">
             <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Frequencia</label>
             <select
-              className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+              className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
               value={formData.frequency}
               onChange={e => setFormData({ ...formData, frequency: e.target.value as 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' })}
             >
@@ -202,7 +202,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
                 min="0"
                 step="0.01"
                 placeholder="0.00"
-                className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
+                className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
                 value={formData.amount}
                 onChange={e => setFormData({ ...formData, amount: e.target.value })}
               />
@@ -217,7 +217,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
                 min="0"
                 step="0.01"
                 placeholder="0"
-                className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
+                className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
                 value={formData.interestRate}
                 onChange={e => setFormData({ ...formData, interestRate: e.target.value })}
               />
@@ -232,7 +232,7 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
                 min="1"
                 step="1"
                 placeholder="1"
-                className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
+                className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 pl-12 text-white outline-none focus:border-[#BF953F] text-xs"
                 value={formData.installmentsCount}
                 onChange={e => setFormData({ ...formData, installmentsCount: e.target.value })}
               />
@@ -241,11 +241,11 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-10">
-          <div className="bg-[#071226] border border-zinc-900 p-6 rounded-3xl text-center">
+          <div className="bg-[#000000] border border-zinc-900 p-6 rounded-3xl text-center">
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Valor da Parcela</p>
             <p className="text-xl font-black text-white">R$ {installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
           </div>
-          <div className="bg-[#071226] border border-zinc-900 p-6 rounded-3xl text-center">
+          <div className="bg-[#000000] border border-zinc-900 p-6 rounded-3xl text-center">
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Total Geral</p>
             <p className="text-xl font-black text-emerald-500">R$ {totalWithInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
           </div>
@@ -273,4 +273,6 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
 };
 
 export default SimulationTab;
+
+
 

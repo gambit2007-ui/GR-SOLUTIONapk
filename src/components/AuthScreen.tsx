@@ -1,4 +1,4 @@
-
+﻿
 import React, { useState } from 'react';
 import { ShieldCheck, Mail, Lock, User, ArrowRight, LogIn } from 'lucide-react';
 import { AuthUser } from '../types';
@@ -23,11 +23,11 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
       if (user) {
         onLogin(user);
       } else {
-        setError('E-mail ou senha inválidos.');
+        setError('E-mail ou senha invÃ¡lidos.');
       }
     } else {
       if (users.find((u: AuthUser) => u.email === formData.email)) {
-        setError('Este e-mail já está cadastrado.');
+        setError('Este e-mail jÃ¡ estÃ¡ cadastrado.');
         return;
       }
       const newUser: AuthUser = {
@@ -59,7 +59,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
                onError={(e) => (e.currentTarget.style.display = 'none')}
              />
           </div>
-          <h1 className="text-3xl font-black gold-text tracking-tighter mb-2">GR SOLUTION</h1>
+          <h1 className="text-3xl font-black gold-text tracking-tighter mb-2">GR SULTION</h1>
           <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-[0.4em]">Wealth Management System</p>
         </div>
 
@@ -120,7 +120,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
 
           <div className="mt-8 pt-6 border-t border-zinc-900 flex items-center justify-center gap-2 text-zinc-600">
              <ShieldCheck size={14} className="text-[#BF953F]" />
-             <span className="text-[9px] font-bold uppercase tracking-widest">Sessão Segura e Criptografada</span>
+             <span className="text-[9px] font-bold uppercase tracking-widest">SessÃ£o Segura e Criptografada</span>
           </div>
         </div>
       </div>
@@ -145,3 +145,5 @@ const AuthInput: React.FC<{ icon: React.ReactNode, placeholder: string, type: st
 );
 
 export default AuthScreen;
+
+

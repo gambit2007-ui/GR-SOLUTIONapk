@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+﻿import React, { useState, useEffect } from 'react';
 import { 
   Calculator, 
   RefreshCcw, 
@@ -64,7 +64,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
       }
     }
 
-    let currentDate = new Date(startDate + 'T12:00:00'); // Usar meio-dia evita problemas de fuso horário
+    let currentDate = new Date(startDate + 'T12:00:00'); // Usar meio-dia evita problemas de fuso horÃ¡rio
     for (let i = 1; i <= installments; i++) {
       const installmentDate = new Date(currentDate);
       if (frequency === 'DIARIO') installmentDate.setDate(currentDate.getDate() + i);
@@ -121,7 +121,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
       dueDate: simulation.dueDate,
       createdAt: Date.now(),
       installments: installmentObjects,
-      // ✅ CAMPOS ADICIONADOS PARA RESOLVER O ERRO TS(2739)
+      // âœ… CAMPOS ADICIONADOS PARA RESOLVER O ERRO TS(2739)
       status: 'ATIVO',
       paidAmount: 0
     };
@@ -147,7 +147,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
         <div className="flex items-center justify-between mb-10">
           <h2 className="text-xl font-black text-[#BF953F] uppercase tracking-[0.2em] flex items-center gap-4">
             <Calculator size={24} className="text-[#BF953F]" />
-            Simulação Premium
+            SimulaÃ§Ã£o Premium
           </h2>
           <button 
             onClick={resetSimulation}
@@ -159,7 +159,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
 
         <div className="space-y-8">
           <div>
-            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 ml-2">Proprietário do Contrato</label>
+            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 ml-2">ProprietÃ¡rio do Contrato</label>
             <select
               value={selectedCustomerId}
               onChange={(e) => setSelectedCustomerId(e.target.value)}
@@ -178,15 +178,15 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
           </div>
 
           <div className="grid grid-cols-2 gap-8">
-            <SimulatorInput label="Nº de Parcelas" type="number" value={installments} onChange={(e: any) => setInstallments(Number(e.target.value))} />
+            <SimulatorInput label="NÂº de Parcelas" type="number" value={installments} onChange={(e: any) => setInstallments(Number(e.target.value))} />
             <div>
-              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 ml-2">Período</label>
+              <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 ml-2">PerÃ­odo</label>
               <select
                 value={frequency}
                 onChange={(e) => setFrequency(e.target.value as Frequency)}
                 className="w-full px-6 py-4 bg-black border border-zinc-800 rounded-2xl focus:border-[#BF953F] outline-none text-zinc-200"
               >
-                <option value="DIARIO" className="bg-black">Diário</option>
+                <option value="DIARIO" className="bg-black">DiÃ¡rio</option>
                 <option value="SEMANAL" className="bg-black">Semanal</option>
                 <option value="MENSAL" className="bg-black">Mensal</option>
               </select>
@@ -194,7 +194,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 ml-2">Data de Início</label>
+            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-3 ml-2">Data de InÃ­cio</label>
             <input 
               type="date" 
               value={startDate}
@@ -204,7 +204,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
           </div>
 
           <div>
-            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2 text-center">Metodologia de Cálculo</label>
+            <label className="block text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-4 ml-2 text-center">Metodologia de CÃ¡lculo</label>
             <div className="flex gap-4 p-2 bg-black border border-zinc-900 rounded-3xl">
               <button
                 onClick={() => setInterestType('SIMPLES')}
@@ -236,7 +236,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
           <div className="relative z-10">
             <div className="flex items-center gap-3 mb-10">
               <ShieldCheck className="text-[#BF953F]" size={20} />
-              <h3 className="text-[10px] font-black text-[#BF953F] uppercase tracking-[0.4em]">Sumário do Ativo</h3>
+              <h3 className="text-[10px] font-black text-[#BF953F] uppercase tracking-[0.4em]">SumÃ¡rio do Ativo</h3>
             </div>
             
             <div className="mb-10">
@@ -285,16 +285,16 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
             <HelpCircle size={24} />
           </div>
           <div>
-            <h4 className="font-bold text-zinc-200 text-sm uppercase tracking-widest mb-2">Segurança Financeira</h4>
+            <h4 className="font-bold text-zinc-200 text-sm uppercase tracking-widest mb-2">SeguranÃ§a Financeira</h4>
             <p className="text-[11px] text-zinc-500 leading-relaxed italic">
-              Este sistema utiliza criptografia de ponta a ponta para proteger as operações de crédito e os dados sensíveis.
+              Este sistema utiliza criptografia de ponta a ponta para proteger as operaÃ§Ãµes de crÃ©dito e os dados sensÃ­veis.
             </p>
             <div className="mt-4 flex gap-4">
               <div className="flex items-center gap-2 text-[9px] font-bold text-[#BF953F] bg-[#BF953F]/5 px-3 py-1.5 rounded-full border border-[#BF953F]/20">
                 <TrendingUp size={12} /> PROTOCOLO {interestType}
               </div>
               <div className="flex items-center gap-2 text-[9px] font-bold text-zinc-400 bg-zinc-800/50 px-3 py-1.5 rounded-full border border-zinc-800">
-                <CreditCard size={12} /> FREQUÊNCIA {frequency}
+                <CreditCard size={12} /> FREQUÃŠNCIA {frequency}
               </div>
             </div>
           </div>
@@ -317,3 +317,4 @@ const SimulatorInput: React.FC<{ label: string; type: string; value: any; onChan
 );
 
 export default LoanSimulator;
+

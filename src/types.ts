@@ -1,4 +1,4 @@
-export type Frequency =
+﻿export type Frequency =
   | 'DIARIO'
   | 'SEMANAL'
   | 'QUINZENAL'
@@ -109,4 +109,5 @@ export interface Loan {
 }
 
 export type View = 'DASHBOARD' | 'CUSTOMERS' | 'LOANS' | 'SIMULATION' | 'REPORTS';
+
 

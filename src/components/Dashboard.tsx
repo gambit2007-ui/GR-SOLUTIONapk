@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+﻿import React, { useState, useEffect, useRef } from 'react';
 import { Loan, Customer, CashMovement, Installment } from '../types';
 import { TrendingUp, Users, FileText, Wallet, Activity, ChevronDown, Calendar as CalendarIcon, Clock, ArrowRight } from 'lucide-react';
 import {
@@ -135,7 +135,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
           <div 
             key={i} 
             onClick={stat.onClick}
-            className={`bg-[#0b1730] border border-zinc-900 p-6 rounded-3xl ${stat.onClick ? 'cursor-pointer hover:border-zinc-700 transition-all' : ''}`}
+            className={`bg-[#050505] border border-zinc-900 p-6 rounded-3xl ${stat.onClick ? 'cursor-pointer hover:border-zinc-700 transition-all' : ''}`}
           >
             <div className="flex items-center justify-between mb-4">
               <stat.icon size={24} className={stat.color} />
@@ -148,7 +148,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
       </div>
       
       {/* AGENDA DE RECEBIMENTOS */}
-      <div className="bg-[#0b1730] border border-zinc-900 p-4 rounded-[1.5rem]">
+      <div className="bg-[#050505] border border-zinc-900 p-4 rounded-[1.5rem]">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3 mb-4">
           <div className="flex items-center gap-2">
             <div className="p-2 bg-zinc-900 rounded-lg border border-zinc-800">
@@ -159,7 +159,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
               <p className="text-[7px] text-zinc-500 uppercase tracking-widest mt-0.5">Organize seus recebimentos diarios</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 bg-[#071226] border border-zinc-900 p-1 rounded-lg">
+          <div className="flex items-center gap-2 bg-[#000000] border border-zinc-900 p-1 rounded-lg">
             <input 
               type="date" 
               className="bg-transparent text-white text-[8px] font-black uppercase tracking-widest outline-none px-2 py-1"
@@ -245,7 +245,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
               <button
                 key={`${inst.loanId}-${idx}`}
                 onClick={() => onNavigateToLoan(inst.loanId)}
-                className="group bg-[#071226] border border-zinc-900 p-3 rounded-2xl hover:border-[#BF953F]/50 transition-all text-left flex items-center justify-between"
+                className="group bg-[#000000] border border-zinc-900 p-3 rounded-2xl hover:border-[#BF953F]/50 transition-all text-left flex items-center justify-between"
               >
                 <div className="min-w-0 flex-1 mr-2">
                   <p className="text-[9px] font-black text-white uppercase group-hover:text-[#BF953F] transition-colors truncate">{inst.customerName}</p>
@@ -302,7 +302,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                   <button
                     key={loan.id}
                     onClick={() => onNavigateToLoan(loan.id)}
-                    className="flex flex-col p-6 bg-[#071226] border border-zinc-900 rounded-3xl hover:border-red-500/50 transition-all text-left group relative overflow-hidden"
+                    className="flex flex-col p-6 bg-[#000000] border border-zinc-900 rounded-3xl hover:border-red-500/50 transition-all text-left group relative overflow-hidden"
                   >
                     <div className="absolute top-0 right-0 w-1 h-full bg-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                     <div className="flex justify-between items-start mb-4">
@@ -331,14 +331,14 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
         {/* CONTRATOS POR MES */}
-        <div className="bg-[#0b1730] border border-zinc-900 p-8 rounded-[2rem]">
+        <div className="bg-[#050505] border border-zinc-900 p-8 rounded-[2rem]">
           <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-6">Contratos por Mes</h3>
           <div className="space-y-3">
             {Object.keys(loansByMonth).map((month) => (
               <div key={month} className="border border-zinc-900 rounded-2xl overflow-hidden">
                 <button 
                   onClick={() => setExpandedMonthLoans(expandedMonthLoans === month ? null : month)}
-                  className="w-full p-4 flex items-center justify-between bg-[#071226]/40 hover:bg-zinc-900/50 transition-colors"
+                  className="w-full p-4 flex items-center justify-between bg-[#000000]/40 hover:bg-zinc-900/50 transition-colors"
                 >
                   <span className="text-[10px] font-black text-white uppercase tracking-widest truncate max-w-[70%] text-left">{month}</span>
                   <span className="text-[9px] font-black text-[#BF953F] px-2 py-1 bg-[#BF953F]/10 rounded-lg">
@@ -346,7 +346,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                   </span>
                 </button>
                 {expandedMonthLoans === month && (
-                  <div className="p-4 space-y-2 bg-[#071226]/20 border-t border-zinc-900 animate-in slide-in-from-top duration-200">
+                  <div className="p-4 space-y-2 bg-[#000000]/20 border-t border-zinc-900 animate-in slide-in-from-top duration-200">
                     {loansByMonth[month].map((loan: Loan) => (
                       <div key={loan.id} className="flex items-center justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50">
                         <div className="min-w-0">
@@ -372,14 +372,14 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
         </div>
 
         {/* MOVIMENTACOES POR MES */}
-        <div className="bg-[#0b1730] border border-zinc-900 p-8 rounded-[2rem]">
+        <div className="bg-[#050505] border border-zinc-900 p-8 rounded-[2rem]">
           <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-6">Movimentacoes por Mes</h3>
           <div className="space-y-3">
             {Object.keys(movementsByMonth).map((month) => (
               <div key={month} className="border border-zinc-900 rounded-2xl overflow-hidden">
                 <button 
                   onClick={() => setExpandedMonthMovements(expandedMonthMovements === month ? null : month)}
-                  className="w-full p-4 flex items-center justify-between bg-[#071226]/40 hover:bg-zinc-900/50 transition-colors"
+                  className="w-full p-4 flex items-center justify-between bg-[#000000]/40 hover:bg-zinc-900/50 transition-colors"
                 >
                   <span className="text-[10px] font-black text-white uppercase tracking-widest truncate max-w-[70%] text-left">{month}</span>
                   <span className="text-[9px] font-black text-[#BF953F] px-2 py-1 bg-[#BF953F]/10 rounded-lg">
@@ -387,7 +387,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                   </span>
                 </button>
                 {expandedMonthMovements === month && (
-                  <div className="p-4 bg-[#071226]/20 border-t border-zinc-900 animate-in slide-in-from-top duration-200">
+                  <div className="p-4 bg-[#000000]/20 border-t border-zinc-900 animate-in slide-in-from-top duration-200">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       {/* COLUNA DE ENTRADAS */}
                       <div className="space-y-2">
@@ -463,6 +463,8 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
 };
 
 export default Dashboard;
+
+
 
 
 
