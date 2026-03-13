@@ -28,6 +28,33 @@ interface Toast {
 
 type MovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
 
+const sanitizeFirestorePayload = <T,>(value: T): T => {
+  if (value === undefined) return value;
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => sanitizeFirestorePayload(item))
+      .filter((item) => item !== undefined) as unknown as T;
+  }
+
+  if (value && typeof value === 'object') {
+    const maybeFieldValue = value as { constructor?: { name?: string }; isEqual?: (other: unknown) => boolean };
+    const ctorName = String(maybeFieldValue.constructor?.name || '').toLowerCase();
+    if (ctorName.includes('fieldvalue')) return value;
+    if (typeof (value as any).toDate === 'function') return value;
+    if (value instanceof Date) return value;
+
+    const output: Record<string, unknown> = {};
+    Object.entries(value as Record<string, unknown>).forEach(([key, entryValue]) => {
+      if (entryValue === undefined) return;
+      output[key] = sanitizeFirestorePayload(entryValue);
+    });
+    return output as T;
+  }
+
+  return value;
+};
+
 const App: React.FC = () => {
   // --- ESTADOS DE AUTENTICACAO ---
   const [user, setUser] = useState<User | null>(null);
@@ -128,7 +155,7 @@ const App: React.FC = () => {
 
   const handleUpdateLoan = async (loanId: string, newData: Partial<Loan>) => {
     try {
-      await updateDoc(doc(db, 'loans', loanId), newData);
+      await updateDoc(doc(db, 'loans', loanId), sanitizeFirestorePayload(newData));
     } catch (e) {
       showToast("Erro ao atualizar contrato", "error");
       throw e;
@@ -216,7 +243,7 @@ const App: React.FC = () => {
         const isEntrada = tipo === 'APORTE' || tipo === 'PAGAMENTO' || tipo === 'ENTRADA';
         const novoSaldo = Number((saldoAtual + (isEntrada ? valorNum : -valorNum)).toFixed(2));
 
-        tx.update(loanRef, newData);
+        tx.update(loanRef, sanitizeFirestorePayload(newData));
         tx.set(movimentoRef, {
           type: tipo,
           amount: valorNum,
@@ -260,7 +287,7 @@ const App: React.FC = () => {
   const handleAddCustomer = async (c: Customer) => {
     try { 
       const { id, ...data } = c;
-      await addDoc(collection(db, "clientes"), { ...data, createdAt: Date.now() }); 
+      await addDoc(collection(db, "clientes"), sanitizeFirestorePayload({ ...data, createdAt: Date.now() })); 
       showToast('Cliente cadastrado com sucesso!'); 
     } catch (e) { showToast('Erro ao salvar cliente', 'error'); }
   };
@@ -269,7 +296,7 @@ const App: React.FC = () => {
   const handleUpdateCustomer = async (updated: Customer) => {
     try {
       const { id, ...data } = updated;
-      await updateDoc(doc(db, "clientes", id), data);
+      await updateDoc(doc(db, "clientes", id), sanitizeFirestorePayload(data));
       showToast('Cadastro atualizado!', 'info');
     } catch (e) { showToast('Erro ao atualizar cadastro', 'error'); }
   };
@@ -299,6 +326,7 @@ const App: React.FC = () => {
   const handleAddLoan = async (l: Loan): Promise<void> => {
     try {
       const { id, ...data } = l;
+      const safeLoanData = sanitizeFirestorePayload(data);
 
       await runTransaction(db, async (tx) => {
         const loanRef = doc(db, "loans", l.id);
@@ -309,7 +337,7 @@ const App: React.FC = () => {
         const saldoAtual = caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
         const novoSaldo = Number((saldoAtual - Number(l.amount || 0)).toFixed(2));
 
-        tx.set(loanRef, { ...data, createdAt: serverTimestamp() });
+        tx.set(loanRef, { ...safeLoanData, createdAt: serverTimestamp() });
         tx.set(movimentoRef, {
           type: 'RETIRADA',
           amount: Number(l.amount || 0),
@@ -323,6 +351,7 @@ const App: React.FC = () => {
       setCurrentView('DASHBOARD');
       showToast('Contrato efetivado!');
     } catch (e) {
+      console.error('Erro ao salvar contrato:', e);
       showToast('Erro ao salvar contrato', 'error');
       throw e;
     }
