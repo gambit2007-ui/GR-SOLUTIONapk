@@ -449,6 +449,7 @@ const App: React.FC = () => {
     <div className="flex min-h-dvh bg-[#000000] overflow-x-hidden text-white font-sans">
       <style>
         {`
+          html, body, #root { background: #000000 !important; }
           .gold-text { background: linear-gradient(to right, #BF953F, #FCF6BA, #B38728); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
           .gold-gradient { background: linear-gradient(45deg, #BF953F, #FCF6BA, #B38728); }
           .custom-scrollbar::-webkit-scrollbar { width: 4px; }
