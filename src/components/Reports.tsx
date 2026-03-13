@@ -21,6 +21,7 @@ interface ReportsProps {
     description: string,
   ) => Promise<void>;
   onRecalculateCash: () => Promise<void>;
+  onDownloadBackup?: () => Promise<void>;
   showToast: (message: string, type: 'success' | 'info' | 'error') => void;
 }
 

@@ -37,6 +37,7 @@ const App: React.FC = () => {
   const [loginLoading, setLoginLoading] = useState(false);
   // --- ESTADOS DA APLICACAO ---
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
+  const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loans, setLoans] = useState<Loan[]>([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -327,6 +328,49 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteLoan = async (loanId: string) => {
+    try {
+      await deleteDoc(doc(db, 'loans', loanId));
+      showToast('Contrato excluido com sucesso!', 'success');
+    } catch (e) {
+      showToast('Erro ao excluir contrato', 'error');
+      throw e;
+    }
+  };
+
+  const handleDownloadBackup = async () => {
+    try {
+      const [customersSnap, loansSnap, movementsSnap, caixaSnap] = await Promise.all([
+        getDocs(collection(db, 'clientes')),
+        getDocs(collection(db, 'loans')),
+        getDocs(collection(db, 'cashMovement')),
+        getDocs(query(collection(db, 'settings'))),
+      ]);
+
+      const payload = {
+        generatedAt: new Date().toISOString(),
+        customers: customersSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        loans: loansSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        cashMovement: movementsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        settings: caixaSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+      };
+
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `backup-grjuros-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+
+      showToast('Backup completo baixado (clientes, contratos e financeiro)!', 'success');
+    } catch {
+      showToast('Erro ao gerar backup', 'error');
+    }
+  };
+
   // --- COMPONENTES DE TELA ---
 
   if (authLoading) {
@@ -390,9 +434,15 @@ const App: React.FC = () => {
 
   const handleSelectView = (view: View) => {
     setCurrentView(view);
+    if (view !== 'LOANS') setSelectedLoanId(null);
     if (isMobileViewport) {
       setIsMobileSidebarOpen(false);
     }
+  };
+
+  const navigateToLoan = (loanId: string) => {
+    setSelectedLoanId(loanId);
+    setCurrentView('LOANS');
   };
 
   return (
@@ -499,19 +549,43 @@ const App: React.FC = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#071226] p-3 sm:p-4 md:p-6">
-            {currentView === 'DASHBOARD' && <Dashboard loans={loans} customers={customers} cashMovements={transactions} />}
+            {currentView === 'DASHBOARD' && (
+              <Dashboard
+                loans={loans}
+                customers={customers}
+                cashMovements={transactions}
+                onNavigateToLoan={navigateToLoan}
+              />
+            )}
             {currentView === 'CUSTOMERS' && (
               <CustomerSection
                 customers={customers} loans={loans}
                 onAddCustomer={handleAddCustomer} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer}
               />
             )}
-            {currentView === 'LOANS' && <LoanSection customers={customers} loans={loans} onAddLoan={handleAddLoan} showToast={showToast} />}
+            {currentView === 'LOANS' && (
+              <LoanSection
+                customers={customers}
+                loans={loans}
+                onAddLoan={handleAddLoan}
+                onUpdateLoan={handleUpdateLoan}
+                onDeleteLoan={handleDeleteLoan}
+                showToast={showToast}
+                initialExpandedLoanId={selectedLoanId}
+                onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
+              />
+            )}
             {currentView === 'SIMULATION' && <SimulationTab customers={customers} />}
             {currentView === 'REPORTS' && (
               <Reports
                 loans={loans} cashMovements={transactions}
-                caixa={caixa} onAddTransaction={handleAddTransaction} onUpdateLoan={handleUpdateLoan} onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction} onRecalculateCash={handleRecalculateCash} showToast={showToast}
+                caixa={caixa}
+                onAddTransaction={handleAddTransaction}
+                onUpdateLoan={handleUpdateLoan}
+                onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
+                onRecalculateCash={handleRecalculateCash}
+                onDownloadBackup={handleDownloadBackup}
+                showToast={showToast}
               />
             )}
         </div>

@@ -10,6 +10,7 @@ interface DashboardProps {
   loans: Loan[];
   customers: Customer[];
   cashMovements: CashMovement[];
+  onNavigateToLoan?: (loanId: string) => void;
 }
 
 const Dashboard: React.FC<DashboardProps> = ({ loans = [], customers = [], cashMovements = [] }) => {

@@ -17,6 +17,7 @@ import { Customer, Loan, Installment } from '../types';
 
 import { generateContractPDF } from '../utils/contractGenerator';
 
+type MovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
 
 
 interface LoanSectionProps {
@@ -26,6 +27,16 @@ interface LoanSectionProps {
   loans: Loan[];
 
   onAddLoan: (loan: Loan) => Promise<void>;
+  onUpdateLoan?: (loanId: string, newData: Partial<Loan>) => Promise<void>;
+  onDeleteLoan?: (loanId: string) => Promise<void>;
+  initialExpandedLoanId?: string | null;
+  onUpdateLoanAndAddTransaction?: (
+    loanId: string,
+    newData: Partial<Loan>,
+    type: MovementType,
+    amount: number,
+    description: string,
+  ) => Promise<void>;
 
   showToast?: (message: string, type: 'success' | 'error' | 'info') => void;
 
