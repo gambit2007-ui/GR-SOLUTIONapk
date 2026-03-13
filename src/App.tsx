@@ -331,7 +331,7 @@ const App: React.FC = () => {
 
   if (authLoading) {
     return (
-      <div className="min-h-dvh bg-black flex items-center justify-center">
+      <div className="min-h-dvh bg-[#071226] flex items-center justify-center">
         <Activity size={40} className="text-[#BF953F] animate-pulse" />
       </div>
     );
@@ -339,25 +339,25 @@ const App: React.FC = () => {
 
   if (!user) {
     return (
-      <div className="min-h-dvh bg-black flex items-center justify-center p-6">
-        <div className="w-full max-w-sm bg-[#050505] border border-zinc-900 p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
+      <div className="min-h-dvh bg-[#071226] flex items-center justify-center p-6">
+        <div className="w-full max-w-sm bg-[#0b1730] border border-zinc-900 p-10 rounded-[3rem] shadow-2xl relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 gold-gradient opacity-50" />
           <div className="mb-10 text-center">
             <div className="inline-flex p-4 bg-zinc-900 rounded-2xl mb-4 border border-zinc-800">
               <Lock size={32} className="text-[#BF953F]" />
             </div>
-            <h1 className="text-2xl font-black gold-text tracking-tighter">GR SOLUTION</h1>
+            <h1 className="text-2xl font-black gold-text tracking-tighter">GESTAO DE EMPRESTIMOS</h1>
             <p className="text-[9px] text-zinc-500 uppercase tracking-[0.4em] mt-2 text-center">Acesso ao Painel de Controle</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
             <input 
               type="email" placeholder="E-MAIL" required
-              className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
+              className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
               onChange={e => setEmail(e.target.value)}
             />
             <input 
               type="password" placeholder="CHAVE DE ACESSO" required
-              className="w-full bg-black border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
+              className="w-full bg-[#071226] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
               onChange={e => setPassword(e.target.value)}
             />
             <button 
@@ -372,10 +372,18 @@ const App: React.FC = () => {
     );
   }
 
+  const overdueLoansCount = loans.filter((loan) => {
+    const saldoDevedor = Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0);
+    if (saldoDevedor <= 0.5) return false;
+
+    const today = new Date().toISOString().split('T')[0];
+    return (loan.installments || []).some((inst) => inst.status !== 'PAGO' && inst.dueDate < today);
+  }).length;
+
   const navItems = [
     { id: 'DASHBOARD', label: 'Painel', icon: LayoutDashboard },
     { id: 'CUSTOMERS', label: 'Clientes', icon: Users },
-    { id: 'LOANS', label: 'Contratos', icon: FileText },
+    { id: 'LOANS', label: 'Contratos', icon: FileText, badge: overdueLoansCount > 0 ? overdueLoansCount : null },
     { id: 'SIMULATION', label: 'Simular', icon: Calculator },
     { id: 'REPORTS', label: 'Financeiro', icon: PieChart },
   ];
@@ -388,7 +396,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="flex min-h-screen h-dvh bg-black overflow-hidden text-white font-sans">
+    <div className="flex min-h-dvh bg-[#071226] overflow-x-hidden text-white font-sans">
       <style>
         {`
           .gold-text { background: linear-gradient(to right, #BF953F, #FCF6BA, #B38728); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
@@ -403,20 +411,20 @@ const App: React.FC = () => {
           type="button"
           onClick={() => setIsMobileSidebarOpen(false)}
           aria-label="Fechar menu"
-          className="fixed inset-0 z-[170] bg-black/70 backdrop-blur-[1px]"
+          className="fixed inset-0 z-[170] bg-[#071226]/70 backdrop-blur-[1px]"
         />
       )}
 
       {/* SIDEBAR */}
       <aside
-        className={`flex flex-col bg-[#050505] border-r border-zinc-900 transition-all duration-300 ${
+        className={`flex flex-col bg-[#0b1730] border-r border-zinc-900 transition-all duration-300 ${
           isMobileViewport
             ? `fixed inset-y-0 left-0 z-[180] w-72 transform ${isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}`
             : `relative z-[70] ${isSidebarOpen ? 'w-72' : 'w-24'}`
         }`}
       >
         <div className="h-24 flex items-center justify-between px-6 border-b border-zinc-900">
-          {(isSidebarOpen || isMobileViewport) && <span className="font-black text-lg gold-text tracking-tighter">GR SOLUTION</span>}
+          {(isSidebarOpen || isMobileViewport) && <span className="font-black text-lg gold-text tracking-tighter">GESTAO DE EMPRESTIMOS</span>}
           <button
             onClick={() => {
               if (isMobileViewport) {
@@ -435,12 +443,24 @@ const App: React.FC = () => {
             <button
               key={item.id}
               onClick={() => handleSelectView(item.id as View)}
-              className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all ${
+              className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all relative ${
                 currentView === item.id ? 'gold-gradient text-black font-black' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900/50'
               }`}
             >
               <item.icon size={22} />
-              {(isSidebarOpen || isMobileViewport) && <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>}
+              {(isSidebarOpen || isMobileViewport) && (
+                <div className="flex-1 flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-widest">{item.label}</span>
+                  {item.badge && (
+                    <span className="bg-red-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full animate-pulse">
+                      {item.badge}
+                    </span>
+                  )}
+                </div>
+              )}
+              {!(isSidebarOpen || isMobileViewport) && item.badge && (
+                <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse" />
+              )}
             </button>
           ))}
         </nav>
@@ -454,7 +474,7 @@ const App: React.FC = () => {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
-        <header className="h-16 md:h-20 bg-[#020202] border-b border-zinc-900 flex items-center justify-between px-3 sm:px-4 md:px-8 lg:px-10 flex-shrink-0 gap-3">
+        <header className="h-16 md:h-20 bg-[#08152b] border-b border-zinc-900 flex items-center justify-between px-3 sm:px-4 md:px-8 lg:px-10 flex-shrink-0 gap-3">
             <div className="flex items-center gap-2 min-w-0">
               <button
                 type="button"
@@ -472,13 +492,13 @@ const App: React.FC = () => {
                 <div className="flex items-center gap-2 px-2.5 sm:px-4 py-1.5 bg-zinc-950 border border-zinc-900 rounded-full max-w-[72vw] sm:max-w-none">
                   <Activity size={12} className="text-emerald-500 animate-pulse shrink-0" />
                   <span className="text-[8px] sm:text-[9px] font-black text-zinc-500 uppercase truncate">
-                    <span className="hidden sm:inline">Online: </span>{user?.email}
+                    <span className="hidden sm:inline">Conectado: </span>{user?.email}
                   </span>
                 </div>
             </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar bg-black p-3 sm:p-4 md:p-6">
+        <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#071226] p-3 sm:p-4 md:p-6">
             {currentView === 'DASHBOARD' && <Dashboard loans={loans} customers={customers} cashMovements={transactions} />}
             {currentView === 'CUSTOMERS' && (
               <CustomerSection
