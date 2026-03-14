@@ -47,7 +47,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         if (normalizedStatus === 'OVERDUE') score -= 10;
         
         // Verifica pendencia vencida
-        const dueDate = new Date(inst.dueDate);
+        const dueDate = new Date(inst.dueDate + 'T00:00:00');
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         if (normalizedStatus !== 'PAID' && dueDate < today) {
@@ -103,7 +103,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       loan.customerId === customerId && 
       normalizeLoanStatus(loan.status) === 'ACTIVE' && 
       loan.installments.some(inst => {
-        const dueDate = new Date(inst.dueDate);
+        const dueDate = new Date(inst.dueDate + 'T00:00:00');
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         return normalizeInstallmentStatus(inst.status) !== 'PAID' && dueDate < today;
@@ -474,7 +474,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                   ) : (
                     loans.filter(l => l.customerId === viewingDetails.id).map(loan => {
                       const overdueCount = loan.installments.filter(i => {
-                        const dueDate = new Date(i.dueDate);
+                        const dueDate = new Date(i.dueDate + 'T00:00:00');
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);
                         return normalizeInstallmentStatus(i.status) !== 'PAID' && dueDate < today;

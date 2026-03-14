@@ -6,6 +6,7 @@ import {
   normalizeInstallmentStatus,
   normalizeLoanStatus,
 } from '../utils/loanCompat';
+import { formatDateTimeBR, getLocalISODate } from '../utils/dateTime';
 
 interface DashboardProps {
   loans: Loan[];
@@ -17,14 +18,14 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, onNavigateToLoan }) => {
   const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
   const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(getLocalISODate());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Gera dias para o calendario horizontal (7 dias antes e 21 dias depois)
   const calendarDays = Array.from({ length: 30 }, (_, i) => {
     const d = new Date();
     d.setDate(d.getDate() - 7 + i);
-    return d.toISOString().split('T')[0];
+    return getLocalISODate(d);
   });
 
   useEffect(() => {
@@ -69,7 +70,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
       const diffTime = today.getTime() - dueDate.getTime();
       const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
       if (diffDays <= 0) return 0;
-      return installmentAmount(inst) * 0.015 * diffDays;
+      return Number((installmentAmount(inst) * 0.015 * diffDays).toFixed(2));
     }
     return 0;
   };
@@ -77,7 +78,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
   // Identificar contratos em atraso
   const overdueLoans = loans.filter(loan => {
     if (normalizeLoanStatus(loan.status) !== 'ACTIVE') return false;
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalISODate();
     return loan.installments.some(
       (inst) => normalizeInstallmentStatus(inst.status) !== 'PAID' && inst.dueDate < today,
     );
@@ -177,7 +178,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
           >
             {calendarDays.map((date) => {
               const isSelected = date === selectedDate;
-              const todayStr = new Date().toISOString().split('T')[0];
+              const todayStr = getLocalISODate();
               const isToday = date === todayStr;
               
               const hasOverdue = loans.some(l => 
@@ -289,7 +290,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {overdueLoans.map((loan) => {
                 const overdueInstallments = loan.installments.filter(i => {
-                  const today = new Date().toISOString().split('T')[0];
+                  const today = getLocalISODate();
                   return normalizeInstallmentStatus(i.status) !== 'PAID' && i.dueDate < today;
                 });
                 const overdueCount = overdueInstallments.length;
@@ -407,7 +408,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                               <div key={m.id} className="flex items-center justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-emerald-500/30 transition-colors">
                                 <div className="min-w-0 flex-1 mr-3">
                                   <p className="text-[9px] font-black text-white uppercase truncate">{m.description}</p>
-                                  <p className="text-[7px] text-zinc-500 uppercase tracking-tighter">{new Date(m.date).toLocaleDateString('pt-BR')}  -  {m.type}</p>
+                                  <p className="text-[7px] text-zinc-500 uppercase tracking-tighter">{formatDateTimeBR(m.date)}  -  {m.type}</p>
                                 </div>
                                 <span className="text-[9px] font-black text-emerald-500 whitespace-nowrap">
                                   + R$ {m.amount.toLocaleString('pt-BR')}
@@ -438,7 +439,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                               <div key={m.id} className="flex items-center justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-red-500/30 transition-colors">
                                 <div className="min-w-0 flex-1 mr-3">
                                   <p className="text-[9px] font-black text-white uppercase truncate">{m.description}</p>
-                                  <p className="text-[7px] text-zinc-500 uppercase tracking-tighter">{new Date(m.date).toLocaleDateString('pt-BR')}  -  {m.type}</p>
+                                  <p className="text-[7px] text-zinc-500 uppercase tracking-tighter">{formatDateTimeBR(m.date)}  -  {m.type}</p>
                                 </div>
                                 <span className="text-[9px] font-black text-red-500 whitespace-nowrap">
                                   - R$ {m.amount.toLocaleString('pt-BR')}

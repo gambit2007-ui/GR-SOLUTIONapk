@@ -19,6 +19,7 @@ import CustomerSection from './components/CustomerSection';
 import SimulationTab from './components/SimulationTab';
 import Reports from './components/Reports';
 import LoanSection from './components/LoanSection';
+import { getLocalISODate } from './utils/dateTime';
 
 interface Toast {
   id: string;
@@ -449,7 +450,7 @@ const App: React.FC = () => {
     const saldoDevedor = Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0);
     if (saldoDevedor <= 0.5) return false;
 
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalISODate();
     return (loan.installments || []).some((inst) => inst.status !== 'PAGO' && inst.dueDate < today);
   }).length;
 

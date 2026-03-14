@@ -10,6 +10,7 @@ import {
   Calendar
 } from 'lucide-react';
 import { Customer, Loan, Frequency, InterestType, Installment } from '../types';
+import { getLocalISODate } from '../utils/dateTime';
 
 interface LoanSimulatorProps {
   customers: Customer[];
@@ -24,7 +25,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
   const [installments, setInstallments] = useState<number>(12);
   const [frequency, setFrequency] = useState<Frequency>('MENSAL');
   const [interestType, setInterestType] = useState<InterestType>('SIMPLES');
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
+  const [startDate, setStartDate] = useState(getLocalISODate());
 
   const [simulation, setSimulation] = useState<{
     totalToReturn: number;
@@ -72,7 +73,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
       else if (frequency === 'MENSAL') installmentDate.setMonth(currentDate.getMonth() + i);
       
       schedule.push({
-        date: installmentDate.toISOString().split('T')[0],
+        date: getLocalISODate(installmentDate),
         value: installmentValue
       });
     }
@@ -138,7 +139,7 @@ const LoanSimulator: React.FC<LoanSimulatorProps> = ({ customers, loans, onSaveL
     setFrequency('MENSAL');
     setInterestType('SIMPLES');
     setSelectedCustomerId('');
-    setStartDate(new Date().toISOString().split('T')[0]);
+    setStartDate(getLocalISODate());
   };
 
   return (

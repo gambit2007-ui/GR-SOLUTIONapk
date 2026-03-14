@@ -9,6 +9,7 @@ import {
   normalizeInstallmentStatus,
   normalizeLoanStatus,
 } from '../utils/loanCompat';
+import { getLocalISODate } from '../utils/dateTime';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -59,7 +60,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     interestType: 'SIMPLE' as 'SIMPLE' | 'PRICE' | 'SPLIT',
     frequency: 'MONTHLY' as 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY',
     installmentsCount: '',
-    startDate: new Date().toISOString().split('T')[0]
+    startDate: getLocalISODate()
   });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -329,7 +330,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       interestType: fromLegacyInterestType((loan as any).interestType),
       frequency: fromLegacyFrequency((loan as any).frequency),
       installmentsCount: String(loanInstallmentsCount(loan)),
-      startDate: loan.startDate || new Date().toISOString().split('T')[0]
+      startDate: loan.startDate || getLocalISODate()
     });
     setIsModalOpen(true);
   };
@@ -517,7 +518,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           installmentsCount: Number(payload.installmentsCount || (payload as any).installmentCount || 0) as any,
           totalToReturn: Number(totalToReturn.toFixed(2)),
           installmentValue: Number(installmentValue.toFixed(2)),
-          startDate: payload.startDate || new Date().toISOString().split('T')[0],
+          startDate: payload.startDate || getLocalISODate(),
           dueDate,
           status: 'ATIVO' as any,
           paidAmount: 0,
