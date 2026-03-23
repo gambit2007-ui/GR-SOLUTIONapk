@@ -2,9 +2,9 @@
 import { Loan, Customer, CashMovement, Installment } from '../types';
 import { TrendingUp, Users, FileText, Wallet, Activity, ChevronDown, Calendar as CalendarIcon, Clock, ArrowRight } from 'lucide-react';
 import {
+  effectiveLoanStatus,
   installmentAmount,
   normalizeInstallmentStatus,
-  normalizeLoanStatus,
 } from '../utils/loanCompat';
 import { formatDateTimeBR, getLocalISODate } from '../utils/dateTime';
 
@@ -58,7 +58,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
     CANCELLED: 'Cancelado',
   };
 
-  const activeLoans = loans.filter(l => normalizeLoanStatus(l.status) === 'ACTIVE');
+  const activeLoans = loans.filter((l) => effectiveLoanStatus(l) === 'ACTIVE');
 
   const calculateLateFee = (inst: Installment) => {
     if (normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
@@ -77,7 +77,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
 
   // Identificar contratos em atraso
   const overdueLoans = loans.filter(loan => {
-    if (normalizeLoanStatus(loan.status) !== 'ACTIVE') return false;
+    if (effectiveLoanStatus(loan) !== 'ACTIVE') return false;
     const today = getLocalISODate();
     return loan.installments.some(
       (inst) => normalizeInstallmentStatus(inst.status) !== 'PAID' && inst.dueDate < today,
@@ -85,10 +85,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
   });
 
   // Prestacoes do dia selecionado
-  const installmentsOfDay = loans.flatMap(loan => 
-    loan.installments
-      .filter(inst => inst.dueDate === selectedDate)
-      .map(inst => {
+  const installmentsOfDay = loans.flatMap((loan) => {
+    if (effectiveLoanStatus(loan) !== 'ACTIVE') return [];
+    const installments = Array.isArray(loan.installments) ? loan.installments : [];
+    return installments
+      .filter((inst) => inst.dueDate === selectedDate && normalizeInstallmentStatus(inst.status) !== 'PAID')
+      .map((inst) => {
         const lateFee = calculateLateFee(inst);
         return {
           ...inst,
@@ -97,8 +99,8 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
           totalWithFee: installmentAmount(inst) + lateFee,
           lateFee,
         };
-      })
-  );
+      });
+  });
 
   const stats = [
     { label: 'Clientes Ativos', value: customers.length, icon: Users, color: 'text-blue-500' },
@@ -182,7 +184,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
               const isToday = date === todayStr;
               
               const hasOverdue = loans.some(l => 
-                normalizeLoanStatus(l.status) === 'ACTIVE' && 
+                effectiveLoanStatus(l) === 'ACTIVE' && 
                 l.installments.some(
                   (i) =>
                     i.dueDate === date &&
@@ -355,13 +357,13 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                           <p className="text-[8px] text-zinc-500 uppercase">R$ {loan.amount.toLocaleString('pt-BR')}</p>
                         </div>
                         <span className={`text-[7px] font-black px-2 py-0.5 rounded-full uppercase ${
-                          normalizeLoanStatus(loan.status) === 'ACTIVE'
+                          effectiveLoanStatus(loan) === 'ACTIVE'
                             ? 'bg-emerald-500/10 text-emerald-500'
-                            : normalizeLoanStatus(loan.status) === 'COMPLETED'
+                            : effectiveLoanStatus(loan) === 'COMPLETED'
                               ? 'bg-blue-500/10 text-blue-500'
                               : 'bg-zinc-800 text-zinc-500'
                         }`}>
-                          {loanStatusLabel[normalizeLoanStatus(loan.status)]}
+                          {loanStatusLabel[effectiveLoanStatus(loan)]}
                         </span>
                       </div>
                     ))}

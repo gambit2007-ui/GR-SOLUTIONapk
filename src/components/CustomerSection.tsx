@@ -2,9 +2,9 @@
 import { Plus, Search, User, Phone, Mail, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
 import { Customer, Loan, CustomerDocument } from '../types';
 import {
+  effectiveLoanStatus,
   loanInstallmentsCount,
   normalizeInstallmentStatus,
-  normalizeLoanStatus,
 } from '../utils/loanCompat';
 
 interface CustomerSectionProps {
@@ -40,7 +40,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
 
     let score = 50;
     customerLoans.forEach(loan => {
-      if (normalizeLoanStatus(loan.status) === 'COMPLETED') score += 15;
+      if (effectiveLoanStatus(loan) === 'COMPLETED') score += 15;
       loan.installments.forEach(inst => {
         const normalizedStatus = normalizeInstallmentStatus(inst.status);
         if (normalizedStatus === 'PAID') score += 2;
@@ -93,15 +93,17 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     }));
   };
 
-  const filteredCustomers = customers.filter(c => 
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.cpf?.includes(searchTerm)
-  );
+  const filteredCustomers = [...customers]
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR', { sensitivity: 'base' }))
+    .filter(c =>
+      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.cpf?.includes(searchTerm)
+    );
 
   const isCustomerOverdue = (customerId: string) => {
     return loans.some(loan => 
       loan.customerId === customerId && 
-      normalizeLoanStatus(loan.status) === 'ACTIVE' && 
+      effectiveLoanStatus(loan) === 'ACTIVE' && 
       loan.installments.some(inst => {
         const dueDate = new Date(inst.dueDate + 'T00:00:00');
         const today = new Date();
@@ -474,6 +476,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                   ) : (
                     loans.filter(l => l.customerId === viewingDetails.id).map(loan => {
                       const overdueCount = loan.installments.filter(i => {
+                        if (effectiveLoanStatus(loan) !== 'ACTIVE') return false;
                         const dueDate = new Date(i.dueDate + 'T00:00:00');
                         const today = new Date();
                         today.setHours(0, 0, 0, 0);
@@ -494,13 +497,13 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                               </div>
                             )}
                             <span className={`text-[8px] font-black px-2 py-1 rounded-full ${
-                              normalizeLoanStatus(loan.status) === 'ACTIVE'
+                              effectiveLoanStatus(loan) === 'ACTIVE'
                                 ? 'bg-emerald-500/10 text-emerald-500'
-                                : normalizeLoanStatus(loan.status) === 'COMPLETED'
+                                : effectiveLoanStatus(loan) === 'COMPLETED'
                                   ? 'bg-blue-500/10 text-blue-500'
                                   : 'bg-zinc-800 text-zinc-500'
                             }`}>
-                              {loanStatusLabel[normalizeLoanStatus(loan.status)]}
+                              {loanStatusLabel[effectiveLoanStatus(loan)]}
                             </span>
                           </div>
                         </div>

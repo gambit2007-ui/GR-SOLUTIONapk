@@ -3,6 +3,7 @@ import { Customer, Loan, Installment } from '../types';
 import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban } from 'lucide-react';
 import { generateContractPDF } from '../utils/contractGenerator';
 import {
+  effectiveLoanStatus,
   installmentAmount,
   installmentPaidAmount,
   loanInstallmentsCount,
@@ -190,8 +191,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const filteredLoans = loans.filter(loan => {
     const matchesSearch = loan.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || loan.id.toLowerCase().includes(searchTerm.toLowerCase());
     const installments = Array.isArray(loan.installments) ? loan.installments : [];
+    const loanStatus = effectiveLoanStatus(loan);
     
-    const isOverdue = normalizeLoanStatus(loan.status) === 'ACTIVE' && installments.some(inst => {
+    const isOverdue = loanStatus === 'ACTIVE' && installments.some(inst => {
       if (!inst?.dueDate || normalizeInstallmentStatus(inst.status) === 'PAID') return false;
       const dueDate = new Date(inst.dueDate + 'T00:00:00');
       if (Number.isNaN(dueDate.getTime())) return false;
@@ -201,9 +203,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     });
 
     if (statusFilter === 'ALL') return matchesSearch;
-    if (statusFilter === 'ACTIVE') return matchesSearch && normalizeLoanStatus(loan.status) === 'ACTIVE' && !isOverdue;
-    if (statusFilter === 'COMPLETED') return matchesSearch && normalizeLoanStatus(loan.status) === 'COMPLETED';
-    if (statusFilter === 'CANCELLED') return matchesSearch && normalizeLoanStatus(loan.status) === 'CANCELLED';
+    if (statusFilter === 'ACTIVE') return matchesSearch && loanStatus === 'ACTIVE' && !isOverdue;
+    if (statusFilter === 'COMPLETED') return matchesSearch && loanStatus === 'COMPLETED';
+    if (statusFilter === 'CANCELLED') return matchesSearch && loanStatus === 'CANCELLED';
     if (statusFilter === 'OVERDUE') return matchesSearch && isOverdue;
     return matchesSearch;
   });
@@ -676,6 +678,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   };
 
   const handleWhatsApp = (loan: Loan) => {
+    if (effectiveLoanStatus(loan) !== 'ACTIVE') {
+      showToast('Contrato concluido/cancelado. Cobranca indisponivel.', 'error');
+      return;
+    }
     const customer = customers.find(c => c.id === loan.customerId);
     if (!customer?.phone) {
       return showToast('Cliente sem telefone cadastrado', 'error');
@@ -725,6 +731,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       <div className="space-y-4">
         {filteredLoans.map(loan => {
           const loanInstallments = Array.isArray(loan.installments) ? loan.installments : [];
+          const resolvedLoanStatus = effectiveLoanStatus(loan);
           const paidInstallmentsCount = loanInstallments.filter((inst) => normalizeInstallmentStatus(inst.status) === 'PAID').length;
           const totalInstallmentsCount = loanInstallmentsCount(loan);
           const remainingLoanAmount = Number(
@@ -738,7 +745,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
               .toFixed(2)
           );
           const showRemainingLoanAmount = paidInstallmentsCount > 0 && remainingLoanAmount > 0;
-          const isOverdue = normalizeLoanStatus(loan.status) === 'ACTIVE' && loanInstallments.some(inst => {
+          const isOverdue = resolvedLoanStatus === 'ACTIVE' && loanInstallments.some(inst => {
             if (!inst?.dueDate || normalizeInstallmentStatus(inst.status) === 'PAID') return false;
             const dueDate = new Date(inst.dueDate + 'T00:00:00');
             if (Number.isNaN(dueDate.getTime())) return false;
@@ -747,9 +754,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             return dueDate < today;
           });
           const canEarlySettle =
-            normalizeLoanStatus(loan.status) === 'ACTIVE' &&
+            resolvedLoanStatus === 'ACTIVE' &&
             fromLegacyInterestType((loan as any).interestType) === 'PRICE' &&
             loanInstallments.some((inst) => getRemainingInstallmentValue(inst) > 0);
+          const canChargeLoan = resolvedLoanStatus === 'ACTIVE' && remainingLoanAmount > 0;
 
           return (
             <div key={loan.id} id={`loan-${loan.id}`} className={`bg-[#050505] border rounded-[2rem] overflow-hidden transition-all ${
@@ -798,8 +806,13 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     e.stopPropagation();
                     handleWhatsApp(loan);
                   }}
-                  className="p-3 bg-emerald-500/10 text-emerald-500 rounded-xl hover:bg-emerald-500 hover:text-black transition-all"
-                  title="WhatsApp"
+                  className={`p-3 rounded-xl transition-all ${
+                    canChargeLoan
+                      ? 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500 hover:text-black'
+                      : 'bg-zinc-900 text-zinc-700 cursor-not-allowed'
+                  }`}
+                  title={canChargeLoan ? 'WhatsApp' : 'Contrato sem cobranca pendente'}
+                  disabled={!canChargeLoan}
                 >
                   <MessageCircle size={18} />
                 </button>
@@ -839,15 +852,15 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   <Trash2 size={16} />
                 </button>
                 <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase ${
-                  normalizeLoanStatus(loan.status) === 'ACTIVE' 
+                  resolvedLoanStatus === 'ACTIVE' 
                     ? (isOverdue ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500') 
-                    : normalizeLoanStatus(loan.status) === 'COMPLETED' 
+                    : resolvedLoanStatus === 'COMPLETED' 
                       ? 'bg-blue-500/10 text-blue-500' 
                       : 'bg-zinc-800 text-zinc-500'
                 }`}>
-                  {normalizeLoanStatus(loan.status) === 'ACTIVE' && isOverdue ? 'Atrasado' : 
-                   normalizeLoanStatus(loan.status) === 'ACTIVE' ? 'Ativo' : 
-                   normalizeLoanStatus(loan.status) === 'COMPLETED' ? 'Concluido' : 'Cancelado'}
+                  {resolvedLoanStatus === 'ACTIVE' && isOverdue ? 'Atrasado' : 
+                   resolvedLoanStatus === 'ACTIVE' ? 'Ativo' : 
+                   resolvedLoanStatus === 'COMPLETED' ? 'Concluido' : 'Cancelado'}
                 </span>
                 <Plus size={16} className={`text-[#BF953F] transition-transform ${expandedLoanId === loan.id ? 'rotate-45' : ''}`} />
               </div>

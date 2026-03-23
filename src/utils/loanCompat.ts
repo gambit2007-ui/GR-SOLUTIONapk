@@ -26,6 +26,24 @@ export const normalizeLoanStatus = (status: unknown): NormalizedLoanStatus => {
   return 'ACTIVE';
 };
 
+export const effectiveLoanStatus = (loan?: Partial<Loan> | null): NormalizedLoanStatus => {
+  if (!loan) return 'ACTIVE';
+
+  const normalizedStatus = normalizeLoanStatus((loan as any).status);
+  if (normalizedStatus === 'CANCELLED') return 'CANCELLED';
+
+  const installments = Array.isArray((loan as any).installments) ? (loan as any).installments : [];
+  if (installments.length > 0) {
+    const allPaid = installments.every(
+      (inst) => normalizeInstallmentStatus((inst as any)?.status) === 'PAID',
+    );
+    if (allPaid) return 'COMPLETED';
+  }
+
+  if (normalizedStatus === 'COMPLETED') return 'COMPLETED';
+  return 'ACTIVE';
+};
+
 export const normalizeInstallmentStatus = (status: unknown): NormalizedInstallmentStatus => {
   const normalized = normalizeText(status);
 
