@@ -736,15 +736,13 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           const totalInstallmentsCount = loanInstallmentsCount(loan);
           const remainingLoanAmount = Number(
             loanInstallments
-              .reduce((sum, inst) => {
-                const installmentValue = installmentAmount(inst);
-                const alreadyPaid = Math.min(installmentPaidAmount(inst), installmentValue);
-                const remaining = Math.max(installmentValue - alreadyPaid, 0);
-                return sum + remaining;
-              }, 0)
+              .reduce((sum, inst) => sum + getRemainingInstallmentValue(inst), 0)
               .toFixed(2)
           );
-          const showRemainingLoanAmount = paidInstallmentsCount > 0 && remainingLoanAmount > 0;
+          const showRemainingLoanAmount =
+            resolvedLoanStatus === 'ACTIVE' &&
+            paidInstallmentsCount > 0 &&
+            remainingLoanAmount > 0;
           const isOverdue = resolvedLoanStatus === 'ACTIVE' && loanInstallments.some(inst => {
             if (!inst?.dueDate || normalizeInstallmentStatus(inst.status) === 'PAID') return false;
             const dueDate = new Date(inst.dueDate + 'T00:00:00');
