@@ -725,6 +725,19 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       <div className="space-y-4">
         {filteredLoans.map(loan => {
           const loanInstallments = Array.isArray(loan.installments) ? loan.installments : [];
+          const paidInstallmentsCount = loanInstallments.filter((inst) => normalizeInstallmentStatus(inst.status) === 'PAID').length;
+          const totalInstallmentsCount = loanInstallmentsCount(loan);
+          const remainingLoanAmount = Number(
+            loanInstallments
+              .reduce((sum, inst) => {
+                const installmentValue = installmentAmount(inst);
+                const alreadyPaid = Math.min(installmentPaidAmount(inst), installmentValue);
+                const remaining = Math.max(installmentValue - alreadyPaid, 0);
+                return sum + remaining;
+              }, 0)
+              .toFixed(2)
+          );
+          const showRemainingLoanAmount = paidInstallmentsCount > 0 && remainingLoanAmount > 0;
           const isOverdue = normalizeLoanStatus(loan.status) === 'ACTIVE' && loanInstallments.some(inst => {
             if (!inst?.dueDate || normalizeInstallmentStatus(inst.status) === 'PAID') return false;
             const dueDate = new Date(inst.dueDate + 'T00:00:00');
@@ -755,11 +768,16 @@ const LoanSection: React.FC<LoanSectionProps> = ({
               <div className="flex-1 min-w-[120px]">
                 <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Valor Total</p>
                 <p className="text-[11px] font-black text-white">R$ {(loan.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                {showRemainingLoanAmount && (
+                  <p className="text-[9px] font-black text-emerald-500 mt-1">
+                    Restante: R$ {remainingLoanAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </p>
+                )}
               </div>
               <div className="flex-1 min-w-[100px]">
                 <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-1">Parcelas</p>
                 <p className="text-[11px] font-black text-white">
-                  {(loan.installments || []).filter(i => normalizeInstallmentStatus(i.status) === 'PAID').length} / {loanInstallmentsCount(loan)}
+                  {paidInstallmentsCount} / {totalInstallmentsCount}
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
