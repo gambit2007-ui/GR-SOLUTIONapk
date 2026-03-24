@@ -58,6 +58,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
     CANCELLED: 'Cancelado',
   };
 
+  const getMovementActorLabel = (movement: CashMovement) => {
+    if (movement.createdByName && movement.createdByName.trim()) return movement.createdByName.trim();
+    if (movement.createdByEmail && movement.createdByEmail.trim()) return movement.createdByEmail.trim();
+    return 'Sistema';
+  };
+
   const activeLoans = loans.filter((l) => effectiveLoanStatus(l) === 'ACTIVE');
 
   const calculateLateFee = (inst: Installment) => {
@@ -407,10 +413,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                           {movementsByMonth[month]
                             .filter((m: CashMovement) => ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type))
                             .map((m: CashMovement) => (
-                              <div key={m.id} className="flex items-center justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-emerald-500/30 transition-colors">
+                              <div key={m.id} className="flex items-start justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-emerald-500/30 transition-colors">
                                 <div className="min-w-0 flex-1 mr-3">
-                                  <p className="text-[9px] font-black text-white uppercase truncate">{m.description}</p>
-                                  <p className="text-[7px] text-zinc-500 uppercase tracking-tighter">{formatDateTimeBR(m.date)}  -  {m.type}</p>
+                                  <p className="text-[9px] font-black text-white uppercase whitespace-normal break-words">{m.description}</p>
+                                  <p className="text-[7px] text-zinc-500 uppercase tracking-tighter whitespace-normal break-words">
+                                    {formatDateTimeBR(m.date)}  -  {m.type}  -  POR: {getMovementActorLabel(m)}
+                                  </p>
                                 </div>
                                 <span className="text-[9px] font-black text-emerald-500 whitespace-nowrap">
                                   + R$ {m.amount.toLocaleString('pt-BR')}
@@ -438,10 +446,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                           {movementsByMonth[month]
                             .filter((m: CashMovement) => !['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type))
                             .map((m: CashMovement) => (
-                              <div key={m.id} className="flex items-center justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-red-500/30 transition-colors">
+                              <div key={m.id} className="flex items-start justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-red-500/30 transition-colors">
                                 <div className="min-w-0 flex-1 mr-3">
-                                  <p className="text-[9px] font-black text-white uppercase truncate">{m.description}</p>
-                                  <p className="text-[7px] text-zinc-500 uppercase tracking-tighter">{formatDateTimeBR(m.date)}  -  {m.type}</p>
+                                  <p className="text-[9px] font-black text-white uppercase whitespace-normal break-words">{m.description}</p>
+                                  <p className="text-[7px] text-zinc-500 uppercase tracking-tighter whitespace-normal break-words">
+                                    {formatDateTimeBR(m.date)}  -  {m.type}  -  POR: {getMovementActorLabel(m)}
+                                  </p>
                                 </div>
                                 <span className="text-[9px] font-black text-red-500 whitespace-nowrap">
                                   - R$ {m.amount.toLocaleString('pt-BR')}

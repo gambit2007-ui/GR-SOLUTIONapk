@@ -38,6 +38,9 @@ export interface CashMovement {
   description: string;
   date: string;
   loanId?: string;
+  createdByUid?: string;
+  createdByEmail?: string;
+  createdByName?: string;
   value?: number;
 }
 

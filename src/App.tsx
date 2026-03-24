@@ -131,6 +131,14 @@ const App: React.FC = () => {
   };
 
   const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
+  const buildMovementActor = () => {
+    const actor: Partial<Pick<CashMovement, 'createdByUid' | 'createdByEmail' | 'createdByName'>> = {};
+    if (user?.uid) actor.createdByUid = user.uid;
+    if (user?.email) actor.createdByEmail = user.email.toLowerCase();
+    if (user?.displayName) actor.createdByName = user.displayName;
+    return actor;
+  };
+
   // --- SINCRONIZACAO EM TEMPO REAL ---
   useEffect(() => {
     if (!user) return;
@@ -193,6 +201,7 @@ const App: React.FC = () => {
           amount: valorNum,
           description: motivo.toUpperCase(),
           date: new Date().toISOString(),
+          ...buildMovementActor(),
         });
 
         tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
@@ -252,6 +261,7 @@ const App: React.FC = () => {
           description: motivo.toUpperCase(),
           date: new Date().toISOString(),
           loanId,
+          ...buildMovementActor(),
         });
         tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
       });
@@ -346,6 +356,7 @@ const App: React.FC = () => {
           description: `EMPRESTIMO: ${l.customerName}`,
           date: new Date().toISOString(),
           loanId: l.id,
+          ...buildMovementActor(),
         });
         tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
       });
