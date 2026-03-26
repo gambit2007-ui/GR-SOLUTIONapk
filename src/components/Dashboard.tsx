@@ -61,6 +61,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
   const getMovementActorLabel = (movement: CashMovement) => {
     if (movement.createdByName && movement.createdByName.trim()) return movement.createdByName.trim();
     if (movement.createdByEmail && movement.createdByEmail.trim()) return movement.createdByEmail.trim();
+    if (movement.createdByUid && movement.createdByUid.trim()) return movement.createdByUid.trim();
     return 'Sistema';
   };
 

@@ -42,6 +42,16 @@ interface EarlySettlementQuote {
   entries: EarlySettlementEntry[];
 }
 
+type PaymentApplyMode = 'INSTALLMENTS' | 'TOTAL_BALANCE' | 'REDISTRIBUTE_BALANCE';
+
+interface PaymentModalState {
+  isOpen: boolean;
+  loanId: string;
+  installmentIndex: number;
+  amount: string;
+  applyMode: PaymentApplyMode;
+}
+
 const LoanSection: React.FC<LoanSectionProps> = ({ 
   customers, 
   loans, 
@@ -68,7 +78,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [editingLoanId, setEditingLoanId] = useState<string | null>(null);
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(initialExpandedLoanId || null);
   const [processingPayment, setProcessingPayment] = useState<string | null>(null);
-  const [paymentModal, setPaymentModal] = useState<{ isOpen: boolean; loanId: string; installmentIndex: number; amount: string } | null>(null);
+  const [paymentModal, setPaymentModal] = useState<PaymentModalState | null>(null);
   const [settlementModal, setSettlementModal] = useState<EarlySettlementQuote | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'>('ALL');
@@ -135,6 +145,21 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   };
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+
+  const splitAmountEvenly = (total: number, count: number) => {
+    const safeCount = Math.max(0, Math.trunc(count));
+    if (safeCount === 0) return [] as number[];
+
+    const totalCents = Math.max(0, Math.round(roundMoney(total) * 100));
+    const baseCents = Math.floor(totalCents / safeCount);
+    let remainder = totalCents - baseCents * safeCount;
+
+    return Array.from({ length: safeCount }, () => {
+      const valueCents = baseCents + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) remainder -= 1;
+      return Number((valueCents / 100).toFixed(2));
+    });
+  };
 
   const getRemainingInstallmentValue = (inst: Installment | null | undefined) => {
     if (!inst || normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
@@ -547,7 +572,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     }
   };
 
-  const handlePayment = async (amount?: string | React.MouseEvent, directLoanId?: string, directInstIdx?: number) => {
+  const handlePayment = async (
+    amount?: string | React.MouseEvent,
+    directLoanId?: string,
+    directInstIdx?: number,
+    directApplyMode?: PaymentApplyMode,
+  ) => {
     const overrideAmount = typeof amount === 'string' ? amount : undefined;
     const activeModal = paymentModal;
     if (!activeModal && !overrideAmount) return;
@@ -572,52 +602,100 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       return;
     }
 
+    const applyMode: PaymentApplyMode = directApplyMode || activeModal?.applyMode || 'INSTALLMENTS';
+
     setProcessingPayment(`${loanId}-${instIdx}`);
     try {
       const newInstallments = [...loanInstallments];
-      let currentIdx = instIdx;
       let remainingToApply = Number(parsedAmount.toFixed(2));
-      const totalPaid = remainingToApply;
+      const requestedAmount = remainingToApply;
       let changedInstallment = false;
+      if (applyMode === 'REDISTRIBUTE_BALANCE') {
+        const pendingIndexes = newInstallments.reduce<number[]>((acc, inst, index) => {
+          if (getRemainingInstallmentValue(inst) > 0) acc.push(index);
+          return acc;
+        }, []);
 
-      while (remainingToApply > 0 && currentIdx < newInstallments.length) {
-        const originalInstallment = newInstallments[currentIdx];
-        if (!originalInstallment) {
-          currentIdx++;
-          continue;
+        if (pendingIndexes.length === 0) {
+          showToast('Nenhuma parcela pendente para redividir', 'error');
+          return;
         }
 
-        const inst = { ...originalInstallment };
-        const lateFee = calculateLateFee(inst);
-        const totalWithFee = Number((installmentAmount(inst) + lateFee).toFixed(2));
-        const alreadyPaid = Number(installmentPaidAmount(inst));
-        const remaining = Number((totalWithFee - alreadyPaid).toFixed(2));
-
-        if (!Number.isFinite(remaining) || remaining <= 0) {
-          currentIdx++;
-          continue;
+        const outstandingTotal = roundMoney(
+          pendingIndexes.reduce((sum, index) => sum + getRemainingInstallmentValue(newInstallments[index]), 0),
+        );
+        if (outstandingTotal <= 0) {
+          showToast('Nenhum saldo pendente para redividir', 'error');
+          return;
         }
 
-        changedInstallment = true;
-        if (remainingToApply + 0.000001 >= remaining) {
-          remainingToApply = Number((remainingToApply - remaining).toFixed(2));
-          (inst as any).paidAmount = totalWithFee;
-          (inst as any).status = 'PAGO';
-          (inst as any).paymentDate = new Date().toISOString();
+        const appliedInRedistribution = roundMoney(Math.min(remainingToApply, outstandingTotal));
+        const remainingOutstanding = roundMoney(Math.max(outstandingTotal - appliedInRedistribution, 0));
+        const redistributedValues = splitAmountEvenly(remainingOutstanding, pendingIndexes.length);
+
+        pendingIndexes.forEach((index, position) => {
+          const originalInstallment = newInstallments[index];
+          if (!originalInstallment) return;
+
+          const inst = { ...originalInstallment };
+          const newInstallmentValue = redistributedValues[position] ?? 0;
+
+          (inst as any).amount = newInstallmentValue;
+          (inst as any).value = newInstallmentValue;
+          (inst as any).paidAmount = 0;
           (inst as any).partialPaid = 0;
-          (inst as any).lastPaidValue = totalWithFee;
-        } else {
-          const partialValue = Number((alreadyPaid + remainingToApply).toFixed(2));
-          (inst as any).paidAmount = partialValue;
-          (inst as any).partialPaid = partialValue;
-          remainingToApply = 0;
+          (inst as any).lastPaidValue = undefined;
+          (inst as any).paymentDate = undefined;
           if (normalizeInstallmentStatus(inst.status) !== 'PAID') {
             (inst as any).status = 'PENDENTE';
           }
-        }
 
-        newInstallments[currentIdx] = inst;
-        currentIdx++;
+          newInstallments[index] = inst;
+        });
+
+        remainingToApply = roundMoney(remainingToApply - appliedInRedistribution);
+        changedInstallment = appliedInRedistribution > 0;
+      } else {
+        const installmentIndexes =
+          applyMode === 'TOTAL_BALANCE'
+            ? newInstallments.map((_, index) => index).reverse()
+            : Array.from({ length: Math.max(newInstallments.length - instIdx, 0) }, (_, offset) => instIdx + offset);
+
+        for (const currentIdx of installmentIndexes) {
+          if (remainingToApply <= 0) break;
+          const originalInstallment = newInstallments[currentIdx];
+          if (!originalInstallment) continue;
+
+          const inst = { ...originalInstallment };
+          const lateFee = calculateLateFee(inst);
+          const totalWithFee = Number((installmentAmount(inst) + lateFee).toFixed(2));
+          const alreadyPaid = Number(installmentPaidAmount(inst));
+          const remaining = Number((totalWithFee - alreadyPaid).toFixed(2));
+
+          if (!Number.isFinite(remaining) || remaining <= 0) {
+            continue;
+          }
+
+          changedInstallment = true;
+          if (remainingToApply + 0.000001 >= remaining) {
+            remainingToApply = Number((remainingToApply - remaining).toFixed(2));
+            (inst as any).paidAmount = totalWithFee;
+            (inst as any).status = 'PAGO';
+            (inst as any).paymentDate = new Date().toISOString();
+            (inst as any).partialPaid = 0;
+            (inst as any).lastPaidValue = totalWithFee;
+          } else {
+            const partialValue = Number((alreadyPaid + remainingToApply).toFixed(2));
+            (inst as any).paidAmount = partialValue;
+            (inst as any).partialPaid = partialValue;
+            remainingToApply = 0;
+            if (normalizeInstallmentStatus(inst.status) !== 'PAID') {
+              (inst as any).status = 'PENDENTE';
+            }
+          }
+
+          newInstallments[currentIdx] = inst;
+        }
       }
 
       if (!changedInstallment) {
@@ -625,7 +703,19 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         return;
       }
 
+      const appliedAmount = Number((requestedAmount - remainingToApply).toFixed(2));
+      if (!Number.isFinite(appliedAmount) || appliedAmount <= 0) {
+        showToast('Nenhum valor foi aplicado nas parcelas', 'error');
+        return;
+      }
+
       const allPaid = newInstallments.filter(Boolean).every(i => normalizeInstallmentStatus(i.status) === 'PAID');
+      const paymentLabel =
+        applyMode === 'TOTAL_BALANCE'
+          ? `PAGAMENTO (ABATIMENTO SALDO): ${loan.customerName}`
+          : applyMode === 'REDISTRIBUTE_BALANCE'
+            ? `PAGAMENTO (ABATE + REDIVISAO): ${loan.customerName}`
+            : `PAGAMENTO (ABATIMENTO PARCELAS): ${loan.customerName}`;
 
       await onUpdateLoanAndAddTransaction(
         loan.id,
@@ -634,10 +724,18 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           status: (allPaid ? 'QUITADO' : 'ATIVO') as any
         },
         'PAGAMENTO',
-        totalPaid,
-        `PAGAMENTO: ${loan.customerName}`
+        appliedAmount,
+        paymentLabel
       );
-      showToast('Pagamento processado!', 'success');
+
+      if (remainingToApply > 0.000001) {
+        showToast(
+          `Pagamento aplicado: R$ ${appliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. Excedente nao aplicado: R$ ${remainingToApply.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`,
+          'success'
+        );
+      } else {
+        showToast('Pagamento processado!', 'success');
+      }
       setPaymentModal(null);
     } catch (e) {
       showToast('Erro ao processar pagamento', 'error');
@@ -939,7 +1037,13 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                                 disabled={isLocked || !!processingPayment}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setPaymentModal({ isOpen: true, loanId: loan.id, installmentIndex: idx, amount: Math.max(remaining, 0).toFixed(2) });
+                                  setPaymentModal({
+                                    isOpen: true,
+                                    loanId: loan.id,
+                                    installmentIndex: idx,
+                                    amount: Math.max(remaining, 0).toFixed(2),
+                                    applyMode: 'INSTALLMENTS',
+                                  });
                                 }}
                                 className={`flex-1 py-2 rounded-xl text-[7px] font-black uppercase tracking-widest flex items-center justify-center gap-1 transition-all ${
                                   isLocked || !!processingPayment
@@ -1014,7 +1118,53 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   />
                 </div>
                 <p className="text-[8px] text-zinc-600 uppercase italic ml-1">
-                  * Valores maiores que a parcela serao aplicados as proximas parcelas.
+                  * Valores maiores que a parcela podem ser distribuidos em outras parcelas.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Forma de Abatimento</label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModal({ ...paymentModal, applyMode: 'INSTALLMENTS' })}
+                    className={`py-3 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all ${
+                      paymentModal.applyMode === 'INSTALLMENTS'
+                        ? 'bg-emerald-500 text-black border-emerald-400'
+                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                    }`}
+                  >
+                    Em Parcelas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModal({ ...paymentModal, applyMode: 'TOTAL_BALANCE' })}
+                    className={`py-3 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all ${
+                      paymentModal.applyMode === 'TOTAL_BALANCE'
+                        ? 'bg-[#BF953F] text-black border-[#BF953F]'
+                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                    }`}
+                  >
+                    No Saldo Total
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModal({ ...paymentModal, applyMode: 'REDISTRIBUTE_BALANCE' })}
+                    className={`py-3 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all ${
+                      paymentModal.applyMode === 'REDISTRIBUTE_BALANCE'
+                        ? 'bg-blue-500 text-black border-blue-400'
+                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                    }`}
+                  >
+                    Redividir
+                  </button>
+                </div>
+                <p className="text-[8px] text-zinc-600 uppercase italic ml-1">
+                  {paymentModal.applyMode === 'TOTAL_BALANCE'
+                    ? '* Abate do fim para o inicio das parcelas pendentes.'
+                    : paymentModal.applyMode === 'REDISTRIBUTE_BALANCE'
+                      ? '* Abate no saldo e redivide igualmente as parcelas pendentes.'
+                      : '* Abate da parcela atual para as proximas parcelas.'}
                 </p>
               </div>
 
