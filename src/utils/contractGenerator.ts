@@ -59,19 +59,35 @@ export const generateContractPDF = (customer: Customer, loan: Loan) => {
   const installmentCount = Number((loan as any).installmentCount || (loan as any).installmentsCount || (loan.installments || []).length || 0);
   const firstInstallment = Array.isArray(loan.installments) ? loan.installments[0] : undefined;
   const installmentValue = Number((loan as any).installmentValue ?? firstInstallment?.amount ?? firstInstallment?.value ?? 0);
+  const totalToReturn = Number(
+    (loan as any).totalToReturn ??
+    (installmentCount > 0 ? installmentValue * installmentCount : 0),
+  );
   const startDate = formatDateBR((loan as any).startDate || createdAt);
   const firstDueDate = formatDateBR(firstInstallment?.dueDate || (loan as any).dueDate);
-  const frequency = normalizeText((loan as any).frequency || 'MENSAL');
   const customerName = normalizeText(customer.name);
   const customerCpf = normalizeText(customer.cpf);
   const customerRg = normalizeText(customer.rg);
   const customerPhone = normalizeText(customer.phone);
-  const customerEmail = normalizeText(customer.email);
   const customerAddress = normalizeText(customer.address);
+  const customerEmail = normalizeText(customer.email);
+  const interestRate = Number(loan.interestRate || 0);
+
+  const normalizeInterestType = (value: unknown): 'SIMPLE' | 'PRICE' | 'SPLIT' => {
+    const normalized = String(value || '').trim().toUpperCase();
+    if (normalized === 'PRICE') return 'PRICE';
+    if (normalized === 'SPLIT' || normalized === 'PERSONALIZADO') return 'SPLIT';
+    return 'SIMPLE';
+  };
+
+  const interestType = normalizeInterestType((loan as any).interestType);
+  const markSimple = interestType === 'SIMPLE' ? 'X' : ' ';
+  const markPrice = interestType === 'PRICE' ? 'X' : ' ';
+  const markSplit = interestType === 'SPLIT' ? 'X' : ' ';
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
-  doc.text('CONTRATO PARTICULAR DE EMPRESTIMO', 105, y, { align: 'center' });
+  doc.text('CONTRATO PARTICULAR DE EMPRESTIMO DE DINHEIRO', 105, y, { align: 'center' });
   y += 10;
 
   doc.setFont('helvetica', 'normal');
@@ -85,80 +101,107 @@ export const generateContractPDF = (customer: Customer, loan: Loan) => {
   doc.text('PARTES', margin, y);
   y += 7;
 
-  doc.setFont('helvetica', 'bold');
-  doc.text('CREDOR:', margin, y);
-  y += 5;
   doc.setFont('helvetica', 'normal');
-  writeParagraph('Nome: GR SULTION');
-  writeParagraph('CPF/CNPJ: [NAO INFORMADO]');
-  writeParagraph('RG: [NAO INFORMADO]');
-  writeParagraph('Endereco: [NAO INFORMADO]');
-  writeParagraph('Telefone: 021967519287');
-  writeParagraph('E-mail: [NAO INFORMADO]', 8);
-
-  doc.setFont('helvetica', 'bold');
-  doc.text('DEVEDOR:', margin, y);
-  y += 5;
-  doc.setFont('helvetica', 'normal');
+  writeParagraph('CREDOR: GR SOLUTION', 4);
+  writeParagraph('CPF/CNPJ: [PREENCHER]', 4);
+  writeParagraph('Endereco: [PREENCHER]', 4);
+  writeParagraph('Telefone: [PREENCHER]', 8);
+  writeParagraph('DEVEDOR:', 4);
   writeParagraph(`Nome: ${customerName}`);
-  writeParagraph(`CPF/CNPJ: ${customerCpf}`);
+  writeParagraph(`CPF: ${customerCpf}`);
   writeParagraph(`RG: ${customerRg}`);
   writeParagraph(`Endereco: ${customerAddress}`);
-  writeParagraph(`Telefone: ${customerPhone}`);
-  writeParagraph(`E-mail: ${customerEmail}`, 10);
+  writeParagraph(`Telefone: ${customerPhone}`, 10);
 
   doc.setFont('helvetica', 'bold');
   doc.text('CLAUSULA 1 - OBJETO', margin, y);
   y += 6;
   doc.setFont('helvetica', 'normal');
   writeParagraph(
-    `O CREDOR empresta ao DEVEDOR a quantia de ${formatCurrency(Number(loan.amount || 0))}, nesta data, por meio de PIX, transferencia ou especie.`
+    `O CREDOR concede ao DEVEDOR um emprestimo no valor de ${formatCurrency(Number(loan.amount || 0))}.`
   );
 
   doc.setFont('helvetica', 'bold');
   doc.text('CLAUSULA 2 - PAGAMENTO', margin, y);
   y += 6;
   doc.setFont('helvetica', 'normal');
-  writeParagraph(
-    `O DEVEDOR pagara ${installmentCount} parcelas de ${formatCurrency(installmentValue)} com frequencia ${frequency.toLowerCase()}, iniciando em ${firstDueDate}.`
-  );
-  writeParagraph(`Data de inicio do contrato: ${startDate}`);
+  writeParagraph(`Parcelas: ${installmentCount}`, 4);
+  writeParagraph(`Valor: ${formatCurrency(installmentValue)}`, 4);
+  writeParagraph(`Vencimento: ${firstDueDate}`, 4);
+  writeParagraph(`Total: ${formatCurrency(totalToReturn)}`);
 
   doc.setFont('helvetica', 'bold');
   doc.text('CLAUSULA 3 - JUROS', margin, y);
   y += 6;
   doc.setFont('helvetica', 'normal');
-  writeParagraph(`Incidira taxa de juros contratada de ${Number(loan.interestRate || 0)}%.`);
+  writeParagraph(`Taxa: ${interestRate.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}% ao mes`, 4);
+  writeParagraph(`Tipo: (${markSimple}) Simples (${markPrice}) PRICE (${markSplit}) Personalizado`);
 
   doc.setFont('helvetica', 'bold');
   doc.text('CLAUSULA 4 - ATRASO', margin, y);
   y += 6;
   doc.setFont('helvetica', 'normal');
-  writeParagraph(
-    'Em caso de atraso, poderao ser aplicados juros e multa conforme regras do contrato e da legislacao vigente.'
-  );
+  writeParagraph('Multa: 2%', 4);
+  writeParagraph('Juros de mora: 1,5% ao dia', 4);
+  writeParagraph('Correcao monetaria aplicavel');
 
   doc.setFont('helvetica', 'bold');
-  doc.text('CLAUSULA 5 - FORO', margin, y);
+  doc.text('CLAUSULA 5 - VENCIMENTO ANTECIPADO', margin, y);
   y += 6;
   doc.setFont('helvetica', 'normal');
-  writeParagraph('Fica eleito o foro de Araxa/MG para dirimir eventuais duvidas deste contrato.');
+  writeParagraph('O nao pagamento implica vencimento antecipado da divida.');
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('CLAUSULA 6 - QUITACAO ANTECIPADA', margin, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  writeParagraph('Pode haver desconto conforme tipo de juros.');
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('CLAUSULA 7 - PAGAMENTO', margin, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  writeParagraph('PIX, transferencia ou dinheiro.');
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('CLAUSULA 8 - COBRANCA', margin, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  writeParagraph('Autorizado envio de cobrancas via WhatsApp, e-mail ou telefone.');
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('CLAUSULA 9 - INADIMPLEMENTO', margin, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  writeParagraph('Pode haver cobranca judicial e negativacao.');
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('CLAUSULA 10 - FORO', margin, y);
+  y += 6;
+  doc.setFont('helvetica', 'normal');
+  writeParagraph('Foro: [CIDADE/ESTADO]');
 
   ensureSpace(40);
   y += 10;
-  doc.text(`Local e data: Araxa/MG, ${new Date().toLocaleDateString('pt-BR')}`, margin, y);
-  y += 18;
+  doc.text(`Data da assinatura: ${formatDateBR(createdAt)}`, margin, y);
+  y += 14;
 
-  doc.line(margin, y, margin + 75, y);
-  doc.line(117, y, 192, y);
-  y += 5;
   doc.setFont('helvetica', 'bold');
-  doc.text('CREDOR', margin, y);
-  doc.text('DEVEDOR', 117, y);
+  doc.text('Assinaturas:', margin, y);
+  y += 10;
+
+  doc.line(margin, y, margin + 85, y);
+  doc.line(107, y, 192, y);
   y += 5;
+
   doc.setFont('helvetica', 'normal');
-  doc.text('Assinatura: GR SULTION', margin, y);
-  doc.text(`Assinatura: ${customerName}`, 117, y);
+  doc.text('CREDOR', margin, y);
+  doc.text('DEVEDOR', 107, y);
+  y += 5;
+  doc.text('Assinatura: GR SOLUTION', margin, y);
+  doc.text(`Assinatura: ${customerName}`, 107, y);
+  y += 5;
+  doc.text(`E-mail do devedor: ${customerEmail}`, 107, y);
 
   const safeCustomerName = customerName.replace(/[^\w\-]+/g, '_');
   const filename = `Contrato_${contractNumber}_${safeCustomerName}.pdf`;
@@ -166,4 +209,3 @@ export const generateContractPDF = (customer: Customer, loan: Loan) => {
   // Apenas download local no navegador (nao salva em banco de dados).
   doc.save(filename);
 };
-
