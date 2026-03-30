@@ -81,12 +81,8 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
     doc.text('DETALHES DA SIMULACAO', 14, 75);
 
     const details = [
-      ['Valor Principal', `R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
-      ['Taxa de Juros', `${formData.interestRate}% (${interestTypeLabel[formData.interestType]})`],
-      ['Frequencia', frequencyLabel[formData.frequency]],
       ['Numero de Parcelas', formData.installmentsCount],
       ['Valor da Parcela', `R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
-      ['Total Geral', `R$ ${totalWithInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
     ];
 
     autoTable(doc, {
