@@ -8,6 +8,7 @@ import {
   InterestType,
   Loan,
   LoanStatus,
+  PaymentBreakdown,
 } from '../types';
 import { getLocalISODate } from './dateTime';
 
@@ -38,6 +39,13 @@ const toString = (value: unknown, fallback = ''): string => {
 const toOptionalString = (value: unknown): string | undefined => {
   const parsed = String(value ?? '').trim();
   return parsed.length > 0 ? parsed : undefined;
+};
+
+const toOptionalPositiveNumber = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  const rounded = Number(parsed.toFixed(2));
+  return rounded >= 0 ? rounded : undefined;
 };
 
 export const parseMovementType = (value: unknown): CashMovementType => {
@@ -74,6 +82,36 @@ export const parseInstallmentStatus = (value: unknown): InstallmentStatus => {
   return 'PENDENTE';
 };
 
+const parsePaymentBreakdown = (raw: unknown): PaymentBreakdown | undefined => {
+  if (!isRecord(raw)) return undefined;
+
+  const principalPaid = toOptionalPositiveNumber(raw.principalPaid) ?? 0;
+  const interestPaid = toOptionalPositiveNumber(raw.interestPaid) ?? 0;
+  const lateFeePaid = toOptionalPositiveNumber(raw.lateFeePaid) ?? 0;
+  const serviceFeePaid = toOptionalPositiveNumber(raw.serviceFeePaid) ?? 0;
+  const discountApplied = toOptionalPositiveNumber(raw.discountApplied) ?? 0;
+  const totalPaid = toOptionalPositiveNumber(raw.totalPaid);
+
+  const hasAnyValue =
+    principalPaid > 0 ||
+    interestPaid > 0 ||
+    lateFeePaid > 0 ||
+    serviceFeePaid > 0 ||
+    discountApplied > 0 ||
+    (totalPaid ?? 0) > 0;
+
+  if (!hasAnyValue) return undefined;
+
+  return {
+    principalPaid,
+    interestPaid,
+    lateFeePaid,
+    serviceFeePaid,
+    discountApplied,
+    totalPaid: totalPaid ?? Number((principalPaid + interestPaid + lateFeePaid + serviceFeePaid).toFixed(2)),
+  };
+};
+
 const parseFrequency = (value: unknown): Frequency => {
   const normalized = String(value ?? '').trim().toUpperCase();
   if (normalized === 'DIARIO' || normalized === 'DAILY') return 'DIARIO';
@@ -102,6 +140,7 @@ export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installm
   const payload = isRecord(raw) ? raw : {};
   const amount = toNumber(payload.amount ?? payload.value, 0);
   const paidAmount = toNumber(payload.paidAmount ?? payload.partialPaid, 0);
+  const paymentBreakdown = parsePaymentBreakdown(payload.paymentBreakdown);
 
   return {
     id: toOptionalString(payload.id),
@@ -117,6 +156,10 @@ export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installm
     paidAmount,
     lastPaidValue: toNumber(payload.lastPaidValue, 0) || undefined,
     originalValue: toNumber(payload.originalValue, 0) || undefined,
+    expectedPrincipal: toOptionalPositiveNumber(payload.expectedPrincipal),
+    expectedInterest: toOptionalPositiveNumber(payload.expectedInterest),
+    paymentBreakdown,
+    needsFiscalReview: payload.needsFiscalReview === true ? true : undefined,
   };
 };
 

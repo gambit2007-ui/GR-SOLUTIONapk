@@ -9,6 +9,7 @@
   | 'MONTHLY';
 
 export type InterestType = 'SIMPLES' | 'PRICE' | 'SIMPLE' | 'SPLIT';
+export type LoanType = 'SIMPLE' | 'PRICE';
 
 export type InstallmentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO' | 'PENDING' | 'PAID' | 'OVERDUE';
 export type PaymentStatus = InstallmentStatus;
@@ -90,6 +91,19 @@ export interface Installment {
   paidAmount?: number;
   lastPaidValue?: number;
   originalValue?: number;
+  expectedPrincipal?: number;
+  expectedInterest?: number;
+  paymentBreakdown?: PaymentBreakdown;
+  needsFiscalReview?: boolean;
+}
+
+export interface PaymentBreakdown {
+  principalPaid: number;
+  interestPaid: number;
+  lateFeePaid: number;
+  serviceFeePaid: number;
+  discountApplied: number;
+  totalPaid: number;
 }
 
 export interface Loan {

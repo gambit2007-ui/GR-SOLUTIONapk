@@ -1,5 +1,6 @@
 ﻿import React, { useState } from 'react';
 import { Loan, CashMovement, MovementType } from '../types';
+import { useMemo } from 'react';
 import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
 import {
   BarChart, 
@@ -46,6 +47,100 @@ const Reports: React.FC<ReportsProps> = ({
     description: ''
   });
 
+  const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+  const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+  const makeMonthKey = (dateValue: string) => {
+    const date = new Date(dateValue);
+    if (Number.isNaN(date.getTime())) return null;
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  const makeMonthLabelFromKey = (monthKey: string) => {
+    const [yearRaw, monthRaw] = monthKey.split('-');
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
+      return monthKey;
+    }
+    return `${monthNames[month - 1]}/${String(year).slice(2)}`;
+  };
+
+  const isSameMonth = (date: Date, reference: Date) =>
+    date.getFullYear() === reference.getFullYear() && date.getMonth() === reference.getMonth();
+
+  const isSameYear = (date: Date, reference: Date) =>
+    date.getFullYear() === reference.getFullYear();
+
+  const fiscalData = useMemo(() => {
+    const monthly: Record<string, {
+      principalRecovered: number;
+      interestReceived: number;
+      lateFeesReceived: number;
+      serviceFeesReceived: number;
+      taxableRevenue: number;
+      totalPaid: number;
+    }> = {};
+
+    const totals = {
+      principalRecovered: 0,
+      interestReceived: 0,
+      lateFeesReceived: 0,
+      serviceFeesReceived: 0,
+      taxableRevenue: 0,
+      totalPaid: 0,
+    };
+
+    loans.forEach((loan) => {
+      const installments = Array.isArray(loan.installments) ? loan.installments : [];
+      installments.forEach((installment) => {
+        if (normalizeInstallmentStatus(installment.status) !== 'PAID') return;
+        const breakdown = installment.paymentBreakdown;
+        if (!breakdown) return;
+
+        const paymentDate = installment.paidAt || installment.paymentDate || installment.lastPaymentDate;
+        if (!paymentDate) return;
+
+        const monthKey = makeMonthKey(paymentDate);
+        if (!monthKey) return;
+
+        if (!monthly[monthKey]) {
+          monthly[monthKey] = {
+            principalRecovered: 0,
+            interestReceived: 0,
+            lateFeesReceived: 0,
+            serviceFeesReceived: 0,
+            taxableRevenue: 0,
+            totalPaid: 0,
+          };
+        }
+
+        const principalPaid = roundMoney(Number(breakdown.principalPaid || 0));
+        const interestPaid = roundMoney(Number(breakdown.interestPaid || 0));
+        const lateFeePaid = roundMoney(Number(breakdown.lateFeePaid || 0));
+        const serviceFeePaid = roundMoney(Number(breakdown.serviceFeePaid || 0));
+        const totalPaid = roundMoney(Number(breakdown.totalPaid || 0));
+        const taxableRevenue = roundMoney(interestPaid + lateFeePaid + serviceFeePaid);
+
+        monthly[monthKey].principalRecovered = roundMoney(monthly[monthKey].principalRecovered + principalPaid);
+        monthly[monthKey].interestReceived = roundMoney(monthly[monthKey].interestReceived + interestPaid);
+        monthly[monthKey].lateFeesReceived = roundMoney(monthly[monthKey].lateFeesReceived + lateFeePaid);
+        monthly[monthKey].serviceFeesReceived = roundMoney(monthly[monthKey].serviceFeesReceived + serviceFeePaid);
+        monthly[monthKey].taxableRevenue = roundMoney(monthly[monthKey].taxableRevenue + taxableRevenue);
+        monthly[monthKey].totalPaid = roundMoney(monthly[monthKey].totalPaid + totalPaid);
+
+        totals.principalRecovered = roundMoney(totals.principalRecovered + principalPaid);
+        totals.interestReceived = roundMoney(totals.interestReceived + interestPaid);
+        totals.lateFeesReceived = roundMoney(totals.lateFeesReceived + lateFeePaid);
+        totals.serviceFeesReceived = roundMoney(totals.serviceFeesReceived + serviceFeePaid);
+        totals.taxableRevenue = roundMoney(totals.taxableRevenue + taxableRevenue);
+        totals.totalPaid = roundMoney(totals.totalPaid + totalPaid);
+      });
+    });
+
+    return { monthly, totals };
+  }, [loans]);
+
   // Calculos Financeiros
   const totalAportes = cashMovements
     .filter((m) => ['APORTE', 'ENTRADA'].includes(String(m.type || '').toUpperCase()))
@@ -68,6 +163,45 @@ const Reports: React.FC<ReportsProps> = ({
       if (m.type === 'ESTORNO') return acc - m.amount;
       return acc;
     }, 0);
+
+  const { faturamentoMes, faturamentoAno } = useMemo(() => {
+    const now = new Date();
+    let monthRevenue = 0;
+    let yearRevenue = 0;
+
+    loans.forEach((loan) => {
+      const installments = Array.isArray(loan.installments) ? loan.installments : [];
+      installments.forEach((installment) => {
+        if (normalizeInstallmentStatus(installment.status) !== 'PAID') return;
+
+        const breakdown = installment.paymentBreakdown;
+        if (!breakdown) return;
+
+        const paymentDateRaw = installment.paidAt || installment.paymentDate || installment.lastPaymentDate;
+        if (!paymentDateRaw) return;
+        const paymentDate = new Date(paymentDateRaw);
+        if (Number.isNaN(paymentDate.getTime())) return;
+
+        const taxableValue = roundMoney(
+          Number(breakdown.interestPaid || 0) +
+          Number(breakdown.lateFeePaid || 0) +
+          Number(breakdown.serviceFeePaid || 0),
+        );
+
+        if (isSameYear(paymentDate, now)) {
+          yearRevenue += taxableValue;
+        }
+        if (isSameMonth(paymentDate, now)) {
+          monthRevenue += taxableValue;
+        }
+      });
+    });
+
+    return {
+      faturamentoMes: roundMoney(monthRevenue),
+      faturamentoAno: roundMoney(yearRevenue),
+    };
+  }, [loans]);
 
   const totalAReceber = loans.reduce((acc, loan) => {
     const unpaid = loan.installments
@@ -112,11 +246,12 @@ const Reports: React.FC<ReportsProps> = ({
       entradas: number, 
       saidas: number
     } } = {};
-    const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+    const legacyProfitByMonth: Record<string, number> = {};
 
     // Processar Movimentacoes
     cashMovements.forEach(m => {
       const date = new Date(m.date);
+      if (Number.isNaN(date.getTime())) return;
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       const label = `${monthNames[date.getMonth()]}/${String(date.getFullYear()).slice(2)}`;
 
@@ -143,7 +278,8 @@ const Reports: React.FC<ReportsProps> = ({
             const totalExpected = getLoanExpectedTotal(loan);
             const totalInterest = Math.max(totalExpected - loan.amount, 0);
             const profitPortion = totalExpected > 0 ? (Number(m.amount || 0) / totalExpected) * totalInterest : 0;
-            months[key].lucro += isEstorno ? -profitPortion : profitPortion;
+            const signedProfit = isEstorno ? -profitPortion : profitPortion;
+            legacyProfitByMonth[key] = roundMoney((legacyProfitByMonth[key] || 0) + signedProfit);
           }
         }
       }
@@ -151,6 +287,32 @@ const Reports: React.FC<ReportsProps> = ({
       if (movementType === 'RETIRADA' && String(m.description || '').toUpperCase().includes('EMPRESTIMO')) {
         months[key].emprestado += Number(m.amount || 0);
       }
+    });
+
+    Object.keys(months).forEach((monthKey) => {
+      months[monthKey].lucro = roundMoney(legacyProfitByMonth[monthKey] || 0);
+    });
+
+    Object.entries(fiscalData.monthly).forEach(([monthKey, fiscalMonth]) => {
+      if (!months[monthKey]) {
+        months[monthKey] = {
+          month: makeMonthLabelFromKey(monthKey),
+          lucro: 0,
+          recebido: 0,
+          emprestado: 0,
+          entradas: 0,
+          saidas: 0,
+        };
+      }
+
+      const monthReceived = Math.max(Number(months[monthKey].recebido || 0), 0);
+      const monthLegacyProfit = Number(legacyProfitByMonth[monthKey] || 0);
+      const coveredPaid = Math.max(Number(fiscalMonth.totalPaid || 0), 0);
+      const uncoveredReceived = Math.max(monthReceived - coveredPaid, 0);
+      const uncoveredRatio = monthReceived > 0 ? uncoveredReceived / monthReceived : 0;
+      const fallbackProfitForUncovered = roundMoney(monthLegacyProfit * uncoveredRatio);
+
+      months[monthKey].lucro = roundMoney(Number(fiscalMonth.taxableRevenue || 0) + fallbackProfitForUncovered);
     });
 
     return Object.keys(months)
@@ -186,7 +348,7 @@ const Reports: React.FC<ReportsProps> = ({
   const financialCards = [
     { label: 'Total a Receber', value: totalAReceber, color: 'text-[#BF953F]' },
     { label: 'Valor em Rua', value: valorEmRua, color: 'text-blue-500' },
-    { label: 'Lucro Estimado', value: lucroEstimado, color: 'text-purple-500' },
+    { label: 'Lucro Projetado', value: lucroEstimado, color: 'text-purple-500' },
     { label: 'Total Emprestado', value: totalEmprestado, color: 'text-zinc-400' },
     { label: 'Total Recebido', value: totalRecebido, color: 'text-emerald-500' },
     { label: 'Total Aportes', value: totalAportes, color: 'text-cyan-500' },
@@ -335,7 +497,7 @@ const Reports: React.FC<ReportsProps> = ({
                   </div>
                   <div className="flex items-center gap-4">
                     <div className="text-right">
-                      <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Lucro Real</span>
+                      <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Resultado Operacional</span>
                       <span className={`text-xs font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
                         R$ {data.lucro.toLocaleString('pt-BR')}
                       </span>
@@ -420,7 +582,7 @@ const Reports: React.FC<ReportsProps> = ({
                               style={{ fill: '#ef4444', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
-                          <Bar dataKey="lucro" name="Lucro Real" fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
+                          <Bar dataKey="lucro" name="Resultado Operacional" fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
                             <LabelList 
                               dataKey="lucro" 
                               position="top" 
@@ -437,6 +599,32 @@ const Reports: React.FC<ReportsProps> = ({
             ))}
           </div>
         </div>
+
+      {/* Faturamento Fiscal */}
+      <div className="bg-[#050505] border border-zinc-900 rounded-[2.5rem] p-6 sm:p-8">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Faturamento</h3>
+            <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">
+              Baseado em juros, multas e taxas com breakdown fiscal
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-[#000000]/40 border border-zinc-900 rounded-2xl p-5">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Faturamento do Mes</p>
+            <p className="text-2xl font-black text-emerald-500">
+              R$ {faturamentoMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+          <div className="bg-[#000000]/40 border border-zinc-900 rounded-2xl p-5">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Faturamento do Ano</p>
+            <p className="text-2xl font-black text-[#BF953F]">
+              R$ {faturamentoAno.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+      </div>
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/80 backdrop-blur-sm overflow-y-auto">

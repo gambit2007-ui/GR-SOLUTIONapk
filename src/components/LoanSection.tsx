@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Customer, Loan, LoanDraft, Installment } from '../types';
+import { Customer, Loan, LoanDraft, Installment, LoanType, PaymentBreakdown } from '../types';
 import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban } from 'lucide-react';
 import { generateContractPDF } from '../utils/contractGenerator';
 import {
@@ -11,6 +11,7 @@ import {
   normalizeLoanStatus,
 } from '../utils/loanCompat';
 import { getLocalISODate } from '../utils/dateTime';
+import { buildPaymentBreakdown } from '../utils/paymentBreakdown';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -165,6 +166,79 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!inst || normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
     const remaining = roundMoney(installmentAmount(inst) - installmentPaidAmount(inst));
     return remaining > 0 ? remaining : 0;
+  };
+
+  const resolveLoanTypeForFiscal = (loan: Loan): LoanType =>
+    fromLegacyInterestType(loan.interestType) === 'PRICE' ? 'PRICE' : 'SIMPLE';
+
+  const resolveLoanTotalReceivable = (loan: Loan): number => {
+    const installmentsTotal = (Array.isArray(loan.installments) ? loan.installments : []).reduce(
+      (sum, installment) => sum + installmentAmount(installment),
+      0,
+    );
+
+    if (installmentsTotal > 0) {
+      return roundMoney(installmentsTotal);
+    }
+
+    const fallbackTotal = Number(loan.totalToReturn || 0);
+    if (Number.isFinite(fallbackTotal) && fallbackTotal > 0) {
+      return roundMoney(fallbackTotal);
+    }
+
+    return roundMoney(Number(loan.amount || 0));
+  };
+
+  const mergeInstallmentBreakdown = (
+    previous: PaymentBreakdown | undefined,
+    current: PaymentBreakdown,
+  ): PaymentBreakdown => ({
+    principalPaid: roundMoney(Number(previous?.principalPaid || 0) + Number(current.principalPaid || 0)),
+    interestPaid: roundMoney(Number(previous?.interestPaid || 0) + Number(current.interestPaid || 0)),
+    lateFeePaid: roundMoney(Number(previous?.lateFeePaid || 0) + Number(current.lateFeePaid || 0)),
+    serviceFeePaid: roundMoney(Number(previous?.serviceFeePaid || 0) + Number(current.serviceFeePaid || 0)),
+    discountApplied: roundMoney(Number(previous?.discountApplied || 0) + Number(current.discountApplied || 0)),
+    totalPaid: roundMoney(Number(previous?.totalPaid || 0) + Number(current.totalPaid || 0)),
+  });
+
+  const applyInstallmentFiscalBreakdown = (
+    loan: Loan,
+    installment: Installment,
+    paymentAmount: number,
+    lateFeePaid = 0,
+    serviceFeePaid = 0,
+    discountApplied = 0,
+  ): Installment => {
+    const paymentValue = roundMoney(paymentAmount);
+    if (!Number.isFinite(paymentValue) || paymentValue <= 0) {
+      return installment;
+    }
+
+    const breakdownResult = buildPaymentBreakdown({
+      loan: {
+        id: loan.id,
+        type: resolveLoanTypeForFiscal(loan),
+        totalAmount: Number(loan.amount || 0),
+        totalReceivable: resolveLoanTotalReceivable(loan),
+      },
+      installment: {
+        id: installment.id,
+        amount: installmentAmount(installment),
+        expectedPrincipal: installment.expectedPrincipal,
+        expectedInterest: installment.expectedInterest,
+      },
+      paidAmount: paymentValue,
+      lateFeePaid,
+      serviceFeePaid,
+      discountApplied,
+    });
+
+    const mergedBreakdown = mergeInstallmentBreakdown(installment.paymentBreakdown, breakdownResult);
+    return {
+      ...installment,
+      paymentBreakdown: mergedBreakdown,
+      needsFiscalReview: installment.needsFiscalReview || breakdownResult.needsFiscalReview || undefined,
+    };
   };
 
   const buildEarlySettlementQuote = (loan: Loan): EarlySettlementQuote | null => {
@@ -431,14 +505,24 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             ? roundMoney(settlementModal.payoffAmount - allocated)
             : roundMoney(settlementModal.payoffAmount * (entry.remaining / totalOutstanding));
         const share = roundMoney(Math.max(proportionalShare, 0));
+        const discountShare = roundMoney(Math.max(entry.remaining - share, 0));
         allocated = roundMoney(allocated + share);
 
-        inst.paidAmount = installmentAmount(inst);
-        inst.partialPaid = 0;
-        inst.status = 'PAGO';
-        inst.paymentDate = nowIso;
-        inst.lastPaidValue = share;
-        installments[entry.installmentIndex] = inst;
+        const installmentWithFiscal = applyInstallmentFiscalBreakdown(
+          loan,
+          inst,
+          share,
+          0,
+          0,
+          discountShare,
+        );
+
+        installmentWithFiscal.paidAmount = installmentAmount(installmentWithFiscal);
+        installmentWithFiscal.partialPaid = 0;
+        installmentWithFiscal.status = 'PAGO';
+        installmentWithFiscal.paymentDate = nowIso;
+        installmentWithFiscal.lastPaidValue = share;
+        installments[entry.installmentIndex] = installmentWithFiscal;
       });
 
       const allPaid = installments.filter(Boolean).every((inst) => normalizeInstallmentStatus(inst.status) === 'PAID');
@@ -649,6 +733,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           inst.partialPaid = 0;
           inst.lastPaidValue = undefined;
           inst.paymentDate = undefined;
+          inst.paymentBreakdown = undefined;
+          inst.needsFiscalReview = undefined;
           if (normalizeInstallmentStatus(inst.status) !== 'PAID') {
             inst.status = 'PENDENTE';
           }
@@ -669,7 +755,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           const originalInstallment = newInstallments[currentIdx];
           if (!originalInstallment) continue;
 
-          const inst = { ...originalInstallment };
+          let inst = { ...originalInstallment };
           const lateFee = calculateLateFee(inst);
           const totalWithFee = Number((installmentAmount(inst) + lateFee).toFixed(2));
           const alreadyPaid = Number(installmentPaidAmount(inst));
@@ -678,6 +764,17 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           if (!Number.isFinite(remaining) || remaining <= 0) {
             continue;
           }
+
+          const appliedNow = roundMoney(Math.min(remainingToApply, remaining));
+          if (!Number.isFinite(appliedNow) || appliedNow <= 0) {
+            continue;
+          }
+
+          const alreadyAllocatedLateFee = Number(inst.paymentBreakdown?.lateFeePaid || 0);
+          const remainingLateFee = roundMoney(Math.max(lateFee - alreadyAllocatedLateFee, 0));
+          const lateFeePaidNow = roundMoney(Math.min(appliedNow, remainingLateFee));
+
+          inst = applyInstallmentFiscalBreakdown(loan, inst, appliedNow, lateFeePaidNow);
 
           changedInstallment = true;
           if (remainingToApply + 0.000001 >= remaining) {
@@ -759,6 +856,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     inst.status = 'PENDENTE';
     inst.paymentDate = undefined;
     inst.lastPaidValue = undefined;
+    inst.paymentBreakdown = undefined;
+    inst.needsFiscalReview = undefined;
     newInstallments[index] = inst;
 
     try {
