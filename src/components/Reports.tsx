@@ -36,11 +36,19 @@ interface ReportsProps {
   showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
+interface RevenueMonthItem {
+  monthIndex: number;
+  label: string;
+  value: number;
+  isCurrentMonth: boolean;
+}
+
 const Reports: React.FC<ReportsProps> = ({
   loans, cashMovements, caixa, onAddTransaction, onRecalculateCash, onDownloadBackup, showToast
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
+  const [expandedRevenueMonth, setExpandedRevenueMonth] = useState<number | null>(() => new Date().getMonth());
   const [formData, setFormData] = useState({
     type: 'ENTRADA' as MovementType,
     amount: '',
@@ -49,6 +57,7 @@ const Reports: React.FC<ReportsProps> = ({
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
   const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 
   const makeMonthKey = (dateValue: string) => {
     const date = new Date(dateValue);
@@ -66,11 +75,8 @@ const Reports: React.FC<ReportsProps> = ({
     return `${monthNames[month - 1]}/${String(year).slice(2)}`;
   };
 
-  const isSameMonth = (date: Date, reference: Date) =>
-    date.getFullYear() === reference.getFullYear() && date.getMonth() === reference.getMonth();
-
-  const isSameYear = (date: Date, reference: Date) =>
-    date.getFullYear() === reference.getFullYear();
+  const getMonthShortLabel = (monthIndex: number, year: number) =>
+    `${monthNamesUpper[monthIndex]}/${String(year).slice(2)}`;
 
   const fiscalData = useMemo(() => {
     const monthly: Record<string, {
@@ -164,44 +170,29 @@ const Reports: React.FC<ReportsProps> = ({
       return acc;
     }, 0);
 
-  const { faturamentoMes, faturamentoAno } = useMemo(() => {
-    const now = new Date();
-    let monthRevenue = 0;
-    let yearRevenue = 0;
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonthIndex = now.getMonth();
 
-    loans.forEach((loan) => {
-      const installments = Array.isArray(loan.installments) ? loan.installments : [];
-      installments.forEach((installment) => {
-        if (normalizeInstallmentStatus(installment.status) !== 'PAID') return;
+  const revenueMonths = useMemo<RevenueMonthItem[]>(() => {
+    return Array.from({ length: 12 }, (_, monthIndex) => {
+      const monthKey = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}`;
+      const fiscalMonth = fiscalData.monthly[monthKey];
+      const value = roundMoney(Number(fiscalMonth?.taxableRevenue || 0));
 
-        const breakdown = installment.paymentBreakdown;
-        if (!breakdown) return;
-
-        const paymentDateRaw = installment.paidAt || installment.paymentDate || installment.lastPaymentDate;
-        if (!paymentDateRaw) return;
-        const paymentDate = new Date(paymentDateRaw);
-        if (Number.isNaN(paymentDate.getTime())) return;
-
-        const taxableValue = roundMoney(
-          Number(breakdown.interestPaid || 0) +
-          Number(breakdown.lateFeePaid || 0) +
-          Number(breakdown.serviceFeePaid || 0),
-        );
-
-        if (isSameYear(paymentDate, now)) {
-          yearRevenue += taxableValue;
-        }
-        if (isSameMonth(paymentDate, now)) {
-          monthRevenue += taxableValue;
-        }
-      });
+      return {
+        monthIndex,
+        label: getMonthShortLabel(monthIndex, currentYear),
+        value,
+        isCurrentMonth: monthIndex === currentMonthIndex,
+      };
     });
+  }, [currentMonthIndex, currentYear, fiscalData.monthly]);
 
-    return {
-      faturamentoMes: roundMoney(monthRevenue),
-      faturamentoAno: roundMoney(yearRevenue),
-    };
-  }, [loans]);
+  const faturamentoAno = useMemo(
+    () => roundMoney(revenueMonths.reduce((sum, month) => sum + month.value, 0)),
+    [revenueMonths],
+  );
 
   const totalAReceber = loans.reduce((acc, loan) => {
     const unpaid = loan.installments
@@ -600,28 +591,66 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </div>
 
-      {/* Faturamento Fiscal */}
-      <div className="bg-[#050505] border border-zinc-900 rounded-[2.5rem] p-6 sm:p-8">
-        <div className="flex items-center justify-between mb-6">
+      {/* Faturamento */}
+      <div className="bg-[#050505] border border-zinc-900 rounded-[3rem] p-6 sm:p-8 md:p-10">
+        <div className="flex items-center justify-between mb-8">
           <div>
-            <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Faturamento</h3>
-            <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">
-              Baseado em juros, multas e taxas com breakdown fiscal
+            <h3 className="text-sm font-black gold-text uppercase tracking-[0.3em]">Faturamento</h3>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] mt-2">
+              Historico mensal com base em juros, multas e taxas
             </p>
           </div>
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="bg-[#000000]/40 border border-zinc-900 rounded-2xl p-5">
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Faturamento do Mes</p>
-            <p className="text-2xl font-black text-emerald-500">
-              R$ {faturamentoMes.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-            </p>
+
+        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-6 items-start">
+          <div className="space-y-3">
+            {revenueMonths.map((monthItem) => {
+              const isExpanded = expandedRevenueMonth === monthItem.monthIndex;
+              return (
+                <div key={monthItem.monthIndex} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#000000]/20">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedRevenueMonth((prev) => (prev === monthItem.monthIndex ? null : monthItem.monthIndex))}
+                    className="w-full p-5 flex items-center justify-between hover:bg-zinc-900/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <span className={`text-xs font-black uppercase tracking-widest min-w-[72px] text-left ${monthItem.isCurrentMonth ? 'text-[#BF953F]' : 'text-white'}`}>
+                        {monthItem.label}
+                      </span>
+                      <div className="hidden sm:block text-left">
+                        <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Faturamento do Mes</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-4">
+                      <span className={`text-xs font-black ${monthItem.value > 0 ? 'text-emerald-500' : 'text-zinc-400'}`}>
+                        R$ {monthItem.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </span>
+                      <ChevronDown size={16} className={`text-zinc-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                    </div>
+                  </button>
+
+                  {isExpanded && (
+                    <div className="p-5 border-t border-zinc-900 bg-zinc-950/30 animate-in slide-in-from-top duration-200">
+                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Faturamento do Mes</p>
+                      <p className={`text-2xl font-black ${monthItem.value > 0 ? 'text-emerald-500' : 'text-zinc-300'}`}>
+                        R$ {monthItem.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </p>
+                      <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
+                        Baseado em juros, multas e taxas
+                      </p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div className="bg-[#000000]/40 border border-zinc-900 rounded-2xl p-5">
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Faturamento do Ano</p>
-            <p className="text-2xl font-black text-[#BF953F]">
+
+          <div className="bg-[#000000]/40 border border-zinc-900 rounded-3xl p-6 sm:p-7">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-3">Faturamento do Ano</p>
+            <p className="text-3xl sm:text-4xl font-black text-[#BF953F] leading-tight">
               R$ {faturamentoAno.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
             </p>
+            <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-4">Ano {currentYear}</p>
           </div>
         </div>
       </div>
