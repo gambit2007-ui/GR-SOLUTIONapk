@@ -10,7 +10,8 @@
 
 export type InterestType = 'SIMPLES' | 'PRICE' | 'SIMPLE' | 'SPLIT';
 
-export type PaymentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO' | 'PENDING' | 'PAID' | 'OVERDUE';
+export type InstallmentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO' | 'PENDING' | 'PAID' | 'OVERDUE';
+export type PaymentStatus = InstallmentStatus;
 
 export type LoanStatus =
   | 'ATIVO'
@@ -22,6 +23,11 @@ export type LoanStatus =
   | 'CANCELLED';
 
 export type CashMovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
+export type MovementType = CashMovementType;
+
+export interface FirestoreTimestampLike {
+  toDate: () => Date;
+}
 
 export interface AuthUser {
   id: string;
@@ -104,12 +110,14 @@ export interface Loan {
   installmentValue?: number;
   startDate: string;
   dueDate?: string;
-  createdAt?: any;
+  createdAt?: FirestoreTimestampLike | Date | number | string;
   notes?: string;
   installments: Installment[];
   status: LoanStatus;
   paidAmount?: number;
 }
+
+export type LoanDraft = Omit<Loan, 'id' | 'createdAt'>;
 
 export type View = 'DASHBOARD' | 'CUSTOMERS' | 'LOANS' | 'SIMULATION' | 'REPORTS';
 

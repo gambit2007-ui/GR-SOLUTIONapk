@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Customer, Loan, Installment } from '../types';
+import { Customer, Loan, LoanDraft, Installment } from '../types';
 import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban } from 'lucide-react';
 import { generateContractPDF } from '../utils/contractGenerator';
 import {
@@ -15,7 +15,7 @@ import { getLocalISODate } from '../utils/dateTime';
 interface LoanSectionProps {
   customers: Customer[];
   loans: Loan[];
-  onAddLoan: (l: Loan) => Promise<void> | void;
+  onAddLoan: (draft: LoanDraft) => Promise<string | void> | void;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onDeleteLoan: (loanId: string) => Promise<void>;
   showToast: (msg: string, type?: 'success' | 'error') => void;
@@ -115,7 +115,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const base = 2026001;
     if (!Array.isArray(loans) || loans.length === 0) return String(base);
     const values = loans
-      .map((loan) => Number((loan as any).contractNumber || 0))
+      .map((loan) => Number(loan.contractNumber || 0))
       .filter((value) => Number.isFinite(value) && value > 0);
     const max = values.length > 0 ? Math.max(...values) : base;
     return String(max + 1);
@@ -168,7 +168,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   };
 
   const buildEarlySettlementQuote = (loan: Loan): EarlySettlementQuote | null => {
-    const normalizedInterestType = fromLegacyInterestType((loan as any).interestType);
+    const normalizedInterestType = fromLegacyInterestType(loan.interestType);
     if (normalizedInterestType !== 'PRICE') {
       return null;
     }
@@ -354,8 +354,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       interestRate: String(loan.interestRate ?? ''),
       monthlyPaidInterestRate: String(loan.monthlyPaidInterestRate ?? ''),
       monthlyAccruedInterestRate: String(loan.monthlyAccruedInterestRate ?? ''),
-      interestType: fromLegacyInterestType((loan as any).interestType),
-      frequency: fromLegacyFrequency((loan as any).frequency),
+      interestType: fromLegacyInterestType(loan.interestType),
+      frequency: fromLegacyFrequency(loan.frequency),
       installmentsCount: String(loanInstallmentsCount(loan)),
       startDate: loan.startDate || getLocalISODate()
     });
@@ -370,7 +370,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!window.confirm(`Deseja cancelar o contrato ${loan.id}?`)) return;
 
     try {
-      await onUpdateLoan(loan.id, { status: 'CANCELADO' as any });
+      await onUpdateLoan(loan.id, { status: 'CANCELADO' });
       showToast('Contrato cancelado com sucesso!', 'success');
     } catch (e) {
       showToast('Erro ao cancelar contrato', 'error');
@@ -433,11 +433,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         const share = roundMoney(Math.max(proportionalShare, 0));
         allocated = roundMoney(allocated + share);
 
-        (inst as any).paidAmount = installmentAmount(inst);
-        (inst as any).partialPaid = 0;
-        (inst as any).status = 'PAGO';
-        (inst as any).paymentDate = nowIso;
-        (inst as any).lastPaidValue = share;
+        inst.paidAmount = installmentAmount(inst);
+        inst.partialPaid = 0;
+        inst.status = 'PAGO';
+        inst.paymentDate = nowIso;
+        inst.lastPaidValue = share;
         installments[entry.installmentIndex] = inst;
       });
 
@@ -448,7 +448,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         loan.id,
         {
           installments,
-          status: (allPaid ? 'QUITADO' : 'ATIVO') as any,
+          status: allPaid ? 'QUITADO' : 'ATIVO',
         },
         'PAGAMENTO',
         settlementModal.payoffAmount,
@@ -506,12 +506,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       amount: Number(formData.amount),
       interestRate: Number(formData.interestRate),
       customerPhone: customer.phone || '',
-      interestType: toLegacyInterestType(formData.interestType) as any,
+      interestType: toLegacyInterestType(formData.interestType),
       monthlyPaidInterestRate: isSplitContract ? Number(formData.monthlyPaidInterestRate) : undefined,
       monthlyAccruedInterestRate: isSplitContract ? Number(formData.monthlyAccruedInterestRate) : undefined,
-      frequency: (isSplitContract ? 'MENSAL' : toLegacyFrequency(formData.frequency)) as any,
+      frequency: isSplitContract ? 'MENSAL' : toLegacyFrequency(formData.frequency),
       installmentCount: Number(formData.installmentsCount),
-      installmentsCount: Number(formData.installmentsCount) as any,
+      installmentsCount: Number(formData.installmentsCount),
       totalToReturn,
       installmentValue,
       dueDate,
@@ -525,37 +525,40 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         const currentLoan = loans.find(l => l.id === editingLoanId);
         await onUpdateLoan(editingLoanId, {
           ...payload,
-          status: normalizeLoanStatus(currentLoan?.status) === 'CANCELLED' ? ('CANCELADO' as any) : ('ATIVO' as any)
+          status: normalizeLoanStatus(currentLoan?.status) === 'CANCELLED' ? 'CANCELADO' : 'ATIVO'
         });
         showToast('Contrato atualizado com sucesso!', 'success');
       } else {
-        const newLoan: Loan = {
-          id: Math.random().toString(36).substr(2, 9),
+        const newLoan: LoanDraft = {
           contractNumber: getNextContractNumber(),
           customerId: payload.customerId || customer.id,
           customerName: payload.customerName || customer.name,
           customerPhone: customer.phone || '',
           amount: Number(payload.amount || 0),
           interestRate: Number(payload.interestRate || 0),
-          interestType: (payload.interestType || 'SIMPLES') as any,
+          interestType: payload.interestType || 'SIMPLES',
           monthlyPaidInterestRate: payload.monthlyPaidInterestRate,
           monthlyAccruedInterestRate: payload.monthlyAccruedInterestRate,
-          frequency: (payload.frequency || 'MENSAL') as any,
-          installmentCount: Number((payload as any).installmentCount || payload.installmentsCount || 0),
-          installmentsCount: Number(payload.installmentsCount || (payload as any).installmentCount || 0) as any,
+          frequency: payload.frequency || 'MENSAL',
+          installmentCount: Number(payload.installmentCount || payload.installmentsCount || 0),
+          installmentsCount: Number(payload.installmentsCount || payload.installmentCount || 0),
           totalToReturn: Number(totalToReturn.toFixed(2)),
           installmentValue: Number(installmentValue.toFixed(2)),
           startDate: payload.startDate || getLocalISODate(),
           dueDate,
-          status: 'ATIVO' as any,
+          status: 'ATIVO',
           paidAmount: 0,
           notes: '',
           installments: payload.installments || [],
-          createdAt: Date.now(),
         };
-        await Promise.resolve(onAddLoan(newLoan));
+        const createdLoanId = await Promise.resolve(onAddLoan(newLoan));
         try {
-          generateContractPDF(customer as any, newLoan as any);
+          const loanForPdf: Loan = {
+            ...newLoan,
+            id: createdLoanId || String(newLoan.contractNumber || Date.now()),
+            createdAt: Date.now(),
+          };
+          generateContractPDF(customer, loanForPdf);
           showToast('Contrato efetivado e PDF gerado!', 'success');
         } catch (pdfError) {
           console.error('Contrato salvo, mas falhou ao gerar PDF:', pdfError);
@@ -640,14 +643,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           const inst = { ...originalInstallment };
           const newInstallmentValue = redistributedValues[position] ?? 0;
 
-          (inst as any).amount = newInstallmentValue;
-          (inst as any).value = newInstallmentValue;
-          (inst as any).paidAmount = 0;
-          (inst as any).partialPaid = 0;
-          (inst as any).lastPaidValue = undefined;
-          (inst as any).paymentDate = undefined;
+          inst.amount = newInstallmentValue;
+          inst.value = newInstallmentValue;
+          inst.paidAmount = 0;
+          inst.partialPaid = 0;
+          inst.lastPaidValue = undefined;
+          inst.paymentDate = undefined;
           if (normalizeInstallmentStatus(inst.status) !== 'PAID') {
-            (inst as any).status = 'PENDENTE';
+            inst.status = 'PENDENTE';
           }
 
           newInstallments[index] = inst;
@@ -679,18 +682,18 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           changedInstallment = true;
           if (remainingToApply + 0.000001 >= remaining) {
             remainingToApply = Number((remainingToApply - remaining).toFixed(2));
-            (inst as any).paidAmount = totalWithFee;
-            (inst as any).status = 'PAGO';
-            (inst as any).paymentDate = new Date().toISOString();
-            (inst as any).partialPaid = 0;
-            (inst as any).lastPaidValue = totalWithFee;
+            inst.paidAmount = totalWithFee;
+            inst.status = 'PAGO';
+            inst.paymentDate = new Date().toISOString();
+            inst.partialPaid = 0;
+            inst.lastPaidValue = totalWithFee;
           } else {
             const partialValue = Number((alreadyPaid + remainingToApply).toFixed(2));
-            (inst as any).paidAmount = partialValue;
-            (inst as any).partialPaid = partialValue;
+            inst.paidAmount = partialValue;
+            inst.partialPaid = partialValue;
             remainingToApply = 0;
             if (normalizeInstallmentStatus(inst.status) !== 'PAID') {
-              (inst as any).status = 'PENDENTE';
+              inst.status = 'PENDENTE';
             }
           }
 
@@ -721,7 +724,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         loan.id,
         {
           installments: newInstallments,
-          status: (allPaid ? 'QUITADO' : 'ATIVO') as any
+          status: allPaid ? 'QUITADO' : 'ATIVO'
         },
         'PAGAMENTO',
         appliedAmount,
@@ -747,15 +750,15 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const handleReverseInstallment = async (loan: Loan, index: number) => {
     const newInstallments = [...loan.installments];
     const inst = { ...newInstallments[index] };
-    const amountToReverse = Number((inst as any).lastPaidValue ?? installmentPaidAmount(inst));
+    const amountToReverse = Number(inst.lastPaidValue ?? installmentPaidAmount(inst));
 
     if (amountToReverse <= 0) return;
 
-    (inst as any).paidAmount = 0;
-    (inst as any).partialPaid = 0;
-    (inst as any).status = 'PENDENTE';
-    (inst as any).paymentDate = undefined;
-    (inst as any).lastPaidValue = undefined;
+    inst.paidAmount = 0;
+    inst.partialPaid = 0;
+    inst.status = 'PENDENTE';
+    inst.paymentDate = undefined;
+    inst.lastPaidValue = undefined;
     newInstallments[index] = inst;
 
     try {
@@ -763,7 +766,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         loan.id,
         { 
           installments: newInstallments,
-          status: 'ATIVO' as any // Always active if we are reversing a payment
+          status: 'ATIVO' // Always active if we are reversing a payment
         },
         'ESTORNO',
         amountToReverse,
@@ -851,7 +854,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           });
           const canEarlySettle =
             resolvedLoanStatus === 'ACTIVE' &&
-            fromLegacyInterestType((loan as any).interestType) === 'PRICE' &&
+            fromLegacyInterestType(loan.interestType) === 'PRICE' &&
             loanInstallments.some((inst) => getRemainingInstallmentValue(inst) > 0);
           const canChargeLoan = resolvedLoanStatus === 'ACTIVE' && remainingLoanAmount > 0;
 
@@ -1313,7 +1316,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   <select
                     className={`w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none ${formData.interestType === 'SPLIT' ? 'opacity-60 cursor-not-allowed' : ''}`}
                     value={formData.frequency}
-                    onChange={e => setFormData({ ...formData, frequency: e.target.value as any })}
+                    onChange={e => setFormData({ ...formData, frequency: e.target.value as 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' })}
                     disabled={formData.interestType === 'SPLIT'}
                   >
                     <option value="DAILY">DIARIO</option>

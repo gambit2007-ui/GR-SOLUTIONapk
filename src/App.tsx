@@ -1,19 +1,10 @@
-﻿import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   LayoutDashboard, Users, FileText, PieChart, Calculator,
-  Activity, X, Menu, Lock, LogOut, Loader2
+  Activity, X, Menu, Lock, LogOut, Loader2,
 } from 'lucide-react';
 
-// Firebase imports
-import { db, auth } from "./firebase";
-import { onAuthStateChanged, signInWithEmailAndPassword, signOut, User } from "firebase/auth";
-import {
-  collection, onSnapshot, query, orderBy, addDoc,
-  updateDoc, doc, setDoc, runTransaction, serverTimestamp, deleteDoc, getDocs, where, writeBatch
-} from "firebase/firestore";
-
-// Tipos e Componentes
-import { Customer, Loan, View, CashMovement } from './types';
+import { Customer, Loan, LoanDraft, MovementType, View } from './types';
 import Dashboard from './components/Dashboard';
 import CustomerSection from './components/CustomerSection';
 import SimulationTab from './components/SimulationTab';
@@ -21,382 +12,197 @@ import Reports from './components/Reports';
 import LoanSection from './components/LoanSection';
 import { getLocalISODate } from './utils/dateTime';
 import { effectiveLoanStatus, normalizeInstallmentStatus } from './utils/loanCompat';
-
-interface Toast {
-  id: string;
-  message: string;
-  type: 'success' | 'info' | 'error';
-}
-
-type MovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
-
-const sanitizeFirestorePayload = <T,>(value: T): T => {
-  if (value === undefined) return value;
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => sanitizeFirestorePayload(item))
-      .filter((item) => item !== undefined) as unknown as T;
-  }
-
-  if (value && typeof value === 'object') {
-    const maybeFieldValue = value as { constructor?: { name?: string }; isEqual?: (other: unknown) => boolean };
-    const ctorName = String(maybeFieldValue.constructor?.name || '').toLowerCase();
-    if (ctorName.includes('fieldvalue')) return value;
-    if (typeof (value as any).toDate === 'function') return value;
-    if (value instanceof Date) return value;
-
-    const output: Record<string, unknown> = {};
-    Object.entries(value as Record<string, unknown>).forEach(([key, entryValue]) => {
-      if (entryValue === undefined) return;
-      output[key] = sanitizeFirestorePayload(entryValue);
-    });
-    return output as T;
-  }
-
-  return value;
-};
+import { useAuthState } from './hooks/useAuthState';
+import { useRealtimeData } from './hooks/useRealtimeData';
+import { useToasts } from './hooks/useToasts';
+import { useViewport } from './hooks/useViewport';
+import { addCashMovement, recalculateCashBalance } from './services/cashService';
+import { buildBackupPayload } from './services/backupService';
+import { createCustomer, deleteCustomerAndLoans, updateCustomer } from './services/customerService';
+import { createLoan, deleteLoan, updateLoan, updateLoanAndAddMovement } from './services/loanService';
 
 const App: React.FC = () => {
-  // --- ESTADOS DE AUTENTICACAO ---
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [loginLoading, setLoginLoading] = useState(false);
-  // --- ESTADOS DA APLICACAO ---
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loans, setLoans] = useState<Loan[]>([]);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
-  const [isMobileViewport, setIsMobileViewport] = useState(false);
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const [caixa, setCaixa] = useState<number>(0);
-  const [transactions, setTransactions] = useState<CashMovement[]>([]);
 
-  // --- MONITORAMENTO DE AUTH ---
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-      setAuthLoading(false);
-    });
-    return () => unsubscribe();
-  }, []);
+  const { user, authLoading, loginLoading, login, logout } = useAuthState();
+  const { clientes, contratos, movimentacoes, caixa } = useRealtimeData(user);
+  const { toasts, showToast, removeToast } = useToasts();
+  const {
+    isSidebarOpen,
+    setIsSidebarOpen,
+    isMobileSidebarOpen,
+    setIsMobileSidebarOpen,
+    isMobileViewport,
+  } = useViewport();
 
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
+  const movementActor = {
+    uid: user?.uid,
+    email: user?.email,
+    displayName: user?.displayName,
+  };
 
-    const mediaQuery = window.matchMedia('(max-width: 1023px)');
-
-    const syncViewport = () => {
-      const isMobile = mediaQuery.matches;
-      setIsMobileViewport(isMobile);
-      if (!isMobile) setIsMobileSidebarOpen(false);
-    };
-
-    syncViewport();
-    if (mediaQuery.addEventListener) {
-      mediaQuery.addEventListener('change', syncViewport);
-      return () => mediaQuery.removeEventListener('change', syncViewport);
-    }
-
-    mediaQuery.addListener(syncViewport);
-    return () => mediaQuery.removeListener(syncViewport);
-  }, []);
-  // --- FUNCOES DE AUTH ---
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoginLoading(true);
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      showToast("Acesso autorizado!", "success");
-    } catch (error: any) {
-      showToast("E-mail ou senha incorretos", "error");
-    } finally {
-      setLoginLoading(false);
+      await login(email, password);
+      showToast('Acesso autorizado!', 'success');
+    } catch (error: unknown) {
+      showToast('E-mail ou senha incorretos', 'error');
     }
   };
 
   const handleLogout = async () => {
-    await signOut(auth);
-    showToast("Sess\u00E3o encerrada", "info");
-  };
-  // --- SISTEMA DE NOTIFICACOES ---
-  const showToast = (message: string, type: 'success' | 'info' | 'error' = 'success') => {
-    const id = Math.random().toString(36).substr(2, 9);
-    setToasts(prev => [...prev, { id, message, type }]);
-    setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
-  };
-
-  const removeToast = (id: string) => setToasts(prev => prev.filter(t => t.id !== id));
-  const buildMovementActor = () => {
-    const actor: Partial<Pick<CashMovement, 'createdByUid' | 'createdByEmail' | 'createdByName'>> = {};
-    if (user?.uid) actor.createdByUid = user.uid;
-    if (user?.email) actor.createdByEmail = user.email.toLowerCase();
-    if (user?.displayName) actor.createdByName = user.displayName;
-    return actor;
-  };
-
-  // --- SINCRONIZACAO EM TEMPO REAL ---
-  useEffect(() => {
-    if (!user) return;
-
-    const unsubCust = onSnapshot(query(collection(db, "clientes"), orderBy("createdAt", "desc")), (snap) => {
-      setCustomers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Customer)));
-    });
-
-    const unsubLoans = onSnapshot(query(collection(db, "loans"), orderBy("startDate", "desc")), (snap) => {
-      setLoans(snap.docs.map(d => ({ id: d.id, ...d.data() } as Loan)));
-    });
-
-    const unsubCaixa = onSnapshot(doc(db, 'settings', 'caixa'), (snap) => {
-      if (snap.exists()) setCaixa(Number(snap.data().value) || 0);
-    });
-
-    const unsubTrans = onSnapshot(query(collection(db, 'cashMovement'), orderBy('date', 'desc')), (snap) => {
-      setTransactions(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-    });
-
-    return () => { unsubCust(); unsubLoans(); unsubCaixa(); unsubTrans(); };
-  }, [user]);
-  // --- FUNCOES DE OPERACAO (CRUD) ---
-
-  const handleUpdateLoan = async (loanId: string, newData: Partial<Loan>) => {
     try {
-      await updateDoc(doc(db, 'loans', loanId), sanitizeFirestorePayload(newData));
-    } catch (e) {
-      showToast("Erro ao atualizar contrato", "error");
-      throw e;
+      await logout();
+      showToast('Sessao encerrada', 'info');
+    } catch (error: unknown) {
+      showToast('Erro ao encerrar sessao', 'error');
+    }
+  };
+
+  const handleUpdateLoan = async (loanId: string, payload: Partial<Loan>) => {
+    try {
+      await updateLoan(loanId, payload);
+    } catch (error: unknown) {
+      showToast('Erro ao atualizar contrato', 'error');
+      throw error;
     }
   };
 
   const handleAddTransaction = async (type: MovementType, amount: number, description: string) => {
-    const valorNum = Number(amount);
-    const tipo = String(type || '').toUpperCase() as MovementType;
-    const motivo = String(description || '').trim();
+    const valor = Number(amount);
+    const motivo = String(description ?? '').trim();
 
-    if (!Number.isFinite(valorNum) || valorNum <= 0) {
-      showToast("Valor invalido para movimentacao", "error");
+    if (!Number.isFinite(valor) || valor <= 0) {
+      showToast('Valor invalido para movimentacao', 'error');
       throw new Error('VALOR_INVALIDO');
     }
 
     if (!motivo) {
-      showToast("Informe um motivo para a movimentacao", "error");
+      showToast('Informe um motivo para a movimentacao', 'error');
       throw new Error('MOTIVO_OBRIGATORIO');
     }
 
     try {
-      await runTransaction(db, async (tx) => {
-        const caixaRef = doc(db, 'settings', 'caixa');
-        const movimentoRef = doc(collection(db, 'cashMovement'));
-        const caixaSnap = await tx.get(caixaRef);
-        const saldoAtual = caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
-        const isEntrada = tipo === 'APORTE' || tipo === 'PAGAMENTO' || tipo === 'ENTRADA';
-        const novoSaldo = Number((saldoAtual + (isEntrada ? valorNum : -valorNum)).toFixed(2));
-
-        tx.set(movimentoRef, {
-          type: tipo,
-          amount: valorNum,
-          description: motivo.toUpperCase(),
-          date: new Date().toISOString(),
-          ...buildMovementActor(),
-        });
-
-        tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
+      await addCashMovement({
+        type,
+        amount: valor,
+        description: motivo,
+        actor: movementActor,
       });
-
       showToast('Caixa atualizado!', 'success');
-    } catch (e) {
-      showToast("Erro no processamento do caixa", "error");
-      throw e;
+    } catch (error: unknown) {
+      showToast('Erro no processamento do caixa', 'error');
+      throw error;
     }
   };
 
   const handleUpdateLoanAndAddTransaction = async (
     loanId: string,
-    newData: Partial<Loan>,
+    payload: Partial<Loan>,
     type: MovementType,
     amount: number,
     description: string,
   ) => {
-    const valorNum = Number(amount);
-    const tipo = String(type || '').toUpperCase() as MovementType;
-    const motivo = String(description || '').trim();
+    const valor = Number(amount);
+    const motivo = String(description ?? '').trim();
 
     if (!loanId) {
-      showToast('Contrato invalido para estorno', 'error');
+      showToast('Contrato invalido para movimentacao', 'error');
       throw new Error('LOAN_ID_INVALIDO');
     }
 
-    if (!Number.isFinite(valorNum) || valorNum <= 0) {
-      showToast("Valor invalido para movimentacao", "error");
+    if (!Number.isFinite(valor) || valor <= 0) {
+      showToast('Valor invalido para movimentacao', 'error');
       throw new Error('VALOR_INVALIDO');
     }
 
     if (!motivo) {
-      showToast("Informe um motivo para a movimentacao", "error");
+      showToast('Informe um motivo para a movimentacao', 'error');
       throw new Error('MOTIVO_OBRIGATORIO');
     }
 
     try {
-      await runTransaction(db, async (tx) => {
-        const loanRef = doc(db, 'loans', loanId);
-        const caixaRef = doc(db, 'settings', 'caixa');
-        const movimentoRef = doc(collection(db, 'cashMovement'));
-
-        const loanSnap = await tx.get(loanRef);
-        if (!loanSnap.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
-
-        const caixaSnap = await tx.get(caixaRef);
-        const saldoAtual = caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
-        const isEntrada = tipo === 'APORTE' || tipo === 'PAGAMENTO' || tipo === 'ENTRADA';
-        const novoSaldo = Number((saldoAtual + (isEntrada ? valorNum : -valorNum)).toFixed(2));
-
-        tx.update(loanRef, sanitizeFirestorePayload(newData));
-        tx.set(movimentoRef, {
-          type: tipo,
-          amount: valorNum,
-          description: motivo.toUpperCase(),
-          date: new Date().toISOString(),
-          loanId,
-          ...buildMovementActor(),
-        });
-        tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
+      await updateLoanAndAddMovement(loanId, payload, {
+        type,
+        amount: valor,
+        description: motivo,
+        actor: movementActor,
       });
-    } catch (e) {
-      showToast('Erro ao estornar parcela', 'error');
-      throw e;
+    } catch (error: unknown) {
+      showToast('Erro ao processar operacao', 'error');
+      throw error;
     }
   };
 
   const handleRecalculateCash = async () => {
     try {
-      const movementSnap = await getDocs(collection(db, 'cashMovement'));
-
-      const saldoCalculado = movementSnap.docs.reduce((acc, movementDoc) => {
-        const data: any = movementDoc.data();
-        const rawAmount = Number(data.amount ?? data.value ?? 0);
-        if (!Number.isFinite(rawAmount) || rawAmount === 0) return acc;
-
-        // Compatibilidade: alguns registros antigos salvaram saidas como valor negativo.
-        if (rawAmount < 0) return acc + rawAmount;
-
-        const type = String(data.type || '').toUpperCase();
-        const isEntrada = type === 'APORTE' || type === 'PAGAMENTO' || type === 'ENTRADA';
-        return acc + (isEntrada ? rawAmount : -rawAmount);
-      }, 0);
-
-      const novoSaldo = Number(saldoCalculado.toFixed(2));
-      await setDoc(doc(db, 'settings', 'caixa'), { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
-      showToast(`Caixa recalculado para R$ ${novoSaldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`, 'success');
-    } catch (e) {
+      const novoSaldo = await recalculateCashBalance();
+      showToast(
+        `Caixa recalculado para R$ ${novoSaldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        'success',
+      );
+    } catch (error: unknown) {
       showToast('Erro ao recalcular o caixa', 'error');
     }
   };
 
-  const handleAddCustomer = async (c: Customer) => {
-    try { 
-      const { id, ...data } = c;
-      await addDoc(collection(db, "clientes"), sanitizeFirestorePayload({ ...data, createdAt: Date.now() })); 
-      showToast('Cliente cadastrado com sucesso!'); 
-    } catch (e) { showToast('Erro ao salvar cliente', 'error'); }
+  const handleAddCustomer = async (cliente: Customer) => {
+    try {
+      await createCustomer(cliente);
+      showToast('Cliente cadastrado com sucesso!', 'success');
+    } catch (error: unknown) {
+      showToast('Erro ao salvar cliente', 'error');
+    }
   };
 
-  // Correcao: funcao que estava faltando
-  const handleUpdateCustomer = async (updated: Customer) => {
+  const handleUpdateCustomer = async (cliente: Customer) => {
     try {
-      const { id, ...data } = updated;
-      await updateDoc(doc(db, "clientes", id), sanitizeFirestorePayload(data));
+      await updateCustomer(cliente);
       showToast('Cadastro atualizado!', 'info');
-    } catch (e) { showToast('Erro ao atualizar cadastro', 'error'); }
+    } catch (error: unknown) {
+      showToast('Erro ao atualizar cadastro', 'error');
+    }
   };
 
-  const handleDeleteCustomer = async (id: string) => {
-    if (!window.confirm("Isso excluira o cliente e todos os contratos dele. Confirma?")) return;
+  const handleDeleteCustomer = async (customerId: string) => {
+    if (!window.confirm('Isso excluira o cliente e todos os contratos dele. Confirma?')) return;
     try {
-      const loansSnap = await getDocs(query(collection(db, "loans"), where("customerId", "==", id)));
-      const loanDocs = loansSnap.docs;
-
-      const MAX_BATCH_SIZE = 450;
-      let index = 0;
-
-      while (index < loanDocs.length) {
-        const batch = writeBatch(db);
-        const slice = loanDocs.slice(index, index + MAX_BATCH_SIZE);
-        slice.forEach((loanDoc) => batch.delete(doc(db, "loans", loanDoc.id)));
-        await batch.commit();
-        index += MAX_BATCH_SIZE;
-      }
-
-      await deleteDoc(doc(db, "clientes", id));
-      showToast(`Cliente removido com ${loanDocs.length} contrato(s)`, 'info');
-    } catch (e) { showToast('Erro ao remover cliente', 'error'); }
+      const removedLoansCount = await deleteCustomerAndLoans(customerId);
+      showToast(`Cliente removido com ${removedLoansCount} contrato(s)`, 'info');
+    } catch (error: unknown) {
+      showToast('Erro ao remover cliente', 'error');
+    }
   };
 
-  const handleAddLoan = async (l: Loan): Promise<void> => {
+  const handleAddLoan = async (loanDraft: LoanDraft): Promise<string | void> => {
     try {
-      const { id, ...data } = l;
-      const safeLoanData = sanitizeFirestorePayload(data);
-
-      await runTransaction(db, async (tx) => {
-        const loanRef = doc(db, "loans", l.id);
-        const caixaRef = doc(db, 'settings', 'caixa');
-        const movimentoRef = doc(collection(db, 'cashMovement'));
-
-        const caixaSnap = await tx.get(caixaRef);
-        const saldoAtual = caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
-        const novoSaldo = Number((saldoAtual - Number(l.amount || 0)).toFixed(2));
-
-        tx.set(loanRef, { ...safeLoanData, createdAt: serverTimestamp() });
-        tx.set(movimentoRef, {
-          type: 'RETIRADA',
-          amount: Number(l.amount || 0),
-          description: `EMPRESTIMO: ${l.customerName}`,
-          date: new Date().toISOString(),
-          loanId: l.id,
-          ...buildMovementActor(),
-        });
-        tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
-      });
-
+      const createdLoanId = await createLoan(loanDraft, movementActor);
       setCurrentView('DASHBOARD');
-      showToast('Contrato efetivado!');
-    } catch (e) {
-      console.error('Erro ao salvar contrato:', e);
+      showToast('Contrato efetivado!', 'success');
+      return createdLoanId;
+    } catch (error: unknown) {
       showToast('Erro ao salvar contrato', 'error');
-      throw e;
+      throw error;
     }
   };
 
   const handleDeleteLoan = async (loanId: string) => {
     try {
-      await deleteDoc(doc(db, 'loans', loanId));
+      await deleteLoan(loanId);
       showToast('Contrato excluido com sucesso!', 'success');
-    } catch (e) {
+    } catch (error: unknown) {
       showToast('Erro ao excluir contrato', 'error');
-      throw e;
+      throw error;
     }
   };
 
   const handleDownloadBackup = async () => {
     try {
-      const [customersSnap, loansSnap, movementsSnap, caixaSnap] = await Promise.all([
-        getDocs(collection(db, 'clientes')),
-        getDocs(collection(db, 'loans')),
-        getDocs(collection(db, 'cashMovement')),
-        getDocs(query(collection(db, 'settings'))),
-      ]);
-
-      const payload = {
-        generatedAt: new Date().toISOString(),
-        customers: customersSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-        loans: loansSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-        cashMovement: movementsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-        settings: caixaSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-      };
-
+      const payload = await buildBackupPayload();
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -406,14 +212,11 @@ const App: React.FC = () => {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-
       showToast('Backup completo baixado (clientes, contratos e financeiro)!', 'success');
-    } catch {
+    } catch (error: unknown) {
       showToast('Erro ao gerar backup', 'error');
     }
   };
-
-  // --- COMPONENTES DE TELA ---
 
   if (authLoading) {
     return (
@@ -436,21 +239,25 @@ const App: React.FC = () => {
             <p className="text-[9px] text-zinc-500 uppercase tracking-[0.4em] mt-2 text-center">Acesso ao Painel de Controle</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
-            <input 
-              type="email" placeholder="E-MAIL" required
+            <input
+              type="email"
+              placeholder="E-MAIL"
+              required
               className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
-              onChange={e => setEmail(e.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
             />
-            <input 
-              type="password" placeholder="CHAVE DE ACESSO" required
+            <input
+              type="password"
+              placeholder="CHAVE DE ACESSO"
+              required
               className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] transition-all text-xs"
-              onChange={e => setPassword(e.target.value)}
+              onChange={(event) => setPassword(event.target.value)}
             />
-            <button 
+            <button
               disabled={loginLoading}
               className="w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest hover:brightness-110 transition-all flex items-center justify-center gap-2"
             >
-              {loginLoading ? <Loader2 className="animate-spin" size={16} /> : "Entrar no Sistema"}
+              {loginLoading ? <Loader2 className="animate-spin" size={16} /> : 'Entrar no Sistema'}
             </button>
           </form>
         </div>
@@ -458,14 +265,13 @@ const App: React.FC = () => {
     );
   }
 
-  const overdueLoansCount = loans.filter((loan) => {
-    if (effectiveLoanStatus(loan) !== 'ACTIVE') return false;
-    const saldoDevedor = Number(loan.totalToReturn || 0) - Number(loan.paidAmount || 0);
+  const overdueLoansCount = contratos.filter((contrato) => {
+    if (effectiveLoanStatus(contrato) !== 'ACTIVE') return false;
+    const saldoDevedor = Number(contrato.totalToReturn || 0) - Number(contrato.paidAmount || 0);
     if (saldoDevedor <= 0.5) return false;
-
     const today = getLocalISODate();
-    return (loan.installments || []).some(
-      (inst) => normalizeInstallmentStatus((inst as any)?.status) !== 'PAID' && inst.dueDate < today,
+    return (contrato.installments || []).some(
+      (parcela) => normalizeInstallmentStatus(parcela.status) !== 'PAID' && parcela.dueDate < today,
     );
   }).length;
 
@@ -511,7 +317,6 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* SIDEBAR */}
       <aside
         className={`flex flex-col bg-[#050505] border-r border-zinc-900 transition-all duration-300 ${
           isMobileViewport
@@ -568,80 +373,82 @@ const App: React.FC = () => {
         </div>
       </aside>
 
-      {/* MAIN CONTENT */}
       <main className="flex-1 min-w-0 flex flex-col overflow-hidden relative">
         <header className="h-16 md:h-20 bg-[#050505] border-b border-zinc-900 flex items-center justify-between px-3 sm:px-4 md:px-8 lg:px-10 flex-shrink-0 gap-3">
-            <div className="flex items-center gap-2 min-w-0">
-              <button
-                type="button"
-                onClick={() => setIsMobileSidebarOpen(true)}
-                className="lg:hidden p-2 hover:bg-zinc-900 rounded-xl transition-colors"
-                aria-label="Abrir menu"
-              >
-                <Menu size={18} className="text-[#BF953F]" />
-              </button>
-              <h2 className="text-[10px] sm:text-xs font-black text-zinc-100 uppercase tracking-[0.22em] truncate">
-                {navItems.find(item => item.id === currentView)?.label}
-              </h2>
+          <div className="flex items-center gap-2 min-w-0">
+            <button
+              type="button"
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="lg:hidden p-2 hover:bg-zinc-900 rounded-xl transition-colors"
+              aria-label="Abrir menu"
+            >
+              <Menu size={18} className="text-[#BF953F]" />
+            </button>
+            <h2 className="text-[10px] sm:text-xs font-black text-zinc-100 uppercase tracking-[0.22em] truncate">
+              {navItems.find((item) => item.id === currentView)?.label}
+            </h2>
+          </div>
+          <div className="flex items-center gap-2 sm:gap-4 min-w-0">
+            <div className="flex items-center gap-2 px-2.5 sm:px-4 py-1.5 bg-zinc-950 border border-zinc-900 rounded-full max-w-[72vw] sm:max-w-none">
+              <Activity size={12} className="text-emerald-500 animate-pulse shrink-0" />
+              <span className="text-[8px] sm:text-[9px] font-black text-zinc-500 uppercase truncate">
+                <span className="hidden sm:inline">Conectado: </span>{user?.email}
+              </span>
             </div>
-            <div className="flex items-center gap-2 sm:gap-4 min-w-0">
-                <div className="flex items-center gap-2 px-2.5 sm:px-4 py-1.5 bg-zinc-950 border border-zinc-900 rounded-full max-w-[72vw] sm:max-w-none">
-                  <Activity size={12} className="text-emerald-500 animate-pulse shrink-0" />
-                  <span className="text-[8px] sm:text-[9px] font-black text-zinc-500 uppercase truncate">
-                    <span className="hidden sm:inline">Conectado: </span>{user?.email}
-                  </span>
-                </div>
-            </div>
+          </div>
         </header>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#000000] p-3 sm:p-4 md:p-6">
-            {currentView === 'DASHBOARD' && (
-              <Dashboard
-                loans={loans}
-                customers={customers}
-                cashMovements={transactions}
-                onNavigateToLoan={navigateToLoan}
-              />
-            )}
-            {currentView === 'CUSTOMERS' && (
-              <CustomerSection
-                customers={customers} loans={loans}
-                onAddCustomer={handleAddCustomer} onUpdateCustomer={handleUpdateCustomer} onDeleteCustomer={handleDeleteCustomer}
-              />
-            )}
-            {currentView === 'LOANS' && (
-              <LoanSection
-                customers={customers}
-                loans={loans}
-                onAddLoan={handleAddLoan}
-                onUpdateLoan={handleUpdateLoan}
-                onDeleteLoan={handleDeleteLoan}
-                showToast={showToast}
-                initialExpandedLoanId={selectedLoanId}
-                onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
-              />
-            )}
-            {currentView === 'SIMULATION' && <SimulationTab customers={customers} />}
-            {currentView === 'REPORTS' && (
-              <Reports
-                loans={loans} cashMovements={transactions}
-                caixa={caixa}
-                onAddTransaction={handleAddTransaction}
-                onUpdateLoan={handleUpdateLoan}
-                onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
-                onRecalculateCash={handleRecalculateCash}
-                onDownloadBackup={handleDownloadBackup}
-                showToast={showToast}
-              />
-            )}
+          {currentView === 'DASHBOARD' && (
+            <Dashboard
+              loans={contratos}
+              customers={clientes}
+              cashMovements={movimentacoes}
+              onNavigateToLoan={navigateToLoan}
+            />
+          )}
+          {currentView === 'CUSTOMERS' && (
+            <CustomerSection
+              customers={clientes}
+              loans={contratos}
+              onAddCustomer={handleAddCustomer}
+              onUpdateCustomer={handleUpdateCustomer}
+              onDeleteCustomer={handleDeleteCustomer}
+            />
+          )}
+          {currentView === 'LOANS' && (
+            <LoanSection
+              customers={clientes}
+              loans={contratos}
+              onAddLoan={handleAddLoan}
+              onUpdateLoan={handleUpdateLoan}
+              onDeleteLoan={handleDeleteLoan}
+              showToast={showToast}
+              initialExpandedLoanId={selectedLoanId}
+              onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
+            />
+          )}
+          {currentView === 'SIMULATION' && <SimulationTab customers={clientes} />}
+          {currentView === 'REPORTS' && (
+            <Reports
+              loans={contratos}
+              cashMovements={movimentacoes}
+              caixa={caixa}
+              onAddTransaction={handleAddTransaction}
+              onUpdateLoan={handleUpdateLoan}
+              onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
+              onRecalculateCash={handleRecalculateCash}
+              onDownloadBackup={handleDownloadBackup}
+              showToast={showToast}
+            />
+          )}
         </div>
 
-        {/* TOASTS */}
         <div className="fixed top-3 sm:top-6 left-3 right-3 sm:left-auto sm:right-6 z-[200] flex flex-col gap-2 sm:gap-3 pointer-events-none">
-          {toasts.map(t => (
-            <div key={t.id} className="pointer-events-auto flex items-start gap-2 sm:gap-4 px-3 sm:px-6 py-3 sm:py-4 rounded-xl sm:rounded-2xl border bg-zinc-950 border-[#BF953F]/50 text-[#BF953F] shadow-2xl animate-in slide-in-from-right">
-              <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] sm:tracking-widest break-words leading-snug">{t.message}</span>
-              <button type="button" onClick={() => removeToast(t.id)} className="mt-0.5 text-[#BF953F] hover:text-white" aria-label="Fechar aviso">
+          {toasts.map((toast) => (
+            <div key={toast.id} className="pointer-events-auto flex items-start gap-2 sm:gap-4 px-3 sm:px-6 py-3 sm:py-4 rounded-xl sm:rounded-2xl border bg-zinc-950 border-[#BF953F]/50 text-[#BF953F] shadow-2xl animate-in slide-in-from-right">
+              <span className="text-[9px] sm:text-[10px] font-black uppercase tracking-[0.14em] sm:tracking-widest break-words leading-snug">{toast.message}</span>
+              <button type="button" onClick={() => removeToast(toast.id)} className="mt-0.5 text-[#BF953F] hover:text-white" aria-label="Fechar aviso">
                 <X size={14} />
               </button>
             </div>
@@ -653,5 +460,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-
-

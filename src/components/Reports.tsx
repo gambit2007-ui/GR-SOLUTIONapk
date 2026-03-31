@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Loan, CashMovement } from '../types';
+import { Loan, CashMovement, MovementType } from '../types';
 import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
 import {
   BarChart, 
@@ -27,9 +27,9 @@ interface ReportsProps {
   loans: Loan[];
   cashMovements: CashMovement[];
   caixa: number;
-  onAddTransaction: (type: any, amount: number, description: string) => Promise<void>;
+  onAddTransaction: (type: MovementType, amount: number, description: string) => Promise<void>;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
-  onUpdateLoanAndAddTransaction: (loanId: string, newData: Partial<Loan>, type: any, amount: number, description: string) => Promise<void>;
+  onUpdateLoanAndAddTransaction: (loanId: string, newData: Partial<Loan>, type: MovementType, amount: number, description: string) => Promise<void>;
   onRecalculateCash: () => Promise<void>;
   onDownloadBackup: () => Promise<void>;
   showToast: (msg: string, type?: 'success' | 'error') => void;
@@ -41,7 +41,7 @@ const Reports: React.FC<ReportsProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
   const [formData, setFormData] = useState({
-    type: 'ENTRADA',
+    type: 'ENTRADA' as MovementType,
     amount: '',
     description: ''
   });
@@ -166,7 +166,7 @@ const Reports: React.FC<ReportsProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await onAddTransaction(formData.type as any, Number(formData.amount), formData.description);
+      await onAddTransaction(formData.type, Number(formData.amount), formData.description);
       setIsModalOpen(false);
       setFormData({ type: 'ENTRADA', amount: '', description: '' });
     } catch (e) {
