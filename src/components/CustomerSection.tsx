@@ -1,6 +1,7 @@
 ﻿import React, { useState } from 'react';
 import { Plus, Search, User, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle } from 'lucide-react';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { FirebaseError } from 'firebase/app';
 import { Customer, Loan, CustomerDocument } from '../types';
 import {
   effectiveLoanStatus,
@@ -30,6 +31,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
 
   const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024;
   const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
+  const MAX_INLINE_FALLBACK_BYTES = 700 * 1024;
   const ALLOWED_DOCUMENT_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
 
   const getFileExtension = (fileName: string) => {
@@ -44,6 +46,25 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       .replace(/[\u0300-\u036f]/g, '')
       .replace(/[^\w.-]/g, '_');
     return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeBaseName}`;
+  };
+
+  const readFileAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('Erro ao ler arquivo no fallback'));
+      reader.readAsDataURL(file);
+    });
+
+  const extractStorageErrorCode = (error: unknown): string => {
+    if (error instanceof FirebaseError) {
+      return error.code || '';
+    }
+    if (typeof error === 'object' && error && 'code' in error) {
+      const code = (error as { code?: unknown }).code;
+      return typeof code === 'string' ? code : '';
+    }
+    return '';
   };
 
   const calculateScore = (customerId: string) => {
@@ -116,7 +137,44 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       }
     } catch (error) {
       console.error('Falha no upload', error);
-      alert('Falha ao enviar arquivo. Verifique permissao do Storage e tente novamente.');
+      const errorCode = extractStorageErrorCode(error);
+      const canFallbackToInline = file.size <= MAX_INLINE_FALLBACK_BYTES;
+
+      if (canFallbackToInline) {
+        try {
+          const dataUrl = await readFileAsDataUrl(file);
+          if (type === 'PHOTO') {
+            setFormData((prev) => ({ ...prev, photoUrl: dataUrl, avatar: dataUrl } as Partial<Customer>));
+          } else {
+            const fallbackDoc: CustomerDocument & { id?: string; uploadedAt?: string } = {
+              id: Math.random().toString(36).substr(2, 9),
+              name: file.name,
+              type: file.type || 'application/octet-stream',
+              data: dataUrl,
+              uploadedAt: new Date().toISOString(),
+            };
+            setFormData((prev) => ({
+              ...prev,
+              documents: [...((prev.documents || []) as any[]), fallbackDoc],
+            }));
+          }
+
+          const fallbackCodeLabel = errorCode ? ` (${errorCode})` : '';
+          alert(`Upload salvo em modo local${fallbackCodeLabel}. Recomendado ajustar regras/permissoes do Firebase Storage.`);
+          return;
+        } catch (fallbackError) {
+          console.error('Falha no fallback de upload local', fallbackError);
+        }
+      }
+
+      const detail = errorCode ? ` (${errorCode})` : '';
+      if (errorCode === 'storage/unauthorized') {
+        alert(`Falha ao enviar arquivo${detail}. Sem permissao no Firebase Storage para este usuario.`);
+      } else if (errorCode === 'storage/bucket-not-found' || errorCode === 'storage/no-default-bucket') {
+        alert(`Falha ao enviar arquivo${detail}. Bucket do Firebase Storage nao encontrado/configurado.`);
+      } else {
+        alert(`Falha ao enviar arquivo${detail}. Verifique permissao do Storage e tente novamente.`);
+      }
     } finally {
       setIsUploading(false);
     }
