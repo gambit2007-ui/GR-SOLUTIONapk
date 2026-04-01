@@ -116,17 +116,17 @@ export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): P
   const createdLoanId = await runTransaction(db, async (tx) => {
     const loanRef = doc(collection(db, 'loans'));
 
-    tx.set(loanRef, {
-      ...safeLoanData,
-      createdAt: serverTimestamp(),
-    });
-
     await appendCashMovementInTransaction(tx, {
       type: 'RETIRADA',
       amount,
       description: `EMPRESTIMO: ${normalizedLoanDraft.customerName}`,
       loanId: loanRef.id,
       actor,
+    });
+
+    tx.set(loanRef, {
+      ...safeLoanData,
+      createdAt: serverTimestamp(),
     });
 
     return loanRef.id;
@@ -151,8 +151,6 @@ export const updateLoanAndAddMovement = async (
     const loanSnap = await tx.get(loanRef);
     if (!loanSnap.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
 
-    tx.update(loanRef, sanitizeFirestorePayload(payload));
-
     await appendCashMovementInTransaction(tx, {
       type: movementType,
       amount: movement.amount,
@@ -160,6 +158,8 @@ export const updateLoanAndAddMovement = async (
       loanId,
       actor: movement.actor,
     });
+
+    tx.update(loanRef, sanitizeFirestorePayload(payload));
   });
 };
 
