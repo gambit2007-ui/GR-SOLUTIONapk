@@ -43,6 +43,15 @@ interface RevenueMonthItem {
   isCurrentMonth: boolean;
 }
 
+interface FiscalMonthMetrics {
+  principalRecovered: number;
+  interestReceived: number;
+  lateFeesReceived: number;
+  serviceFeesReceived: number;
+  taxableRevenue: number;
+  totalPaid: number;
+}
+
 const Reports: React.FC<ReportsProps> = ({
   loans, cashMovements, caixa, onAddTransaction, onRecalculateCash, onDownloadBackup, showToast
 }) => {
@@ -80,14 +89,7 @@ const Reports: React.FC<ReportsProps> = ({
     `${monthNamesUpper[monthIndex]}/${String(year).slice(2)}`;
 
   const fiscalData = useMemo(() => {
-    const monthly: Record<string, {
-      principalRecovered: number;
-      interestReceived: number;
-      lateFeesReceived: number;
-      serviceFeesReceived: number;
-      taxableRevenue: number;
-      totalPaid: number;
-    }> = {};
+    const monthly: Record<string, FiscalMonthMetrics> = {};
 
     const totals = {
       principalRecovered: 0,
@@ -286,7 +288,7 @@ const Reports: React.FC<ReportsProps> = ({
       months[monthKey].lucro = roundMoney(legacyProfitByMonth[monthKey] || 0);
     });
 
-    Object.entries(fiscalData.monthly).forEach(([monthKey, fiscalMonth]) => {
+    (Object.entries(fiscalData.monthly) as Array<[string, FiscalMonthMetrics]>).forEach(([monthKey, fiscalMonth]) => {
       if (!months[monthKey]) {
         months[monthKey] = {
           month: makeMonthLabelFromKey(monthKey),

@@ -1,4 +1,5 @@
-import {
+import type {
+  BreakdownSource,
   CashMovement,
   CashMovementType,
   Customer,
@@ -112,6 +113,12 @@ const parsePaymentBreakdown = (raw: unknown): PaymentBreakdown | undefined => {
   };
 };
 
+const parseBreakdownSource = (raw: unknown): BreakdownSource | string | undefined => {
+  const source = toOptionalString(raw);
+  if (!source) return undefined;
+  return source;
+};
+
 const parseFrequency = (value: unknown): Frequency => {
   const normalized = String(value ?? '').trim().toUpperCase();
   if (normalized === 'DIARIO' || normalized === 'DAILY') return 'DIARIO';
@@ -154,11 +161,13 @@ export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installm
     lastPaymentDate: toOptionalString(payload.lastPaymentDate),
     partialPaid: paidAmount,
     paidAmount,
+    paymentAmount: toNumber(payload.paymentAmount, 0) || undefined,
     lastPaidValue: toNumber(payload.lastPaidValue, 0) || undefined,
     originalValue: toNumber(payload.originalValue, 0) || undefined,
     expectedPrincipal: toOptionalPositiveNumber(payload.expectedPrincipal),
     expectedInterest: toOptionalPositiveNumber(payload.expectedInterest),
     paymentBreakdown,
+    breakdownSource: parseBreakdownSource(payload.breakdownSource),
     needsFiscalReview: payload.needsFiscalReview === true ? true : undefined,
   };
 };

@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "tsc --noEmit",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "diagnose:breakdown": "node --experimental-strip-types scripts/diagnose-breakdown-migration.ts",
+    "migrate:breakdown:dry": "node --experimental-strip-types scripts/migrate-breakdown-legacy.ts --dry-run",
+    "migrate:breakdown:apply": "node --experimental-strip-types scripts/migrate-breakdown-legacy.ts --apply"
   },
   "dependencies": {
     "@google/genai": "^1.42.0",

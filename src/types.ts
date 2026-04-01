@@ -89,11 +89,13 @@ export interface Installment {
   lastPaymentDate?: string;
   partialPaid?: number;
   paidAmount?: number;
+  paymentAmount?: number;
   lastPaidValue?: number;
   originalValue?: number;
   expectedPrincipal?: number;
   expectedInterest?: number;
   paymentBreakdown?: PaymentBreakdown;
+  breakdownSource?: BreakdownSource | string;
   needsFiscalReview?: boolean;
 }
 
@@ -105,6 +107,11 @@ export interface PaymentBreakdown {
   discountApplied: number;
   totalPaid: number;
 }
+
+export type BreakdownSource =
+  | 'migrated_simple_ratio'
+  | 'migrated_price_schedule'
+  | 'estimated_price_fallback';
 
 export interface Loan {
   id: string;
