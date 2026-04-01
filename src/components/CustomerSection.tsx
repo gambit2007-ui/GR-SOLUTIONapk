@@ -211,11 +211,13 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         const previewDataUrl = await buildPreviewDataUrl(file);
         setFormData((prev) => ({ ...prev, photoUrl: downloadUrl, avatar: previewDataUrl || downloadUrl } as Partial<Customer>));
       } else {
+        const previewDataUrl = file.type.startsWith('image/') ? await buildPreviewDataUrl(file) : undefined;
         const newDoc: CustomerDocument & { id?: string; url?: string; uploadedAt?: string } = {
           id: Math.random().toString(36).substr(2, 9),
           name: file.name,
           url: downloadUrl,
           type: file.type || 'application/octet-stream',
+          data: previewDataUrl,
           uploadedAt: new Date().toISOString(),
         };
         setFormData(prev => ({
@@ -400,16 +402,16 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-4 min-w-0">
-                  <div className="w-16 h-16 bg-zinc-900 rounded-2xl border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
-                    {(customer.photoUrl || customer.avatar) ? (
+                    <div className="w-16 h-16 bg-zinc-900 rounded-2xl border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                    {(customer.avatar || customer.photoUrl) ? (
                       <img
-                        src={(customer.photoUrl || customer.avatar) as string}
+                        src={(customer.avatar || customer.photoUrl) as string}
                         alt={customer.name}
                         className="w-full h-full object-cover"
                         onError={(event) =>
                           handleImageLoadError(
                             event,
-                            customer.avatar && customer.avatar !== customer.photoUrl ? customer.avatar : undefined,
+                            customer.photoUrl && customer.photoUrl !== customer.avatar ? customer.photoUrl : undefined,
                           )
                         }
                       />
@@ -456,16 +458,16 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 <div className="flex flex-col items-center gap-4">
                   <div className="relative group">
                     <div className="w-32 h-32 bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-800 flex items-center justify-center overflow-hidden group-hover:border-[#BF953F] transition-all">
-                      {(formData as any).photoUrl || (formData as any).avatar ? (
+                      {(formData as any).avatar || (formData as any).photoUrl ? (
                         <img
-                          src={((formData as any).photoUrl || (formData as any).avatar) as string}
+                          src={((formData as any).avatar || (formData as any).photoUrl) as string}
                           alt="Pre-visualizacao"
                           className="w-full h-full object-cover"
                           onError={(event) =>
                             handleImageLoadError(
                               event,
-                              (formData as any).avatar && (formData as any).avatar !== (formData as any).photoUrl
-                                ? (formData as any).avatar
+                              (formData as any).photoUrl && (formData as any).photoUrl !== (formData as any).avatar
+                                ? (formData as any).photoUrl
                                 : undefined,
                             )
                           }
@@ -486,7 +488,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                         e.currentTarget.value = '';
                       }}
                     />
-                    {((formData as any).photoUrl || (formData as any).avatar) && (
+                    {((formData as any).avatar || (formData as any).photoUrl) && (
                       <button 
                         type="button"
                         onClick={() => setFormData({ ...formData, photoUrl: undefined, avatar: undefined } as any)}
@@ -617,16 +619,16 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             
             <div className="flex flex-col md:flex-row gap-8 mb-12">
               <div className="w-32 h-32 bg-zinc-900 rounded-[2rem] border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
-                {((viewingDetails as any).photoUrl || (viewingDetails as any).avatar) ? (
+                {((viewingDetails as any).avatar || (viewingDetails as any).photoUrl) ? (
                   <img
-                    src={((viewingDetails as any).photoUrl || (viewingDetails as any).avatar) as string}
+                    src={((viewingDetails as any).avatar || (viewingDetails as any).photoUrl) as string}
                     alt={viewingDetails.name}
                     className="w-full h-full object-cover"
                     onError={(event) =>
                       handleImageLoadError(
                         event,
-                        (viewingDetails as any).avatar && (viewingDetails as any).avatar !== (viewingDetails as any).photoUrl
-                          ? (viewingDetails as any).avatar
+                        (viewingDetails as any).photoUrl && (viewingDetails as any).photoUrl !== (viewingDetails as any).avatar
+                          ? (viewingDetails as any).photoUrl
                           : undefined,
                       )
                     }
@@ -751,7 +753,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                     {((viewingDetails.documents || []) as any[]).map((doc: any) => (
                       <a 
                         key={doc.id || doc.name} 
-                        href={doc.url || doc.data || '#'} 
+                        href={doc.data || doc.url || '#'} 
                         target="_blank" 
                         rel="noopener noreferrer"
                         className="flex items-center gap-3 p-3 bg-zinc-900/30 border border-zinc-800 rounded-xl hover:border-[#BF953F]/50 transition-all"
