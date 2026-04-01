@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Plus, Search, User, Phone, Mail, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
+import { Plus, Search, User, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle } from 'lucide-react';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { Customer, Loan, CustomerDocument } from '../types';
 import {
@@ -227,65 +227,58 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         {filteredCustomers.map(customer => {
           const customerLoans = loans.filter(l => l.customerId === customer.id);
           const hasOverdue = isCustomerOverdue(customer.id);
+          const hasActiveLoan = customerLoans.some((loan) => effectiveLoanStatus(loan) === 'ACTIVE');
+          const statusLabel = hasOverdue ? 'Atrasado' : hasActiveLoan ? 'Ativo' : 'Em dia';
+          const statusClasses = hasOverdue
+            ? 'bg-red-500/10 text-red-500 border-red-500/30'
+            : hasActiveLoan
+              ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
+              : 'bg-zinc-800 text-zinc-400 border-zinc-700';
+
           return (
             <div 
               key={customer.id} 
-              className={`bg-[#050505] border p-6 rounded-3xl group transition-all ${
-                hasOverdue ? 'border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.05)]' : 'border-zinc-900 hover:border-[#BF953F]/30'
+              role="button"
+              tabIndex={0}
+              onClick={() => setViewingDetails(customer)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault();
+                  setViewingDetails(customer);
+                }
+              }}
+              className={`bg-[#050505] border p-5 rounded-3xl transition-all cursor-pointer ${
+                hasOverdue
+                  ? 'border-red-500/50 shadow-[0_0_20px_rgba(239,68,68,0.05)]'
+                  : 'border-zinc-900 hover:border-[#BF953F]/30'
               }`}
             >
-              <div className="flex justify-between items-start mb-6">
-                <div className="flex items-center gap-4">
-                  <div className="w-16 h-16 bg-zinc-900 rounded-2xl border border-zinc-800 flex items-center justify-center overflow-hidden">
-                    {((customer as any).photoUrl || customer.avatar) ? (
-                      <img src={((customer as any).photoUrl || customer.avatar) as string} alt={customer.name} className="w-full h-full object-cover" />
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-4 min-w-0">
+                  <div className="w-16 h-16 bg-zinc-900 rounded-2xl border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
+                    {(customer.photoUrl || customer.avatar) ? (
+                      <img src={(customer.photoUrl || customer.avatar) as string} alt={customer.name} className="w-full h-full object-cover" />
                     ) : (
-                      <User size={32} className="text-[#BF953F]" />
+                      <User size={30} className="text-[#BF953F]" />
                     )}
                   </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="text-sm font-black text-white uppercase break-words">{customer.name}</h3>
-                      {hasOverdue && (
-                        <span className="text-[7px] bg-red-500 text-white px-1.5 py-0.5 rounded font-black uppercase">Atrasado</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2 mt-1">
-                      <Star size={10} className="text-[#BF953F]" />
-                      <span className="text-[10px] font-black gold-text">{calculateScore(customer.id)} PTS</span>
-                    </div>
+                  <div className="min-w-0">
+                    <h3 className="text-sm font-black text-white uppercase truncate">{customer.name}</h3>
+                    <span className={`inline-flex mt-2 text-[8px] font-black uppercase px-2.5 py-1 rounded-full border ${statusClasses}`}>
+                      {statusLabel}
+                    </span>
                   </div>
                 </div>
-                <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-all">
-                  <button onClick={() => { setEditingCustomer(customer); setFormData(customer); setIsModalOpen(true); }} className="p-2 hover:bg-zinc-900 rounded-xl text-zinc-400 hover:text-white">
-                    <Edit2 size={16} />
-                  </button>
-                  <button onClick={() => setDeleteConfirmation(customer.id)} className="p-2 hover:bg-red-500/10 rounded-xl text-zinc-400 hover:text-red-500">
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-2 mb-6">
-                <div className="flex items-center gap-2 text-zinc-500">
-                  <Phone size={14} /> <span className="text-[10px] tracking-widest break-all">{customer.phone || 'Nao informado'}</span>
-                </div>
-                <div className="flex items-center gap-2 text-zinc-500">
-                  <Mail size={14} /> <span className="text-[10px] tracking-widest break-all">{customer.email || 'Nao informado'}</span>
-                </div>
-                {((customer as any).observations || customer.notes) && (
-                  <div className="mt-4 p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50">
-                    <p className="text-[8px] text-zinc-500 uppercase tracking-widest mb-1">Observacoes</p>
-                    <p className="text-[10px] text-zinc-400 line-clamp-2 italic">{(customer as any).observations || customer.notes}</p>
-                  </div>
-                )}
-              </div>
-              <div className="pt-4 border-t border-zinc-900 flex justify-between items-center">
-                <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">{customerLoans.length} CONTRATOS</span>
+
                 <button 
-                  onClick={() => setViewingDetails(customer)}
-                  className="text-[9px] font-black text-[#BF953F] uppercase tracking-widest hover:underline"
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setViewingDetails(customer);
+                  }}
+                  className="px-3 py-2 text-[9px] font-black text-[#BF953F] uppercase tracking-widest border border-[#BF953F]/30 rounded-xl hover:bg-[#BF953F]/10 transition-colors shrink-0"
                 >
-                  VER DETALHES
+                  Detalhes
                 </button>
               </div>
             </div>
@@ -482,6 +475,16 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                       title="Editar Cadastro"
                     >
                       <Edit2 size={16} />
+                    </button>
+                    <button
+                      onClick={() => {
+                        setDeleteConfirmation(viewingDetails.id);
+                        setViewingDetails(null);
+                      }}
+                      className="p-2 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 hover:bg-red-500/20 transition-all"
+                      title="Excluir Cliente"
+                    >
+                      <Trash2 size={16} />
                     </button>
                   </div>
                 </div>
