@@ -33,6 +33,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
   const MAX_INLINE_FALLBACK_BYTES = 700 * 1024;
   const ALLOWED_DOCUMENT_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
+  const DEFAULT_AVATAR_DATA_URL =
+    "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='24' fill='%23121212'/%3E%3Ccircle cx='64' cy='48' r='19' fill='%23BF953F' fill-opacity='0.85'/%3E%3Cpath d='M28 104c5-16 19-26 36-26s31 10 36 26' fill='none' stroke='%23BF953F' stroke-opacity='0.85' stroke-width='10' stroke-linecap='round'/%3E%3C/svg%3E";
 
   const getFileExtension = (fileName: string) => {
     const dotIndex = fileName.lastIndexOf('.');
@@ -55,6 +57,59 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       reader.onerror = () => reject(new Error('Erro ao ler arquivo no fallback'));
       reader.readAsDataURL(file);
     });
+
+  const buildPreviewDataUrl = async (file: File): Promise<string> => {
+    if (!file.type.startsWith('image/')) {
+      return readFileAsDataUrl(file);
+    }
+
+    const sourceDataUrl = await readFileAsDataUrl(file);
+
+    return new Promise<string>((resolve) => {
+      const image = new Image();
+      image.onload = () => {
+        const maxSide = 320;
+        const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+        const width = Math.max(1, Math.round(image.width * scale));
+        const height = Math.max(1, Math.round(image.height * scale));
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext('2d');
+        if (!context) {
+          resolve(sourceDataUrl);
+          return;
+        }
+
+        context.drawImage(image, 0, 0, width, height);
+        try {
+          resolve(canvas.toDataURL('image/jpeg', 0.78));
+        } catch {
+          resolve(sourceDataUrl);
+        }
+      };
+
+      image.onerror = () => resolve(sourceDataUrl);
+      image.src = sourceDataUrl;
+    });
+  };
+
+  const handleImageLoadError = (
+    event: React.SyntheticEvent<HTMLImageElement>,
+    fallbackSrc?: string,
+  ) => {
+    const target = event.currentTarget;
+    if (fallbackSrc && target.dataset.fallbackApplied !== '1') {
+      target.dataset.fallbackApplied = '1';
+      target.src = fallbackSrc;
+      return;
+    }
+
+    if (target.src !== DEFAULT_AVATAR_DATA_URL) {
+      target.src = DEFAULT_AVATAR_DATA_URL;
+    }
+  };
 
   const extractStorageErrorCode = (error: unknown): string => {
     if (error instanceof FirebaseError) {
@@ -153,7 +208,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       const downloadUrl = await uploadWithBucketFallbacks(storagePath, file);
 
       if (type === 'PHOTO') {
-        setFormData((prev) => ({ ...prev, photoUrl: downloadUrl, avatar: downloadUrl } as Partial<Customer>));
+        const previewDataUrl = await buildPreviewDataUrl(file);
+        setFormData((prev) => ({ ...prev, photoUrl: downloadUrl, avatar: previewDataUrl || downloadUrl } as Partial<Customer>));
       } else {
         const newDoc: CustomerDocument & { id?: string; url?: string; uploadedAt?: string } = {
           id: Math.random().toString(36).substr(2, 9),
@@ -346,7 +402,17 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 <div className="flex items-center gap-4 min-w-0">
                   <div className="w-16 h-16 bg-zinc-900 rounded-2xl border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
                     {(customer.photoUrl || customer.avatar) ? (
-                      <img src={(customer.photoUrl || customer.avatar) as string} alt={customer.name} className="w-full h-full object-cover" />
+                      <img
+                        src={(customer.photoUrl || customer.avatar) as string}
+                        alt={customer.name}
+                        className="w-full h-full object-cover"
+                        onError={(event) =>
+                          handleImageLoadError(
+                            event,
+                            customer.avatar && customer.avatar !== customer.photoUrl ? customer.avatar : undefined,
+                          )
+                        }
+                      />
                     ) : (
                       <User size={30} className="text-[#BF953F]" />
                     )}
@@ -391,7 +457,19 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                   <div className="relative group">
                     <div className="w-32 h-32 bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-800 flex items-center justify-center overflow-hidden group-hover:border-[#BF953F] transition-all">
                       {(formData as any).photoUrl || (formData as any).avatar ? (
-                        <img src={((formData as any).photoUrl || (formData as any).avatar) as string} alt="Pre-visualizacao" className="w-full h-full object-cover" />
+                        <img
+                          src={((formData as any).photoUrl || (formData as any).avatar) as string}
+                          alt="Pre-visualizacao"
+                          className="w-full h-full object-cover"
+                          onError={(event) =>
+                            handleImageLoadError(
+                              event,
+                              (formData as any).avatar && (formData as any).avatar !== (formData as any).photoUrl
+                                ? (formData as any).avatar
+                                : undefined,
+                            )
+                          }
+                        />
                       ) : (
                         <Camera size={32} className="text-zinc-700 group-hover:text-[#BF953F]" />
                       )}
@@ -540,7 +618,19 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             <div className="flex flex-col md:flex-row gap-8 mb-12">
               <div className="w-32 h-32 bg-zinc-900 rounded-[2rem] border border-zinc-800 flex items-center justify-center overflow-hidden shrink-0">
                 {((viewingDetails as any).photoUrl || (viewingDetails as any).avatar) ? (
-                  <img src={((viewingDetails as any).photoUrl || (viewingDetails as any).avatar) as string} alt={viewingDetails.name} className="w-full h-full object-cover" />
+                  <img
+                    src={((viewingDetails as any).photoUrl || (viewingDetails as any).avatar) as string}
+                    alt={viewingDetails.name}
+                    className="w-full h-full object-cover"
+                    onError={(event) =>
+                      handleImageLoadError(
+                        event,
+                        (viewingDetails as any).avatar && (viewingDetails as any).avatar !== (viewingDetails as any).photoUrl
+                          ? (viewingDetails as any).avatar
+                          : undefined,
+                      )
+                    }
+                  />
                 ) : (
                   <User size={48} className="text-[#BF953F]" />
                 )}
