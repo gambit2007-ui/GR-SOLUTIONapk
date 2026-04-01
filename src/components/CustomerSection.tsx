@@ -1,11 +1,13 @@
 ﻿import React, { useState } from 'react';
 import { Plus, Search, User, Phone, Mail, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle, CheckCircle2, Clock } from 'lucide-react';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { Customer, Loan, CustomerDocument } from '../types';
 import {
   effectiveLoanStatus,
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
+import { storage } from '../firebase';
 
 interface CustomerSectionProps {
   customers: Customer[];
@@ -26,13 +28,23 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const [viewingDetails, setViewingDetails] = useState<Customer | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
 
-  const readFileAsDataUrl = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(new Error('Erro ao ler arquivo'));
-      reader.readAsDataURL(file);
-    });
+  const MAX_PHOTO_SIZE_BYTES = 5 * 1024 * 1024;
+  const MAX_DOCUMENT_SIZE_BYTES = 10 * 1024 * 1024;
+  const ALLOWED_DOCUMENT_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
+
+  const getFileExtension = (fileName: string) => {
+    const dotIndex = fileName.lastIndexOf('.');
+    if (dotIndex < 0) return '';
+    return fileName.slice(dotIndex).toLowerCase();
+  };
+
+  const buildStorageFileName = (fileName: string) => {
+    const safeBaseName = String(fileName || 'arquivo')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w.-]/g, '_');
+    return `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeBaseName}`;
+  };
 
   const calculateScore = (customerId: string) => {
     const customerLoans = loans.filter(l => l.customerId === customerId);
@@ -62,16 +74,39 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const handleFileUpload = async (file: File, type: 'PHOTO' | 'DOCUMENT') => {
     setIsUploading(true);
     try {
-      const dataUrl = await readFileAsDataUrl(file);
+      const maxSize = type === 'PHOTO' ? MAX_PHOTO_SIZE_BYTES : MAX_DOCUMENT_SIZE_BYTES;
+      if (file.size > maxSize) {
+        const maxSizeMb = type === 'PHOTO' ? 5 : 10;
+        alert(`Arquivo muito grande. Limite de ${maxSizeMb}MB.`);
+        return;
+      }
+
+      if (type === 'DOCUMENT') {
+        const extension = getFileExtension(file.name);
+        if (!ALLOWED_DOCUMENT_EXTENSIONS.includes(extension)) {
+          alert('Formato invalido. Envie PDF, JPG ou PNG.');
+          return;
+        }
+      }
+
+      const customerToken = editingCustomer?.id || String(formData.cpf || 'novo').replace(/\W/g, '') || 'novo';
+      const folder = type === 'PHOTO' ? 'photos' : 'documents';
+      const fileName = buildStorageFileName(file.name);
+      const storageRef = ref(storage, `clientes/${customerToken}/${folder}/${fileName}`);
+
+      await uploadBytes(storageRef, file, {
+        contentType: file.type || undefined,
+      });
+      const downloadUrl = await getDownloadURL(storageRef);
+
       if (type === 'PHOTO') {
-        setFormData(prev => ({ ...prev, photoUrl: dataUrl, avatar: dataUrl } as Partial<Customer>));
+        setFormData((prev) => ({ ...prev, photoUrl: downloadUrl, avatar: downloadUrl } as Partial<Customer>));
       } else {
         const newDoc: CustomerDocument & { id?: string; url?: string; uploadedAt?: string } = {
           id: Math.random().toString(36).substr(2, 9),
           name: file.name,
-          url: dataUrl,
-          type: file.type,
-          data: dataUrl,
+          url: downloadUrl,
+          type: file.type || 'application/octet-stream',
           uploadedAt: new Date().toISOString(),
         };
         setFormData(prev => ({
@@ -81,6 +116,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       }
     } catch (error) {
       console.error('Falha no upload', error);
+      alert('Falha ao enviar arquivo. Verifique permissao do Storage e tente novamente.');
     } finally {
       setIsUploading(false);
     }
@@ -282,7 +318,13 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                       type="file" 
                       accept="image/*" 
                       className="absolute inset-0 opacity-0 cursor-pointer" 
-                      onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'PHOTO')}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          void handleFileUpload(file, 'PHOTO');
+                        }
+                        e.currentTarget.value = '';
+                      }}
                     />
                     {((formData as any).photoUrl || (formData as any).avatar) && (
                       <button 
@@ -381,8 +423,15 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                       <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest group-hover:text-[#BF953F]">Anexar Arquivo</span>
                       <input 
                         type="file" 
+                        accept=".pdf,.jpg,.jpeg,.png,image/png,image/jpeg,application/pdf"
                         className="hidden" 
-                        onChange={e => e.target.files?.[0] && handleFileUpload(e.target.files[0], 'DOCUMENT')}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            void handleFileUpload(file, 'DOCUMENT');
+                          }
+                          e.currentTarget.value = '';
+                        }}
                       />
                     </label>
                   </div>

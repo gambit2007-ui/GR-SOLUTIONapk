@@ -36,13 +36,6 @@ interface ReportsProps {
   showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-interface RevenueMonthItem {
-  monthIndex: number;
-  label: string;
-  value: number;
-  isCurrentMonth: boolean;
-}
-
 interface FiscalMonthMetrics {
   principalRecovered: number;
   interestReceived: number;
@@ -57,8 +50,6 @@ const Reports: React.FC<ReportsProps> = ({
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
-  const [expandedRevenueMonth, setExpandedRevenueMonth] = useState<number | null>(() => new Date().getMonth());
-  const [isRevenueYearExpanded, setIsRevenueYearExpanded] = useState(true);
   const [formData, setFormData] = useState({
     type: 'ENTRADA' as MovementType,
     amount: '',
@@ -66,23 +57,12 @@ const Reports: React.FC<ReportsProps> = ({
   });
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
-  const monthNames = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 
   const makeMonthKey = (dateValue: string) => {
     const date = new Date(dateValue);
     if (Number.isNaN(date.getTime())) return null;
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  };
-
-  const makeMonthLabelFromKey = (monthKey: string) => {
-    const [yearRaw, monthRaw] = monthKey.split('-');
-    const year = Number(yearRaw);
-    const month = Number(monthRaw);
-    if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) {
-      return monthKey;
-    }
-    return `${monthNames[month - 1]}/${String(year).slice(2)}`;
   };
 
   const getMonthShortLabel = (monthIndex: number, year: number) =>
@@ -176,27 +156,17 @@ const Reports: React.FC<ReportsProps> = ({
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonthIndex = now.getMonth();
+  const currentMonthLabel = getMonthShortLabel(currentMonthIndex, currentYear);
 
-  const revenueMonths = useMemo<RevenueMonthItem[]>(() => {
-    const elapsedMonthsCount = currentMonthIndex + 1;
-    return Array.from({ length: elapsedMonthsCount }, (_, monthIndex) => {
-      const monthKey = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}`;
-      const fiscalMonth = fiscalData.monthly[monthKey];
-      const value = roundMoney(Number(fiscalMonth?.taxableRevenue || 0));
-
-      return {
-        monthIndex,
-        label: getMonthShortLabel(monthIndex, currentYear),
-        value,
-        isCurrentMonth: monthIndex === currentMonthIndex,
-      };
-    });
-  }, [currentMonthIndex, currentYear, fiscalData.monthly]);
-
-  const faturamentoAno = useMemo(
-    () => roundMoney(revenueMonths.reduce((sum, month) => sum + month.value, 0)),
-    [revenueMonths],
-  );
+  const faturamentoAno = useMemo(() => {
+    return roundMoney(
+      (Object.entries(fiscalData.monthly) as Array<[string, FiscalMonthMetrics]>).reduce((sum, [monthKey, metrics]) => {
+        const [yearRaw] = monthKey.split('-');
+        if (Number(yearRaw) !== currentYear) return sum;
+        return sum + Number(metrics.taxableRevenue || 0);
+      }, 0),
+    );
+  }, [currentYear, fiscalData.monthly]);
 
   const totalAReceber = loans.reduce((acc, loan) => {
     const unpaid = loan.installments
@@ -241,84 +211,53 @@ const Reports: React.FC<ReportsProps> = ({
       entradas: number, 
       saidas: number
     } } = {};
-    const legacyProfitByMonth: Record<string, number> = {};
 
-    // Processar Movimentacoes
-    cashMovements.forEach(m => {
-      const date = new Date(m.date);
-      if (Number.isNaN(date.getTime())) return;
+    for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {
+      const key = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}`;
+      months[key] = {
+        month: getMonthShortLabel(monthIndex, currentYear),
+        lucro: roundMoney(Number(fiscalData.monthly[key]?.taxableRevenue || 0)),
+        recebido: 0,
+        emprestado: 0,
+        entradas: 0,
+        saidas: 0,
+      };
+    }
+
+    cashMovements.forEach((movement) => {
+      const date = new Date(movement.date);
+      if (Number.isNaN(date.getTime()) || date.getFullYear() !== currentYear) return;
+
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      const label = `${monthNames[date.getMonth()]}/${String(date.getFullYear()).slice(2)}`;
+      if (!months[key]) return;
 
-      if (!months[key]) {
-        months[key] = { month: label, lucro: 0, recebido: 0, emprestado: 0, entradas: 0, saidas: 0 };
-      }
-
-      const movementType = String(m.type || '').toUpperCase();
+      const movementType = String(movement.type || '').toUpperCase();
+      const amount = Number(movement.amount || 0);
       const isEntrada = ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(movementType);
       if (isEntrada) {
-        months[key].entradas += Number(m.amount || 0);
+        months[key].entradas = roundMoney(months[key].entradas + amount);
       } else {
-        months[key].saidas += Number(m.amount || 0);
+        months[key].saidas = roundMoney(months[key].saidas + amount);
       }
 
       if (movementType === 'PAGAMENTO' || movementType === 'ESTORNO') {
-        const isEstorno = movementType === 'ESTORNO';
-        months[key].recebido += isEstorno ? -Number(m.amount || 0) : Number(m.amount || 0);
-        
-        // Calcular Lucro (Juros) proporcional
-        if (m.loanId) {
-          const loan = loans.find(l => l.id === m.loanId);
-          if (loan) {
-            const totalExpected = getLoanExpectedTotal(loan);
-            const totalInterest = Math.max(totalExpected - loan.amount, 0);
-            const profitPortion = totalExpected > 0 ? (Number(m.amount || 0) / totalExpected) * totalInterest : 0;
-            const signedProfit = isEstorno ? -profitPortion : profitPortion;
-            legacyProfitByMonth[key] = roundMoney((legacyProfitByMonth[key] || 0) + signedProfit);
-          }
-        }
+        const signedAmount = movementType === 'ESTORNO' ? -amount : amount;
+        months[key].recebido = roundMoney(months[key].recebido + signedAmount);
       }
 
-      if (movementType === 'RETIRADA' && String(m.description || '').toUpperCase().includes('EMPRESTIMO')) {
-        months[key].emprestado += Number(m.amount || 0);
+      if (movementType === 'RETIRADA' && String(movement.description || '').toUpperCase().includes('EMPRESTIMO')) {
+        months[key].emprestado = roundMoney(months[key].emprestado + amount);
       }
-    });
-
-    Object.keys(months).forEach((monthKey) => {
-      months[monthKey].lucro = roundMoney(legacyProfitByMonth[monthKey] || 0);
-    });
-
-    (Object.entries(fiscalData.monthly) as Array<[string, FiscalMonthMetrics]>).forEach(([monthKey, fiscalMonth]) => {
-      if (!months[monthKey]) {
-        months[monthKey] = {
-          month: makeMonthLabelFromKey(monthKey),
-          lucro: 0,
-          recebido: 0,
-          emprestado: 0,
-          entradas: 0,
-          saidas: 0,
-        };
-      }
-
-      const monthReceived = Math.max(Number(months[monthKey].recebido || 0), 0);
-      const monthLegacyProfit = Number(legacyProfitByMonth[monthKey] || 0);
-      const coveredPaid = Math.max(Number(fiscalMonth.totalPaid || 0), 0);
-      const uncoveredReceived = Math.max(monthReceived - coveredPaid, 0);
-      const uncoveredRatio = monthReceived > 0 ? uncoveredReceived / monthReceived : 0;
-      const fallbackProfitForUncovered = roundMoney(monthLegacyProfit * uncoveredRatio);
-
-      months[monthKey].lucro = roundMoney(Number(fiscalMonth.taxableRevenue || 0) + fallbackProfitForUncovered);
     });
 
     return Object.keys(months)
       .sort()
-      .reverse() // Mais recentes primeiro para a lista
-      .map(key => months[key]);
+      .map((key) => months[key]);
   };
 
   const monthlyData = getMonthlyData();
-  const chartData = [...monthlyData].reverse().slice(-6); // Ultimos 6 meses para o grafico
-  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+  const chartData = monthlyData;
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(currentMonthLabel);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -375,6 +314,12 @@ const Reports: React.FC<ReportsProps> = ({
               <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Operacao Ativa</span>
             </div>
           </div>
+          <div className="mt-4 inline-flex items-center gap-3 px-4 py-2.5 bg-zinc-900/40 border border-zinc-800 rounded-2xl">
+            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Faturamento do Ano</span>
+            <span className="text-[11px] font-black text-[#BF953F]">
+              R$ {faturamentoAno.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
         </div>
         
         <div className="relative z-10 shrink-0 flex flex-col sm:flex-row gap-3">
@@ -417,7 +362,7 @@ const Reports: React.FC<ReportsProps> = ({
           <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-6">
             <div className="p-5 border-l-2 border-[#BF953F] bg-zinc-900/10 relative group cursor-help rounded-r-2xl">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Media Mensal de Lucro</p>
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Media Mensal de Lucro Real</p>
                 <Info size={10} className="text-zinc-700" />
               </div>
               <p className="text-xl font-black text-white">
@@ -435,7 +380,7 @@ const Reports: React.FC<ReportsProps> = ({
 
             <div className="p-5 border-l-2 border-emerald-500 bg-zinc-900/10 relative group cursor-help rounded-r-2xl">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Recorde de Faturamento</p>
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Recorde de Lucro Real</p>
                 <Info size={10} className="text-zinc-700" />
               </div>
               <p className="text-xl font-black text-white">
@@ -490,12 +435,12 @@ const Reports: React.FC<ReportsProps> = ({
                       </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Resultado Operacional</span>
-                      <span className={`text-xs font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
-                        R$ {data.lucro.toLocaleString('pt-BR')}
-                      </span>
+                    <div className="flex items-center gap-4">
+                      <div className="text-right">
+                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Lucro Real</span>
+                        <span className={`text-xs font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
+                          R$ {data.lucro.toLocaleString('pt-BR')}
+                        </span>
                     </div>
                     <ChevronDown size={16} className={`text-zinc-500 transition-transform ${expandedMonth === data.month ? 'rotate-180' : ''}`} />
                   </div>
@@ -524,6 +469,16 @@ const Reports: React.FC<ReportsProps> = ({
                           <span className="text-xs font-black text-zinc-300">R$ {data.emprestado.toLocaleString('pt-BR')}</span>
                         </div>
                       </div>
+                    </div>
+
+                    <div className="mt-6 p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
+                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Real do Mes</p>
+                      <p className={`text-2xl font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
+                        R$ {data.lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </p>
+                      <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
+                        Baseado em juros, multas e taxas
+                      </p>
                     </div>
                     
                     <div className="mt-8 h-[350px] w-full bg-[#000000]/40 p-6 rounded-[2rem] border border-zinc-900/50">
@@ -577,7 +532,7 @@ const Reports: React.FC<ReportsProps> = ({
                               style={{ fill: '#ef4444', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
-                          <Bar dataKey="lucro" name="Resultado Operacional" fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
+                          <Bar dataKey="lucro" name="Lucro Real" fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
                             <LabelList 
                               dataKey="lucro" 
                               position="top" 
@@ -594,86 +549,6 @@ const Reports: React.FC<ReportsProps> = ({
             ))}
           </div>
         </div>
-
-      {/* Faturamento */}
-      <div className="bg-[#050505] border border-zinc-900 rounded-[3rem] p-6 sm:p-8 md:p-10">
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h3 className="text-sm font-black gold-text uppercase tracking-[0.3em]">Faturamento</h3>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] mt-2">
-              Historico mensal com base em juros, multas e taxas
-            </p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)] gap-6 items-start">
-          <div className="space-y-3">
-            {revenueMonths.map((monthItem) => {
-              const isExpanded = expandedRevenueMonth === monthItem.monthIndex;
-              return (
-                <div key={monthItem.monthIndex} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#000000]/20">
-                  <button
-                    type="button"
-                    onClick={() => setExpandedRevenueMonth((prev) => (prev === monthItem.monthIndex ? null : monthItem.monthIndex))}
-                    className="w-full p-5 flex items-center justify-between hover:bg-zinc-900/30 transition-colors"
-                  >
-                    <div className="flex items-center gap-4">
-                      <span className={`text-xs font-black uppercase tracking-widest min-w-[72px] text-left ${monthItem.isCurrentMonth ? 'text-[#BF953F]' : 'text-white'}`}>
-                        {monthItem.label}
-                      </span>
-                      <div className="hidden sm:block text-left">
-                        <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Faturamento do Mes</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <span className={`text-xs font-black ${monthItem.value > 0 ? 'text-emerald-500' : 'text-zinc-400'}`}>
-                        R$ {monthItem.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                      <ChevronDown size={16} className={`text-zinc-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
-                    </div>
-                  </button>
-
-                  {isExpanded && (
-                    <div className="p-5 border-t border-zinc-900 bg-zinc-950/30 animate-in slide-in-from-top duration-200">
-                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Faturamento do Mes</p>
-                      <p className={`text-2xl font-black ${monthItem.value > 0 ? 'text-emerald-500' : 'text-zinc-300'}`}>
-                        R$ {monthItem.value.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </p>
-                      <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
-                        Baseado em juros, multas e taxas
-                      </p>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="bg-[#000000]/40 border border-zinc-900 rounded-3xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setIsRevenueYearExpanded((prev) => !prev)}
-              className="w-full p-6 sm:p-7 flex items-center justify-between hover:bg-zinc-900/30 transition-colors text-left"
-            >
-              <div>
-                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Faturamento do Ano</p>
-                <p className="text-3xl sm:text-4xl font-black text-[#BF953F] leading-tight">
-                  R$ {faturamentoAno.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-              <ChevronDown size={18} className={`text-zinc-500 transition-transform ${isRevenueYearExpanded ? 'rotate-180' : ''}`} />
-            </button>
-            {isRevenueYearExpanded && (
-              <div className="px-6 sm:px-7 pb-6 sm:pb-7 border-t border-zinc-900 bg-zinc-950/30 animate-in slide-in-from-top duration-200">
-                <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-4">Ano {currentYear}</p>
-                <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2">
-                  Baseado em juros, multas e taxas
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/80 backdrop-blur-sm overflow-y-auto">
