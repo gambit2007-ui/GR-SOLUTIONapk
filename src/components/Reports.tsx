@@ -49,6 +49,7 @@ const Reports: React.FC<ReportsProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
   const [expandedRevenueMonth, setExpandedRevenueMonth] = useState<number | null>(() => new Date().getMonth());
+  const [isRevenueYearExpanded, setIsRevenueYearExpanded] = useState(true);
   const [formData, setFormData] = useState({
     type: 'ENTRADA' as MovementType,
     amount: '',
@@ -175,7 +176,8 @@ const Reports: React.FC<ReportsProps> = ({
   const currentMonthIndex = now.getMonth();
 
   const revenueMonths = useMemo<RevenueMonthItem[]>(() => {
-    return Array.from({ length: 12 }, (_, monthIndex) => {
+    const elapsedMonthsCount = currentMonthIndex + 1;
+    return Array.from({ length: elapsedMonthsCount }, (_, monthIndex) => {
       const monthKey = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}`;
       const fiscalMonth = fiscalData.monthly[monthKey];
       const value = roundMoney(Number(fiscalMonth?.taxableRevenue || 0));
@@ -645,12 +647,28 @@ const Reports: React.FC<ReportsProps> = ({
             })}
           </div>
 
-          <div className="bg-[#000000]/40 border border-zinc-900 rounded-3xl p-6 sm:p-7">
-            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-3">Faturamento do Ano</p>
-            <p className="text-3xl sm:text-4xl font-black text-[#BF953F] leading-tight">
-              R$ {faturamentoAno.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-            </p>
-            <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-4">Ano {currentYear}</p>
+          <div className="bg-[#000000]/40 border border-zinc-900 rounded-3xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setIsRevenueYearExpanded((prev) => !prev)}
+              className="w-full p-6 sm:p-7 flex items-center justify-between hover:bg-zinc-900/30 transition-colors text-left"
+            >
+              <div>
+                <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Faturamento do Ano</p>
+                <p className="text-3xl sm:text-4xl font-black text-[#BF953F] leading-tight">
+                  R$ {faturamentoAno.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <ChevronDown size={18} className={`text-zinc-500 transition-transform ${isRevenueYearExpanded ? 'rotate-180' : ''}`} />
+            </button>
+            {isRevenueYearExpanded && (
+              <div className="px-6 sm:px-7 pb-6 sm:pb-7 border-t border-zinc-900 bg-zinc-950/30 animate-in slide-in-from-top duration-200">
+                <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-4">Ano {currentYear}</p>
+                <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-2">
+                  Baseado em juros, multas e taxas
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
