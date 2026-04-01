@@ -27,6 +27,11 @@ export interface CashMovementPayload {
 
 const caixaRef = doc(db, 'settings', 'caixa');
 
+export const readCashBalanceInTransaction = async (tx: Transaction): Promise<number> => {
+  const caixaSnap = await tx.get(caixaRef);
+  return caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
+};
+
 const normalizeAmount = (value: number): number => {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -54,14 +59,16 @@ const buildMovementActorPayload = (actor?: MovementActor) => {
 export const appendCashMovementInTransaction = async (
   tx: Transaction,
   payload: CashMovementPayload,
+  options?: { currentCashBalance?: number },
 ) => {
   const type = parseMovementType(payload.type);
   const amount = normalizeAmount(payload.amount);
   const description = normalizeDescription(payload.description);
   const movementRef = doc(collection(db, 'cashMovement'));
-
-  const caixaSnap = await tx.get(caixaRef);
-  const saldoAtual = caixaSnap.exists() ? Number(caixaSnap.data().value) || 0 : 0;
+  const providedCashBalance = Number(options?.currentCashBalance);
+  const saldoAtual = Number.isFinite(providedCashBalance)
+    ? providedCashBalance
+    : await readCashBalanceInTransaction(tx);
 
   const movement: CashMovement = {
     id: movementRef.id,
@@ -98,4 +105,3 @@ export const recalculateCashBalance = async (): Promise<number> => {
   await setDoc(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
   return novoSaldo;
 };
-

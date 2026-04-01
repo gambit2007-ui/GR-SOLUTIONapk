@@ -8,7 +8,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Installment, Loan, LoanDraft, LoanType, MovementType } from '../types';
-import { appendCashMovementInTransaction, MovementActor } from './cashService';
+import { appendCashMovementInTransaction, MovementActor, readCashBalanceInTransaction } from './cashService';
 import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
 import { parseMovementType } from '../utils/domainParsers';
 
@@ -115,6 +115,7 @@ export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): P
 
   const createdLoanId = await runTransaction(db, async (tx) => {
     const loanRef = doc(collection(db, 'loans'));
+    const saldoAtual = await readCashBalanceInTransaction(tx);
 
     await appendCashMovementInTransaction(tx, {
       type: 'RETIRADA',
@@ -122,7 +123,7 @@ export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): P
       description: `EMPRESTIMO: ${normalizedLoanDraft.customerName}`,
       loanId: loanRef.id,
       actor,
-    });
+    }, { currentCashBalance: saldoAtual });
 
     tx.set(loanRef, {
       ...safeLoanData,
@@ -150,6 +151,7 @@ export const updateLoanAndAddMovement = async (
     const loanRef = doc(db, 'loans', loanId);
     const loanSnap = await tx.get(loanRef);
     if (!loanSnap.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
+    const saldoAtual = await readCashBalanceInTransaction(tx);
 
     await appendCashMovementInTransaction(tx, {
       type: movementType,
@@ -157,7 +159,7 @@ export const updateLoanAndAddMovement = async (
       description: movement.description,
       loanId,
       actor: movement.actor,
-    });
+    }, { currentCashBalance: saldoAtual });
 
     tx.update(loanRef, sanitizeFirestorePayload(payload));
   });
