@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Uploads de fotos e documentos do cadastro de clientes.
+    match /clientes/{customerId}/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Bloqueia escrita fora da pasta de clientes por padrao.
+    match /{allPaths=**} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+  }
+}

@@ -20,6 +20,7 @@ export const db = getFirestore(app);
 export const auth = getAuth(app);
 export const storage = getStorage(app);
 export const storageAppspotFallback = getStorage(app, `gs://${firebaseConfig.projectId}.appspot.com`);
+export const storageFirebasestorageFallback = getStorage(app, `gs://${firebaseConfig.projectId}.firebasestorage.app`);
 
 // Provider
 const googleProvider = new GoogleAuthProvider();

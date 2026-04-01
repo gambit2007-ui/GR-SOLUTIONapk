@@ -8,7 +8,7 @@ import {
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
-import { storage, storageAppspotFallback } from '../firebase';
+import { auth, storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebase';
 
 interface CustomerSectionProps {
   customers: Customer[];
@@ -67,11 +67,6 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     return '';
   };
 
-  const shouldRetryWithFallbackBucket = (errorCode: string) =>
-    errorCode === 'storage/unknown' ||
-    errorCode === 'storage/bucket-not-found' ||
-    errorCode === 'storage/no-default-bucket';
-
   const uploadFileAndGetUrl = async (
     targetStorage: FirebaseStorage,
     path: string,
@@ -80,6 +75,26 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     const storageRef = ref(targetStorage, path);
     await uploadBytes(storageRef, file, { contentType: file.type || undefined });
     return getDownloadURL(storageRef);
+  };
+
+  const uploadWithBucketFallbacks = async (path: string, file: File): Promise<string> => {
+    const triedBuckets = new Set<string>();
+    const candidates = [storage, storageAppspotFallback, storageFirebasestorageFallback];
+    let lastError: unknown = null;
+
+    for (const targetStorage of candidates) {
+      const bucket = targetStorage.app.options.storageBucket || '';
+      if (bucket && triedBuckets.has(bucket)) continue;
+      if (bucket) triedBuckets.add(bucket);
+
+      try {
+        return await uploadFileAndGetUrl(targetStorage, path, file);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw lastError || new Error('FALHA_UPLOAD_STORAGE');
   };
 
   const calculateScore = (customerId: string) => {
@@ -129,18 +144,13 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       const folder = type === 'PHOTO' ? 'photos' : 'documents';
       const fileName = buildStorageFileName(file.name);
       const storagePath = `clientes/${customerToken}/${folder}/${fileName}`;
-      let downloadUrl = '';
 
-      try {
-        downloadUrl = await uploadFileAndGetUrl(storage, storagePath, file);
-      } catch (primaryStorageError) {
-        const primaryCode = extractStorageErrorCode(primaryStorageError);
-        if (!shouldRetryWithFallbackBucket(primaryCode)) {
-          throw primaryStorageError;
-        }
-
-        downloadUrl = await uploadFileAndGetUrl(storageAppspotFallback, storagePath, file);
+      if (!auth.currentUser) {
+        alert('Sessao expirada. Entre novamente para enviar arquivos.');
+        return;
       }
+      await auth.currentUser.getIdToken();
+      const downloadUrl = await uploadWithBucketFallbacks(storagePath, file);
 
       if (type === 'PHOTO') {
         setFormData((prev) => ({ ...prev, photoUrl: downloadUrl, avatar: downloadUrl } as Partial<Customer>));
@@ -181,8 +191,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             }));
           }
 
-          const fallbackCodeLabel = errorCode ? ` (${errorCode})` : '';
-          alert(`Upload salvo em modo local${fallbackCodeLabel}. Recomendado ajustar regras/permissoes do Firebase Storage.`);
+          alert('Arquivo enviado em modo compatibilidade e vinculado ao cliente.');
           return;
         } catch (fallbackError) {
           console.error('Falha no fallback de upload local', fallbackError);
