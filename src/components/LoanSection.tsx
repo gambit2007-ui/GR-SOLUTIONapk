@@ -147,6 +147,44 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
+  const parseMoneyInput = (value: string | number | undefined): number => {
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : Number.NaN;
+    }
+
+    const raw = String(value ?? '').trim();
+    if (!raw) return Number.NaN;
+
+    let normalized = raw
+      .replace(/\s/g, '')
+      .replace(/R\$/gi, '')
+      .replace(/[^\d,.-]/g, '');
+
+    if (!normalized) return Number.NaN;
+
+    const hasComma = normalized.includes(',');
+    const hasDot = normalized.includes('.');
+
+    if (hasComma && hasDot) {
+      const lastComma = normalized.lastIndexOf(',');
+      const lastDot = normalized.lastIndexOf('.');
+      if (lastComma > lastDot) {
+        // Ex.: 1.234,56 (pt-BR)
+        normalized = normalized.replace(/\./g, '').replace(',', '.');
+      } else {
+        // Ex.: 1,234.56 (en-US)
+        normalized = normalized.replace(/,/g, '');
+      }
+    } else if (hasComma) {
+      normalized = normalized.replace(/\./g, '').replace(',', '.');
+    } else {
+      normalized = normalized.replace(/,/g, '');
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  };
+
   const splitAmountEvenly = (total: number, count: number) => {
     const safeCount = Math.max(0, Math.trunc(count));
     if (safeCount === 0) return [] as number[];
@@ -683,7 +721,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       return;
     }
 
-    const parsedAmount = Number(overrideAmount || activeModal?.amount);
+    const parsedAmount = parseMoneyInput(overrideAmount ?? activeModal?.amount);
     if (isNaN(parsedAmount) || parsedAmount <= 0) {
       showToast('Valor invalido', 'error');
       return;
@@ -837,8 +875,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         showToast('Pagamento processado!', 'success');
       }
       setPaymentModal(null);
-    } catch (e) {
-      showToast('Erro ao processar pagamento', 'error');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : '';
+      const safeDetail = message && message !== 'Error' ? ` (${message})` : '';
+      showToast(`Erro ao processar pagamento${safeDetail}`, 'error');
+      console.error('Falha ao processar pagamento:', e);
     } finally {
       setProcessingPayment(null);
     }
@@ -1212,11 +1253,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-black text-xs">R$</span>
                   <input
                     autoFocus
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0,00"
                     className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 pl-10 text-white outline-none focus:border-emerald-500 text-sm font-black"
                     value={paymentModal.amount}
-                    onChange={e => setPaymentModal({ ...paymentModal, amount: e.target.value })}
+                    onChange={e => setPaymentModal({ ...paymentModal, amount: e.target.value.replace(/[^\d,.-]/g, '') })}
                   />
                 </div>
                 <p className="text-[8px] text-zinc-600 uppercase italic ml-1">
