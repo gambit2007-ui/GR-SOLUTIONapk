@@ -1,6 +1,6 @@
 ﻿import React, { useState } from 'react';
 import { Plus, Search, User, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle } from 'lucide-react';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { getDownloadURL, ref, uploadBytes, type FirebaseStorage } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { Customer, Loan, CustomerDocument } from '../types';
 import {
@@ -8,7 +8,7 @@ import {
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
-import { storage } from '../firebase';
+import { storage, storageAppspotFallback } from '../firebase';
 
 interface CustomerSectionProps {
   customers: Customer[];
@@ -67,6 +67,21 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     return '';
   };
 
+  const shouldRetryWithFallbackBucket = (errorCode: string) =>
+    errorCode === 'storage/unknown' ||
+    errorCode === 'storage/bucket-not-found' ||
+    errorCode === 'storage/no-default-bucket';
+
+  const uploadFileAndGetUrl = async (
+    targetStorage: FirebaseStorage,
+    path: string,
+    file: File,
+  ): Promise<string> => {
+    const storageRef = ref(targetStorage, path);
+    await uploadBytes(storageRef, file, { contentType: file.type || undefined });
+    return getDownloadURL(storageRef);
+  };
+
   const calculateScore = (customerId: string) => {
     const customerLoans = loans.filter(l => l.customerId === customerId);
     if (customerLoans.length === 0) return 50;
@@ -113,12 +128,19 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       const customerToken = editingCustomer?.id || String(formData.cpf || 'novo').replace(/\W/g, '') || 'novo';
       const folder = type === 'PHOTO' ? 'photos' : 'documents';
       const fileName = buildStorageFileName(file.name);
-      const storageRef = ref(storage, `clientes/${customerToken}/${folder}/${fileName}`);
+      const storagePath = `clientes/${customerToken}/${folder}/${fileName}`;
+      let downloadUrl = '';
 
-      await uploadBytes(storageRef, file, {
-        contentType: file.type || undefined,
-      });
-      const downloadUrl = await getDownloadURL(storageRef);
+      try {
+        downloadUrl = await uploadFileAndGetUrl(storage, storagePath, file);
+      } catch (primaryStorageError) {
+        const primaryCode = extractStorageErrorCode(primaryStorageError);
+        if (!shouldRetryWithFallbackBucket(primaryCode)) {
+          throw primaryStorageError;
+        }
+
+        downloadUrl = await uploadFileAndGetUrl(storageAppspotFallback, storagePath, file);
+      }
 
       if (type === 'PHOTO') {
         setFormData((prev) => ({ ...prev, photoUrl: downloadUrl, avatar: downloadUrl } as Partial<Customer>));
