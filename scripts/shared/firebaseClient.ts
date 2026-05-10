@@ -1,6 +1,6 @@
 import { getApps, initializeApp } from 'firebase/app';
 import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getFirestore, initializeFirestore } from 'firebase/firestore';
 import type { Firestore } from 'firebase/firestore';
 
 const firebaseConfig = {
@@ -28,7 +28,17 @@ export const createFirebaseScriptSession = async (): Promise<FirebaseScriptSessi
 
   const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
   const auth = getAuth(app);
-  const db = getFirestore(app);
+  const db = (() => {
+    try {
+      return initializeFirestore(app, {
+        // Scripts de manutenção costumam rodar em ambientes sem suporte estável a WebChannel.
+        experimentalForceLongPolling: true,
+        useFetchStreams: false,
+      });
+    } catch {
+      return getFirestore(app);
+    }
+  })();
 
   await signInWithEmailAndPassword(auth, email, password);
 

@@ -4,6 +4,7 @@ import { TrendingUp, Users, FileText, Wallet, Activity, ChevronDown, Calendar as
 import {
   effectiveLoanStatus,
   installmentAmount,
+  installmentPaidAmount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { formatDateTimeBR, getLocalISODate } from '../utils/dateTime';
@@ -82,6 +83,16 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
     return 0;
   };
 
+  const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+
+  const getRemainingInstallmentValue = (inst: Installment) => {
+    if (normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
+    const lateFee = calculateLateFee(inst);
+    const totalWithFee = roundMoney(installmentAmount(inst) + lateFee);
+    const remaining = roundMoney(totalWithFee - installmentPaidAmount(inst));
+    return remaining > 0 ? remaining : 0;
+  };
+
   // Identificar contratos em atraso
   const overdueLoans = loans.filter(loan => {
     if (effectiveLoanStatus(loan) !== 'ACTIVE') return false;
@@ -96,14 +107,20 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
     if (effectiveLoanStatus(loan) !== 'ACTIVE') return [];
     const installments = Array.isArray(loan.installments) ? loan.installments : [];
     return installments
-      .filter((inst) => inst.dueDate === selectedDate && normalizeInstallmentStatus(inst.status) !== 'PAID')
+      .filter(
+        (inst) =>
+          inst.dueDate === selectedDate &&
+          normalizeInstallmentStatus(inst.status) !== 'PAID' &&
+          getRemainingInstallmentValue(inst) > 0,
+      )
       .map((inst) => {
         const lateFee = calculateLateFee(inst);
+        const remainingWithFee = getRemainingInstallmentValue(inst);
         return {
           ...inst,
           customerName: loan.customerName,
           loanId: loan.id,
-          totalWithFee: installmentAmount(inst) + lateFee,
+          totalWithFee: remainingWithFee,
           lateFee,
         };
       });
@@ -300,13 +317,16 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
               {overdueLoans.map((loan) => {
                 const overdueInstallments = loan.installments.filter(i => {
                   const today = getLocalISODate();
-                  return normalizeInstallmentStatus(i.status) !== 'PAID' && i.dueDate < today;
+                  return (
+                    normalizeInstallmentStatus(i.status) !== 'PAID' &&
+                    i.dueDate < today &&
+                    getRemainingInstallmentValue(i) > 0
+                  );
                 });
                 const overdueCount = overdueInstallments.length;
-                const overdueValue = overdueInstallments.reduce((sum, i) => {
-                  const lateFee = calculateLateFee(i);
-                  return sum + installmentAmount(i) + lateFee;
-                }, 0);
+                const overdueValue = roundMoney(
+                  overdueInstallments.reduce((sum, i) => sum + getRemainingInstallmentValue(i), 0),
+                );
 
                 return (
                   <button
@@ -326,7 +346,9 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
                     </div>
                     <div className="mt-auto">
                       <p className="text-[9px] text-zinc-500 uppercase tracking-widest">Valor em Atraso</p>
-                      <p className="text-sm font-black text-white mt-1">R$ {overdueValue.toLocaleString('pt-BR')}</p>
+                      <p className="text-sm font-black text-white mt-1">
+                        R$ {overdueValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </p>
                     </div>
                     <div className="mt-4 flex items-center gap-2 text-[8px] font-black text-red-500 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0">
                       Resolver Agora <TrendingUp size={10} />

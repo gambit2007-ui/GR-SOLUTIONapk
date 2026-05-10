@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Loan, CashMovement, MovementType } from '../types';
+import { Loan, CashMovement, MovementType, PaymentBreakdown } from '../types';
 import { useMemo } from 'react';
 import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
 import {
@@ -19,7 +19,9 @@ import {
   Area
 } from 'recharts';
 import {
+  effectiveLoanStatus,
   installmentAmount,
+  installmentPaidAmount,
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
@@ -59,6 +61,84 @@ const Reports: React.FC<ReportsProps> = ({
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
   const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 
+  const calculateLateFee = (installment: Loan['installments'][number]) => {
+    if (!installment?.dueDate || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
+    const dueDate = new Date(`${installment.dueDate}T00:00:00`);
+    if (Number.isNaN(dueDate.getTime())) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (dueDate >= today) return 0;
+
+    const diffTime = today.getTime() - dueDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays <= 0) return 0;
+
+    return Number((installmentAmount(installment) * 0.015 * diffDays).toFixed(2));
+  };
+
+  const getRemainingInstallmentValue = (installment: Loan['installments'][number]) => {
+    if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
+    const lateFee = calculateLateFee(installment);
+    const totalWithFee = roundMoney(installmentAmount(installment) + lateFee);
+    const remaining = roundMoney(totalWithFee - installmentPaidAmount(installment));
+    return remaining > 0 ? remaining : 0;
+  };
+
+  const getInstallmentPrincipalRecovered = (loan: Loan, installment: Loan['installments'][number]) => {
+    const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
+    if (paymentEntries.length > 0) {
+      return roundMoney(paymentEntries.reduce((sum, entry) => sum + Number(entry.principalPaid || 0), 0));
+    }
+
+    if (installment.paymentBreakdown) {
+      return roundMoney(Number(installment.paymentBreakdown.principalPaid || 0));
+    }
+
+    if (normalizeInstallmentStatus(installment.status) === 'PAID') {
+      if (Number.isFinite(Number(installment.expectedPrincipal)) && Number(installment.expectedPrincipal) > 0) {
+        return roundMoney(Number(installment.expectedPrincipal));
+      }
+
+      const installmentsCount = loanInstallmentsCount(loan) || 1;
+      return roundMoney(Number(loan.amount || 0) / installmentsCount);
+    }
+
+    return 0;
+  };
+
+  const parseAmountInput = (value: string): number => {
+    const raw = String(value ?? '').trim();
+    if (!raw) return Number.NaN;
+
+    let normalized = raw
+      .replace(/\s/g, '')
+      .replace(/R\$/gi, '')
+      .replace(/[^\d,.-]/g, '');
+
+    if (!normalized) return Number.NaN;
+
+    const hasComma = normalized.includes(',');
+    const hasDot = normalized.includes('.');
+
+    if (hasComma && hasDot) {
+      const lastComma = normalized.lastIndexOf(',');
+      const lastDot = normalized.lastIndexOf('.');
+      const decimalSeparator = lastComma > lastDot ? ',' : '.';
+
+      if (decimalSeparator === ',') {
+        normalized = normalized.replace(/\./g, '').replace(',', '.');
+      } else {
+        normalized = normalized.replace(/,/g, '');
+      }
+    } else if (hasComma) {
+      normalized = normalized.replace(',', '.');
+    }
+
+    const parsed = Number(normalized);
+    return Number.isFinite(parsed) ? parsed : Number.NaN;
+  };
+
   const makeMonthKey = (dateValue: string) => {
     const date = new Date(dateValue);
     if (Number.isNaN(date.getTime())) return null;
@@ -80,9 +160,60 @@ const Reports: React.FC<ReportsProps> = ({
       totalPaid: 0,
     };
 
+    const registerMetrics = (monthKey: string, breakdown: PaymentBreakdown) => {
+      if (!monthly[monthKey]) {
+        monthly[monthKey] = {
+          principalRecovered: 0,
+          interestReceived: 0,
+          lateFeesReceived: 0,
+          serviceFeesReceived: 0,
+          taxableRevenue: 0,
+          totalPaid: 0,
+        };
+      }
+
+      const principalPaid = roundMoney(Number(breakdown.principalPaid || 0));
+      const interestPaid = roundMoney(Number(breakdown.interestPaid || 0));
+      const lateFeePaid = roundMoney(Number(breakdown.lateFeePaid || 0));
+      const serviceFeePaid = roundMoney(Number(breakdown.serviceFeePaid || 0));
+      const totalPaid = roundMoney(Number(breakdown.totalPaid || 0));
+      const taxableRevenue = roundMoney(interestPaid + lateFeePaid + serviceFeePaid);
+
+      monthly[monthKey].principalRecovered = roundMoney(monthly[monthKey].principalRecovered + principalPaid);
+      monthly[monthKey].interestReceived = roundMoney(monthly[monthKey].interestReceived + interestPaid);
+      monthly[monthKey].lateFeesReceived = roundMoney(monthly[monthKey].lateFeesReceived + lateFeePaid);
+      monthly[monthKey].serviceFeesReceived = roundMoney(monthly[monthKey].serviceFeesReceived + serviceFeePaid);
+      monthly[monthKey].taxableRevenue = roundMoney(monthly[monthKey].taxableRevenue + taxableRevenue);
+      monthly[monthKey].totalPaid = roundMoney(monthly[monthKey].totalPaid + totalPaid);
+
+      totals.principalRecovered = roundMoney(totals.principalRecovered + principalPaid);
+      totals.interestReceived = roundMoney(totals.interestReceived + interestPaid);
+      totals.lateFeesReceived = roundMoney(totals.lateFeesReceived + lateFeePaid);
+      totals.serviceFeesReceived = roundMoney(totals.serviceFeesReceived + serviceFeePaid);
+      totals.taxableRevenue = roundMoney(totals.taxableRevenue + taxableRevenue);
+      totals.totalPaid = roundMoney(totals.totalPaid + totalPaid);
+    };
+
     loans.forEach((loan) => {
       const installments = Array.isArray(loan.installments) ? loan.installments : [];
       installments.forEach((installment) => {
+        const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
+        if (paymentEntries.length > 0) {
+          paymentEntries.forEach((entry) => {
+            const monthKey = makeMonthKey(entry.recordedAt);
+            if (!monthKey) return;
+            registerMetrics(monthKey, {
+              principalPaid: Number(entry.principalPaid || 0),
+              interestPaid: Number(entry.interestPaid || 0),
+              lateFeePaid: Number(entry.lateFeePaid || 0),
+              serviceFeePaid: Number(entry.serviceFeePaid || 0),
+              discountApplied: Number(entry.discountApplied || 0),
+              totalPaid: Number(entry.totalPaid || 0),
+            });
+          });
+          return;
+        }
+
         if (normalizeInstallmentStatus(installment.status) !== 'PAID') return;
         const breakdown = installment.paymentBreakdown;
         if (!breakdown) return;
@@ -92,38 +223,7 @@ const Reports: React.FC<ReportsProps> = ({
 
         const monthKey = makeMonthKey(paymentDate);
         if (!monthKey) return;
-
-        if (!monthly[monthKey]) {
-          monthly[monthKey] = {
-            principalRecovered: 0,
-            interestReceived: 0,
-            lateFeesReceived: 0,
-            serviceFeesReceived: 0,
-            taxableRevenue: 0,
-            totalPaid: 0,
-          };
-        }
-
-        const principalPaid = roundMoney(Number(breakdown.principalPaid || 0));
-        const interestPaid = roundMoney(Number(breakdown.interestPaid || 0));
-        const lateFeePaid = roundMoney(Number(breakdown.lateFeePaid || 0));
-        const serviceFeePaid = roundMoney(Number(breakdown.serviceFeePaid || 0));
-        const totalPaid = roundMoney(Number(breakdown.totalPaid || 0));
-        const taxableRevenue = roundMoney(interestPaid + lateFeePaid + serviceFeePaid);
-
-        monthly[monthKey].principalRecovered = roundMoney(monthly[monthKey].principalRecovered + principalPaid);
-        monthly[monthKey].interestReceived = roundMoney(monthly[monthKey].interestReceived + interestPaid);
-        monthly[monthKey].lateFeesReceived = roundMoney(monthly[monthKey].lateFeesReceived + lateFeePaid);
-        monthly[monthKey].serviceFeesReceived = roundMoney(monthly[monthKey].serviceFeesReceived + serviceFeePaid);
-        monthly[monthKey].taxableRevenue = roundMoney(monthly[monthKey].taxableRevenue + taxableRevenue);
-        monthly[monthKey].totalPaid = roundMoney(monthly[monthKey].totalPaid + totalPaid);
-
-        totals.principalRecovered = roundMoney(totals.principalRecovered + principalPaid);
-        totals.interestReceived = roundMoney(totals.interestReceived + interestPaid);
-        totals.lateFeesReceived = roundMoney(totals.lateFeesReceived + lateFeePaid);
-        totals.serviceFeesReceived = roundMoney(totals.serviceFeesReceived + serviceFeePaid);
-        totals.taxableRevenue = roundMoney(totals.taxableRevenue + taxableRevenue);
-        totals.totalPaid = roundMoney(totals.totalPaid + totalPaid);
+        registerMetrics(monthKey, breakdown);
       });
     });
 
@@ -169,9 +269,9 @@ const Reports: React.FC<ReportsProps> = ({
   }, [currentYear, fiscalData.monthly]);
 
   const totalAReceber = loans.reduce((acc, loan) => {
+    if (effectiveLoanStatus(loan) !== 'ACTIVE') return acc;
     const unpaid = loan.installments
-      .filter((i) => normalizeInstallmentStatus(i.status) !== 'PAID')
-      .reduce((sum, i) => sum + installmentAmount(i), 0);
+      .reduce((sum, installment) => sum + getRemainingInstallmentValue(installment), 0);
     return acc + unpaid;
   }, 0);
 
@@ -188,11 +288,11 @@ const Reports: React.FC<ReportsProps> = ({
 
   // Valor em Rua (Principal Pendente)
   const valorEmRua = loans.reduce((acc, loan) => {
-    const paidCount = loan.installments.filter((i) => normalizeInstallmentStatus(i.status) === 'PAID').length;
-    const installmentsCount = loanInstallmentsCount(loan) || 1;
-    const principalPerInstallment = Number(loan.amount || 0) / installmentsCount;
-    const principalPaid = paidCount * principalPerInstallment;
-    return acc + (Number(loan.amount || 0) - principalPaid);
+    if (effectiveLoanStatus(loan) !== 'ACTIVE') return acc;
+    const principalRecovered = roundMoney(
+      loan.installments.reduce((sum, installment) => sum + getInstallmentPrincipalRecovered(loan, installment), 0),
+    );
+    return acc + Math.max(roundMoney(Number(loan.amount || 0) - principalRecovered), 0);
   }, 0);
 
   const lucroEstimado = loans.reduce((acc, loan) => {
@@ -261,8 +361,15 @@ const Reports: React.FC<ReportsProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const amountValue = parseAmountInput(formData.amount);
+    if (Number.isNaN(amountValue) || amountValue <= 0) {
+      showToast('Valor invalido para movimentacao', 'error');
+      return;
+    }
+
     try {
-      await onAddTransaction(formData.type, Number(formData.amount), formData.description);
+      await onAddTransaction(formData.type, Number(amountValue.toFixed(2)), formData.description);
       setIsModalOpen(false);
       setFormData({ type: 'ENTRADA', amount: '', description: '' });
     } catch (e) {
@@ -274,6 +381,8 @@ const Reports: React.FC<ReportsProps> = ({
     setIsDownloadingBackup(true);
     try {
       await onDownloadBackup();
+    } catch {
+      // Erro tratado no App.tsx.
     } finally {
       setIsDownloadingBackup(false);
     }
@@ -334,7 +443,7 @@ const Reports: React.FC<ReportsProps> = ({
             disabled={isDownloadingBackup}
             className="px-6 sm:px-8 py-4 sm:py-6 bg-zinc-900 border border-zinc-800 text-white rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.15em] hover:border-[#BF953F]/50 transition-all flex items-center gap-2 sm:gap-3 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Download size={18} /> {isDownloadingBackup ? 'Gerando Backup...' : 'Backup Completo'}
+            <Download size={18} /> {isDownloadingBackup ? 'Gerando Backup...' : 'Backup do Banco'}
           </button>
         </div>
       </div>
@@ -573,10 +682,10 @@ const Reports: React.FC<ReportsProps> = ({
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>
                 <input
-                  type="number" placeholder="0.00" required
+                  type="text" inputMode="decimal" placeholder="0,00" required
                   className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
                   value={formData.amount}
-                  onChange={e => setFormData({ ...formData, amount: e.target.value })}
+                  onChange={e => setFormData({ ...formData, amount: e.target.value.replace(/[^\d,.-]/g, '') })}
                 />
               </div>
               <div className="space-y-1">

@@ -8,6 +8,7 @@
     "build": "vite build",
     "lint": "tsc --noEmit",
     "preview": "vite preview",
+    "dedupe:cash": "node --experimental-strip-types scripts/dedupe-cash-movements.ts",
     "diagnose:breakdown": "node --experimental-strip-types scripts/diagnose-breakdown-migration.ts",
     "migrate:breakdown:dry": "node --experimental-strip-types scripts/migrate-breakdown-legacy.ts --dry-run",
     "migrate:breakdown:apply": "node --experimental-strip-types scripts/migrate-breakdown-legacy.ts --apply"

@@ -152,6 +152,16 @@ export const resolveInstallmentPaidAmount = (installment: LegacyInstallmentLike)
   return 0;
 };
 
+const estimateLegacyLateFeePaid = (installment: LegacyInstallmentLike, paidAmount: number): number => {
+  const safePaidAmount = safePositive(paidAmount);
+  if (safePaidAmount <= 0) return 0;
+
+  const baseInstallmentAmount = resolveInstallmentAmount(installment);
+  if (baseInstallmentAmount <= 0) return 0;
+
+  return round2(Math.max(safePaidAmount - baseInstallmentAmount, 0));
+};
+
 export const resolveInstallmentNumber = (
   installment: LegacyInstallmentLike,
   installmentIndex: number,
@@ -370,17 +380,19 @@ export const buildLegacySimpleBreakdown = (
   const totalAmount = safePositive(loan.amount);
   const totalReceivable = resolveLoanTotalReceivable(loan);
   const paidAmount = check.paidAmount;
+  const lateFeePaid = estimateLegacyLateFeePaid(installment, paidAmount);
+  const basePaid = round2(Math.max(paidAmount - lateFeePaid, 0));
   const lucroTotal = round2(Math.max(totalReceivable - totalAmount, 0));
   const interestRatio = totalReceivable > 0 ? Math.min(Math.max(lucroTotal / totalReceivable, 0), 1) : 0;
 
-  const interestPaid = round2(paidAmount * interestRatio);
-  const principalPaid = round2(Math.max(paidAmount - interestPaid, 0));
+  const interestPaid = round2(basePaid * interestRatio);
+  const principalPaid = round2(Math.max(basePaid - interestPaid, 0));
 
   return {
     paymentBreakdown: {
       principalPaid,
       interestPaid,
-      lateFeePaid: 0,
+      lateFeePaid,
       serviceFeePaid: 0,
       discountApplied: 0,
       totalPaid: paidAmount,
@@ -445,13 +457,15 @@ export const buildLegacyPriceBreakdown = (
   const expectedPrincipal = safePositive(installment.expectedPrincipal) || scheduleEntry.expectedPrincipal;
   const expectedInterest = safePositive(installment.expectedInterest) || scheduleEntry.expectedInterest;
   const paidAmount = check.paidAmount;
-  const allocation = allocateByComposition(paidAmount, expectedPrincipal, expectedInterest);
+  const lateFeePaid = estimateLegacyLateFeePaid(installment, paidAmount);
+  const basePaid = round2(Math.max(paidAmount - lateFeePaid, 0));
+  const allocation = allocateByComposition(basePaid, expectedPrincipal, expectedInterest);
 
   return {
     paymentBreakdown: {
       principalPaid: allocation.principalPaid,
       interestPaid: allocation.interestPaid,
-      lateFeePaid: 0,
+      lateFeePaid,
       serviceFeePaid: 0,
       discountApplied: 0,
       totalPaid: paidAmount,

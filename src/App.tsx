@@ -3,6 +3,7 @@ import {
   LayoutDashboard, Users, FileText, PieChart, Calculator,
   Activity, X, Menu, Lock, LogOut, Loader2,
 } from 'lucide-react';
+import { FirebaseError } from 'firebase/app';
 
 import { Customer, Loan, LoanDraft, MovementType, View } from './types';
 import Dashboard from './components/Dashboard';
@@ -11,7 +12,12 @@ import SimulationTab from './components/SimulationTab';
 import Reports from './components/Reports';
 import LoanSection from './components/LoanSection';
 import { getLocalISODate } from './utils/dateTime';
-import { effectiveLoanStatus, normalizeInstallmentStatus } from './utils/loanCompat';
+import {
+  effectiveLoanStatus,
+  installmentAmount,
+  installmentPaidAmount,
+  normalizeInstallmentStatus,
+} from './utils/loanCompat';
 import { useAuthState } from './hooks/useAuthState';
 import { useRealtimeData } from './hooks/useRealtimeData';
 import { useToasts } from './hooks/useToasts';
@@ -42,6 +48,46 @@ const App: React.FC = () => {
     uid: user?.uid,
     email: user?.email,
     displayName: user?.displayName,
+  };
+
+  const resolveMovementFallbacks = (type: MovementType): MovementType[] => {
+    const normalized = String(type || '').toUpperCase() as MovementType;
+    if (normalized === 'ENTRADA') return ['ENTRADA', 'APORTE'];
+    if (normalized === 'SAIDA') return ['SAIDA', 'RETIRADA'];
+    return [normalized];
+  };
+
+  const getFirebaseErrorCode = (error: unknown): string => {
+    if (error instanceof FirebaseError) return String(error.code || '');
+    if (typeof error === 'object' && error && 'code' in error) {
+      const code = (error as { code?: unknown }).code;
+      return typeof code === 'string' ? code : '';
+    }
+    return '';
+  };
+
+  const calculateLateFee = (dueDateValue: string | undefined, installmentValue: number, installmentStatus: unknown) => {
+    if (!dueDateValue || normalizeInstallmentStatus(installmentStatus) === 'PAID') return 0;
+    const dueDate = new Date(`${dueDateValue}T00:00:00`);
+    if (Number.isNaN(dueDate.getTime())) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (dueDate >= today) return 0;
+
+    const diffTime = today.getTime() - dueDate.getTime();
+    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+    if (diffDays <= 0) return 0;
+
+    return Number((installmentValue * 0.015 * diffDays).toFixed(2));
+  };
+
+  const getRemainingInstallmentValue = (installment: Loan['installments'][number] | null | undefined) => {
+    if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
+    const lateFee = calculateLateFee(installment.dueDate, Number(installmentAmount(installment) || 0), installment.status);
+    const totalWithFee = Number((Number(installmentAmount(installment) || 0) + lateFee).toFixed(2));
+    const remaining = Number((totalWithFee - Number(installmentPaidAmount(installment) || 0)).toFixed(2));
+    return remaining > 0 ? remaining : 0;
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -87,15 +133,42 @@ const App: React.FC = () => {
     }
 
     try {
-      await addCashMovement({
-        type,
-        amount: valor,
-        description: motivo,
-        actor: movementActor,
-      });
-      showToast('Caixa atualizado!', 'success');
+      const movementTypes = resolveMovementFallbacks(type);
+      let lastError: unknown = null;
+
+      for (const movementType of movementTypes) {
+        try {
+          await addCashMovement({
+            type: movementType,
+            amount: valor,
+            description: motivo,
+            actor: movementActor,
+          });
+          showToast('Caixa atualizado!', 'success');
+          return;
+        } catch (error) {
+          lastError = error;
+          const errorCode = getFirebaseErrorCode(error);
+          const canRetryWithAlternativeType =
+            movementTypes.length > 1 &&
+            movementType !== movementTypes[movementTypes.length - 1] &&
+            ['permission-denied', 'invalid-argument', 'failed-precondition'].some((code) =>
+              errorCode.toLowerCase().includes(code),
+            );
+
+          if (canRetryWithAlternativeType) {
+            continue;
+          }
+
+          break;
+        }
+      }
+
+      throw lastError || new Error('FALHA_MOVIMENTACAO');
     } catch (error: unknown) {
-      showToast('Erro no processamento do caixa', 'error');
+      const errorCode = getFirebaseErrorCode(error);
+      const detail = errorCode ? ` (${errorCode})` : '';
+      showToast(`Erro no processamento do caixa${detail}`, 'error');
       throw error;
     }
   };
@@ -156,6 +229,7 @@ const App: React.FC = () => {
       showToast('Cliente cadastrado com sucesso!', 'success');
     } catch (error: unknown) {
       showToast('Erro ao salvar cliente', 'error');
+      throw error;
     }
   };
 
@@ -165,16 +239,17 @@ const App: React.FC = () => {
       showToast('Cadastro atualizado!', 'info');
     } catch (error: unknown) {
       showToast('Erro ao atualizar cadastro', 'error');
+      throw error;
     }
   };
 
   const handleDeleteCustomer = async (customerId: string) => {
-    if (!window.confirm('Isso excluira o cliente e todos os contratos dele. Confirma?')) return;
     try {
       const removedLoansCount = await deleteCustomerAndLoans(customerId);
       showToast(`Cliente removido com ${removedLoansCount} contrato(s)`, 'info');
     } catch (error: unknown) {
       showToast('Erro ao remover cliente', 'error');
+      throw error;
     }
   };
 
@@ -212,9 +287,10 @@ const App: React.FC = () => {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      showToast('Backup completo baixado (clientes, contratos e financeiro)!', 'success');
+      showToast('Backup do banco baixado (clientes, contratos e financeiro do Firestore)!', 'success');
     } catch (error: unknown) {
       showToast('Erro ao gerar backup', 'error');
+      throw error;
     }
   };
 
@@ -267,11 +343,12 @@ const App: React.FC = () => {
 
   const overdueLoansCount = contratos.filter((contrato) => {
     if (effectiveLoanStatus(contrato) !== 'ACTIVE') return false;
-    const saldoDevedor = Number(contrato.totalToReturn || 0) - Number(contrato.paidAmount || 0);
-    if (saldoDevedor <= 0.5) return false;
     const today = getLocalISODate();
     return (contrato.installments || []).some(
-      (parcela) => normalizeInstallmentStatus(parcela.status) !== 'PAID' && parcela.dueDate < today,
+      (parcela) =>
+        normalizeInstallmentStatus(parcela.status) !== 'PAID' &&
+        parcela.dueDate < today &&
+        getRemainingInstallmentValue(parcela) > 0,
     );
   }).length;
 
@@ -425,6 +502,7 @@ const App: React.FC = () => {
               onDeleteLoan={handleDeleteLoan}
               showToast={showToast}
               initialExpandedLoanId={selectedLoanId}
+              currentActor={movementActor}
               onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
             />
           )}

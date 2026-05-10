@@ -10,6 +10,7 @@ import {
 import { db } from '../firebase';
 import { CashMovement, MovementType } from '../types';
 import { parseCashMovement, parseMovementType, resolveCashDelta } from '../utils/domainParsers';
+import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
 
 export interface MovementActor {
   uid?: string | null;
@@ -80,10 +81,11 @@ export const appendCashMovementInTransaction = async (
     loanId: payload.loanId,
     ...buildMovementActorPayload(payload.actor),
   };
+  const sanitizedMovement = sanitizeFirestorePayload(movement);
 
   const novoSaldo = Number((saldoAtual + resolveCashDelta(movement)).toFixed(2));
 
-  tx.set(movementRef, movement);
+  tx.set(movementRef, sanitizedMovement);
   tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
 
   return { movement, novoSaldo, movementRef };

@@ -7,11 +7,11 @@ import {
   query,
   updateDoc,
   where,
-  writeBatch,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Customer } from '../types';
 import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
+import { deleteLoansAndLinkedMovements } from './loanCleanup';
 
 export const createCustomer = async (cliente: Customer) => {
   const { id, ...payload } = cliente;
@@ -31,20 +31,10 @@ export const updateCustomer = async (cliente: Customer) => {
 
 export const deleteCustomerAndLoans = async (customerId: string): Promise<number> => {
   const loansSnap = await getDocs(query(collection(db, 'loans'), where('customerId', '==', customerId)));
-  const loanDocs = loansSnap.docs;
+  const loanIds = loansSnap.docs.map((loanDoc) => loanDoc.id);
 
-  const MAX_BATCH_SIZE = 450;
-  let index = 0;
-
-  while (index < loanDocs.length) {
-    const batch = writeBatch(db);
-    const slice = loanDocs.slice(index, index + MAX_BATCH_SIZE);
-    slice.forEach((loanDoc) => batch.delete(doc(db, 'loans', loanDoc.id)));
-    await batch.commit();
-    index += MAX_BATCH_SIZE;
-  }
+  await deleteLoansAndLinkedMovements(loanIds);
 
   await deleteDoc(doc(db, 'clientes', customerId));
-  return loanDocs.length;
+  return loanIds.length;
 };
-

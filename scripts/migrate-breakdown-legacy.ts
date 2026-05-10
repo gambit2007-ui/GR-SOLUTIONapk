@@ -16,10 +16,13 @@ import { sanitizeFirestorePayload } from '../src/utils/firestoreSanitizer.ts';
 import { createFirebaseScriptSession } from './shared/firebaseClient.ts';
 import {
   isLinkedToEstorno,
+  loadInstallmentEstornoIndexByLoanId,
+  loadLegacyLoanDocumentById,
+  loadLegacyLoanDocumentsByContractNumber,
   loadInstallmentEstornoIndex,
   loadLegacyLoanDocuments,
 } from './shared/breakdownMigrationDataset.ts';
-import type { LegacyLoanDocument } from './shared/breakdownMigrationDataset.ts';
+import type { InstallmentEstornoIndex, LegacyLoanDocument } from './shared/breakdownMigrationDataset.ts';
 
 interface InstallmentMigrationResult {
   loanId: string;
@@ -67,8 +70,15 @@ const args = new Set(process.argv.slice(2));
 const applyMode = args.has('--apply');
 const dryRunMode = !applyMode || args.has('--dry-run');
 const allowEstimatedPriceFallback = args.has('--allow-estimated-price-fallback');
+const includeLinkedEstorno = args.has('--include-estorno');
 const limitArg = process.argv.find((arg) => arg.startsWith('--limit='));
 const contractLimit = limitArg ? Math.max(0, Math.trunc(Number(limitArg.slice('--limit='.length)))) : 0;
+const loanIdArg = process.argv.find((arg) => arg.startsWith('--loan-id='));
+const targetLoanId = loanIdArg ? loanIdArg.slice('--loan-id='.length).trim() : '';
+const contractNumberArg = process.argv.find((arg) => arg.startsWith('--contract-number='));
+const targetContractNumber = contractNumberArg
+  ? contractNumberArg.slice('--contract-number='.length).trim()
+  : '';
 
 const reportArg = process.argv.find((arg) => arg.startsWith('--out='));
 const defaultReportName = dryRunMode
@@ -136,18 +146,60 @@ const commitLoanUpdates = async (db: Firestore, pendingUpdates: LoanPendingUpdat
 
 const run = async (): Promise<void> => {
   const session = await createFirebaseScriptSession();
-  const [allLoanDocs, estornoIndex] = await Promise.all([
-    loadLegacyLoanDocuments(session.db),
-    loadInstallmentEstornoIndex(session.db),
-  ]);
+  let scopedLoanDocs: LegacyLoanDocument[] = [];
+  let estornoIndex: InstallmentEstornoIndex;
 
-  const loanDocs = contractLimit > 0 ? allLoanDocs.slice(0, contractLimit) : allLoanDocs;
+  if (targetLoanId) {
+    const [loanDoc, targetedEstornoIndex] = await Promise.all([
+      loadLegacyLoanDocumentById(session.db, targetLoanId),
+      loadInstallmentEstornoIndexByLoanId(session.db, targetLoanId),
+    ]);
+    scopedLoanDocs = loanDoc ? [loanDoc] : [];
+    estornoIndex = targetedEstornoIndex;
+  } else if (targetContractNumber) {
+    const loanDocsByContract = await loadLegacyLoanDocumentsByContractNumber(
+      session.db,
+      targetContractNumber,
+    );
+    scopedLoanDocs = loanDocsByContract;
+    if (loanDocsByContract.length === 1) {
+      estornoIndex = await loadInstallmentEstornoIndexByLoanId(
+        session.db,
+        loanDocsByContract[0].id,
+      );
+    } else if (loanDocsByContract.length === 0) {
+      estornoIndex = {
+        perInstallment: new Map<string, Set<number>>(),
+        genericLoanEstorno: new Set<string>(),
+      };
+    } else {
+      estornoIndex = await loadInstallmentEstornoIndex(session.db);
+    }
+  } else {
+    const [allLoanDocs, allEstornoIndex] = await Promise.all([
+      loadLegacyLoanDocuments(session.db),
+      loadInstallmentEstornoIndex(session.db),
+    ]);
+    scopedLoanDocs = allLoanDocs;
+    estornoIndex = allEstornoIndex;
+  }
+
+  const loanDocs = contractLimit > 0 ? scopedLoanDocs.slice(0, contractLimit) : scopedLoanDocs;
   const warnings: string[] = [];
   if (contractLimit > 0) {
     warnings.push(`Execucao limitada aos primeiros ${contractLimit} contratos (--limit).`);
   }
+  if (targetLoanId) {
+    warnings.push(`Filtro por loanId ativo: ${targetLoanId}`);
+  }
+  if (targetContractNumber) {
+    warnings.push(`Filtro por contractNumber ativo: ${targetContractNumber}`);
+  }
   if (allowEstimatedPriceFallback) {
     warnings.push('Fallback estimado para PRICE habilitado (needsFiscalReview=true).');
+  }
+  if (includeLinkedEstorno) {
+    warnings.push('Parcelas vinculadas a estorno serao migradas com needsFiscalReview=true.');
   }
 
   const summary: MigrationSummary = {
@@ -192,7 +244,7 @@ const run = async (): Promise<void> => {
         loanDoc.normalized,
         installment,
         installmentIndex,
-        linkedToEstorno,
+        includeLinkedEstorno ? false : linkedToEstorno,
       );
 
       if (classification.category === 'SKIP_ALREADY_HAS_BREAKDOWN') {
@@ -227,6 +279,19 @@ const run = async (): Promise<void> => {
           installmentIndex,
           true,
         );
+      }
+
+      if (breakdownResult && includeLinkedEstorno && linkedToEstorno) {
+        breakdownResult = {
+          ...breakdownResult,
+          needsFiscalReview: true,
+          reasonCodes: Array.from(
+            new Set<BreakdownMigrationReasonCode>([
+              'linked_estorno_detected',
+              ...(breakdownResult.reasonCodes ?? []),
+            ]),
+          ),
+        };
       }
 
       if (!breakdownResult) {

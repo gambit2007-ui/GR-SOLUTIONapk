@@ -1,4 +1,4 @@
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where } from 'firebase/firestore';
 import type { Firestore } from 'firebase/firestore';
 import type { LegacyInstallmentLike, LegacyLoanLike } from '../../src/utils/legacyBreakdownMigration.ts';
 
@@ -69,10 +69,42 @@ export const loadLegacyLoanDocuments = async (db: Firestore): Promise<LegacyLoan
   });
 };
 
+export const loadLegacyLoanDocumentById = async (
+  db: Firestore,
+  loanId: string,
+): Promise<LegacyLoanDocument | null> => {
+  const snapshot = await getDoc(doc(db, 'loans', loanId));
+  if (!snapshot.exists()) return null;
+  const raw = snapshot.data() as Record<string, unknown>;
+  return {
+    id: snapshot.id,
+    raw,
+    normalized: normalizeLoan(raw),
+  };
+};
+
+export const loadLegacyLoanDocumentsByContractNumber = async (
+  db: Firestore,
+  contractNumber: string,
+): Promise<LegacyLoanDocument[]> => {
+  const snapshot = await getDocs(
+    query(collection(db, 'loans'), where('contractNumber', '==', contractNumber)),
+  );
+  return snapshot.docs.map((docSnapshot) => {
+    const raw = docSnapshot.data() as Record<string, unknown>;
+    return {
+      id: docSnapshot.id,
+      raw,
+      normalized: normalizeLoan(raw),
+    };
+  });
+};
+
 const estornoNumberRegex = /ESTORNO\s+PARCELA\s+(\d+)/i;
 
-export const loadInstallmentEstornoIndex = async (db: Firestore): Promise<InstallmentEstornoIndex> => {
-  const snapshot = await getDocs(collection(db, 'cashMovement'));
+const buildEstornoIndex = (
+  snapshot: Awaited<ReturnType<typeof getDocs>>,
+): InstallmentEstornoIndex => {
   const perInstallment = new Map<string, Set<number>>();
   const genericLoanEstorno = new Set<string>();
 
@@ -103,6 +135,21 @@ export const loadInstallmentEstornoIndex = async (db: Firestore): Promise<Instal
   });
 
   return { perInstallment, genericLoanEstorno };
+};
+
+export const loadInstallmentEstornoIndex = async (db: Firestore): Promise<InstallmentEstornoIndex> => {
+  const snapshot = await getDocs(collection(db, 'cashMovement'));
+  return buildEstornoIndex(snapshot);
+};
+
+export const loadInstallmentEstornoIndexByLoanId = async (
+  db: Firestore,
+  loanId: string,
+): Promise<InstallmentEstornoIndex> => {
+  const snapshot = await getDocs(
+    query(collection(db, 'cashMovement'), where('loanId', '==', loanId)),
+  );
+  return buildEstornoIndex(snapshot);
 };
 
 export const isLinkedToEstorno = (

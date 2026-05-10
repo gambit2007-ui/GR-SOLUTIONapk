@@ -1,6 +1,5 @@
 import {
   collection,
-  deleteDoc,
   doc,
   runTransaction,
   serverTimestamp,
@@ -9,6 +8,7 @@ import {
 import { db } from '../firebase';
 import { Installment, Loan, LoanDraft, LoanType, MovementType } from '../types';
 import { appendCashMovementInTransaction, MovementActor, readCashBalanceInTransaction } from './cashService';
+import { deleteLoansAndLinkedMovements } from './loanCleanup';
 import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
 import { parseMovementType } from '../utils/domainParsers';
 
@@ -166,5 +166,5 @@ export const updateLoanAndAddMovement = async (
 };
 
 export const deleteLoan = async (loanId: string) => {
-  await deleteDoc(doc(db, 'loans', loanId));
+  await deleteLoansAndLinkedMovements([loanId]);
 };

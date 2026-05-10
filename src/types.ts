@@ -95,6 +95,7 @@ export interface Installment {
   expectedPrincipal?: number;
   expectedInterest?: number;
   paymentBreakdown?: PaymentBreakdown;
+  paymentEntries?: InstallmentPaymentEntry[];
   breakdownSource?: BreakdownSource | string;
   needsFiscalReview?: boolean;
 }
@@ -108,10 +109,36 @@ export interface PaymentBreakdown {
   totalPaid: number;
 }
 
+export interface InstallmentPaymentEntry {
+  id: string;
+  recordedAt: string;
+  kind?: 'PAYMENT' | 'REVERSAL';
+  principalPaid: number;
+  interestPaid: number;
+  lateFeePaid: number;
+  serviceFeePaid: number;
+  discountApplied: number;
+  totalPaid: number;
+}
+
 export type BreakdownSource =
   | 'migrated_simple_ratio'
   | 'migrated_price_schedule'
   | 'estimated_price_fallback';
+
+export interface InterestOnlyRenewalRecord {
+  id: string;
+  type: 'interest_only_renewal';
+  amount: number;
+  paymentDate: string;
+  previousDueDate?: string;
+  newDueDate?: string;
+  notes?: string;
+  principalUnchanged?: number;
+  performedByUid?: string;
+  performedByEmail?: string;
+  performedByName?: string;
+}
 
 export interface Loan {
   id: string;
@@ -136,6 +163,10 @@ export interface Loan {
   installments: Installment[];
   status: LoanStatus;
   paidAmount?: number;
+  renewCount?: number;
+  lastRenewAt?: string;
+  allowInterestOnlyRenewal?: boolean;
+  renewalHistory?: InterestOnlyRenewalRecord[];
 }
 
 export type LoanDraft = Omit<Loan, 'id' | 'createdAt'>;

@@ -13,9 +13,9 @@ import { auth, storage, storageAppspotFallback, storageFirebasestorageFallback }
 interface CustomerSectionProps {
   customers: Customer[];
   loans: Loan[];
-  onAddCustomer: (c: Customer) => void;
-  onUpdateCustomer: (c: Customer) => void;
-  onDeleteCustomer: (id: string) => void;
+  onAddCustomer: (c: Customer) => Promise<void> | void;
+  onUpdateCustomer: (c: Customer) => Promise<void> | void;
+  onDeleteCustomer: (id: string) => Promise<void> | void;
 }
 
 const CustomerSection: React.FC<CustomerSectionProps> = ({
@@ -26,6 +26,8 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [formData, setFormData] = useState<Partial<Customer>>({});
   const [isUploading, setIsUploading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [viewingDetails, setViewingDetails] = useState<Customer | null>(null);
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
 
@@ -93,6 +95,73 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       image.onerror = () => resolve(sourceDataUrl);
       image.src = sourceDataUrl;
     });
+  };
+
+  const dataUrlToBlob = (dataUrl: string): Blob | null => {
+    try {
+      const [header, payload] = dataUrl.split(',', 2);
+      if (!header || !payload) return null;
+
+      const mimeType = header.match(/data:([^;]+)/i)?.[1] || 'application/octet-stream';
+      const isBase64 = header.includes(';base64');
+
+      if (isBase64) {
+        const binary = atob(payload);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return new Blob([bytes], { type: mimeType });
+      }
+
+      return new Blob([decodeURIComponent(payload)], { type: mimeType });
+    } catch {
+      return null;
+    }
+  };
+
+  const openDocument = (doc: CustomerDocument) => {
+    const inlineData = typeof doc.data === 'string' ? doc.data.trim() : '';
+    const remoteUrl = typeof doc.url === 'string' ? doc.url.trim() : '';
+
+    const openUrlInNewTab = (value: string): boolean => {
+      try {
+        const parsed = new URL(value, window.location.href);
+        const protocol = parsed.protocol.toLowerCase();
+        const isAbsoluteHttp = /^https?:\/\//i.test(value);
+        const isBlob = protocol === 'blob:';
+        if (!(isBlob || (isAbsoluteHttp && (protocol === 'https:' || protocol === 'http:')))) {
+          return false;
+        }
+        window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+        return true;
+      } catch {
+        return false;
+      }
+    };
+
+    if (/^data:/i.test(inlineData)) {
+      const blob = dataUrlToBlob(inlineData);
+      if (blob) {
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank', 'noopener,noreferrer');
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+        return;
+      }
+
+      alert('Documento indisponivel para visualizacao.');
+      return;
+    }
+
+    if (remoteUrl && openUrlInNewTab(remoteUrl)) {
+      return;
+    }
+
+    if (inlineData && openUrlInNewTab(inlineData)) {
+      return;
+    }
+
+    alert('Documento indisponivel para visualizacao.');
   };
 
   const handleImageLoadError = (
@@ -302,8 +371,9 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     CANCELLED: 'Cancelado',
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSaving || isUploading) return;
 
     // Validacao de CPF/CNPJ (11 ou 14 digitos numericos)
     const cleanDocument = (formData.cpf || '').replace(/\D/g, '');
@@ -339,14 +409,21 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       documents: (formData.documents || []) as any,
     } as any;
 
-    if (editingCustomer) {
-      onUpdateCustomer({ ...editingCustomer, ...payload } as Customer);
-    } else {
-      onAddCustomer(payload as Customer);
+    setIsSaving(true);
+    try {
+      if (editingCustomer) {
+        await onUpdateCustomer({ ...editingCustomer, ...payload } as Customer);
+      } else {
+        await onAddCustomer(payload as Customer);
+      }
+      setIsModalOpen(false);
+      setEditingCustomer(null);
+      setFormData({});
+    } catch {
+      // Erro tratado no App.tsx; mantemos o formulario aberto para correcao/tentativa.
+    } finally {
+      setIsSaving(false);
     }
-    setIsModalOpen(false);
-    setEditingCustomer(null);
-    setFormData({});
   };
 
   return (
@@ -601,10 +678,10 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
               </div>
 
               <button 
-                disabled={isUploading}
-                className={`w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4 flex items-center justify-center gap-2 ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}`}
+                disabled={isUploading || isSaving}
+                className={`w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4 flex items-center justify-center gap-2 ${(isUploading || isSaving) ? 'opacity-50 cursor-not-allowed' : ''}`}
               >
-                {isUploading ? 'Enviando Arquivos...' : (editingCustomer ? 'Salvar Alteracoes' : 'Cadastrar Cliente')}
+                {isUploading ? 'Enviando Arquivos...' : isSaving ? 'Salvando...' : (editingCustomer ? 'Salvar Alteracoes' : 'Cadastrar Cliente')}
               </button>
             </form>
           </div>
@@ -751,16 +828,15 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                   <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-4">Documentos Anexados</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {((viewingDetails.documents || []) as any[]).map((doc: any) => (
-                      <a 
-                        key={doc.id || doc.name} 
-                        href={doc.data || doc.url || '#'} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-3 p-3 bg-zinc-900/30 border border-zinc-800 rounded-xl hover:border-[#BF953F]/50 transition-all"
+                      <button
+                        key={doc.id || doc.name}
+                        type="button"
+                        onClick={() => openDocument(doc as CustomerDocument)}
+                        className="w-full text-left flex items-center gap-3 p-3 bg-zinc-900/30 border border-zinc-800 rounded-xl hover:border-[#BF953F]/50 transition-all"
                       >
                         <FileText size={16} className="text-[#BF953F]" />
                         <span className="text-[9px] text-zinc-400 truncate">{doc.name}</span>
-                      </a>
+                      </button>
                     ))}
                   </div>
                 </div>
@@ -791,19 +867,31 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             </p>
             <div className="flex gap-4">
               <button 
-                onClick={() => setDeleteConfirmation(null)}
-                className="flex-1 py-4 bg-zinc-900 text-zinc-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-zinc-800 transition-all"
+                onClick={() => {
+                  if (!isDeleting) setDeleteConfirmation(null);
+                }}
+                disabled={isDeleting}
+                className="flex-1 py-4 bg-zinc-900 text-zinc-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-zinc-800 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 Cancelar
               </button>
               <button 
-                onClick={() => {
-                  onDeleteCustomer(deleteConfirmation);
-                  setDeleteConfirmation(null);
+                disabled={isDeleting}
+                onClick={async () => {
+                  if (!deleteConfirmation || isDeleting) return;
+                  setIsDeleting(true);
+                  try {
+                    await onDeleteCustomer(deleteConfirmation);
+                    setDeleteConfirmation(null);
+                  } catch {
+                    // Erro tratado no App.tsx; mantemos o dialogo aberto para nova tentativa.
+                  } finally {
+                    setIsDeleting(false);
+                  }
                 }}
-                className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-red-600 transition-all shadow-lg shadow-red-500/20"
+                className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-red-600 transition-all shadow-lg shadow-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Confirmar
+                {isDeleting ? 'Excluindo...' : 'Confirmar'}
               </button>
             </div>
           </div>

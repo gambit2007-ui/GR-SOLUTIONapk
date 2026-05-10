@@ -36,7 +36,7 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
       setIsRecording(true);
     } catch (err) {
       console.error("Erro ao acessar microfone:", err);
-      alert("NÃ£o foi possÃ­vel acessar o microfone. Verifique as permissÃµes.");
+      alert("Nao foi possivel acessar o microfone. Verifique as permissoes.");
     }
   };
 
@@ -62,7 +62,12 @@ const VoiceAssistant: React.FC<VoiceAssistantProps> = ({ onResult, context, labe
     setIsProcessing(true);
     try {
       const base64Data = await blobToBase64(audioBlob);
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+      if (!apiKey) {
+        alert('Recurso de voz nao configurado.');
+        return;
+      }
+      const ai = new GoogleGenAI({ apiKey });
       
       const systemInstruction = context === 'NOTE' 
         ? "VocÃª Ã© um transcritor profissional. Transcreva o Ã¡udio fielmente para texto."

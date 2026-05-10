@@ -4,6 +4,8 @@ import type {
   CashMovementType,
   Customer,
   Frequency,
+  InstallmentPaymentEntry,
+  InterestOnlyRenewalRecord,
   Installment,
   InstallmentStatus,
   InterestType,
@@ -47,6 +49,12 @@ const toOptionalPositiveNumber = (value: unknown): number | undefined => {
   if (!Number.isFinite(parsed)) return undefined;
   const rounded = Number(parsed.toFixed(2));
   return rounded >= 0 ? rounded : undefined;
+};
+
+const toOptionalRoundedNumber = (value: unknown): number | undefined => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return undefined;
+  return Number(parsed.toFixed(2));
 };
 
 export const parseMovementType = (value: unknown): CashMovementType => {
@@ -113,10 +121,79 @@ const parsePaymentBreakdown = (raw: unknown): PaymentBreakdown | undefined => {
   };
 };
 
+const parseInstallmentPaymentEntry = (raw: unknown): InstallmentPaymentEntry | null => {
+  if (!isRecord(raw)) return null;
+
+  const id = toString(raw.id, '');
+  const recordedAt = toString(raw.recordedAt, '');
+  const kindRaw = toString(raw.kind, '').toUpperCase();
+  const kind = kindRaw === 'REVERSAL' ? 'REVERSAL' : kindRaw === 'PAYMENT' ? 'PAYMENT' : undefined;
+
+  const principalPaid = toOptionalRoundedNumber(raw.principalPaid) ?? 0;
+  const interestPaid = toOptionalRoundedNumber(raw.interestPaid) ?? 0;
+  const lateFeePaid = toOptionalRoundedNumber(raw.lateFeePaid) ?? 0;
+  const serviceFeePaid = toOptionalRoundedNumber(raw.serviceFeePaid) ?? 0;
+  const discountApplied = toOptionalRoundedNumber(raw.discountApplied) ?? 0;
+  const totalPaid = toOptionalRoundedNumber(raw.totalPaid) ?? 0;
+
+  const hasAnyValue =
+    principalPaid !== 0 ||
+    interestPaid !== 0 ||
+    lateFeePaid !== 0 ||
+    serviceFeePaid !== 0 ||
+    discountApplied !== 0 ||
+    totalPaid !== 0;
+
+  if (!id || !recordedAt || !hasAnyValue) {
+    return null;
+  }
+
+  return {
+    id,
+    recordedAt,
+    kind,
+    principalPaid,
+    interestPaid,
+    lateFeePaid,
+    serviceFeePaid,
+    discountApplied,
+    totalPaid,
+  };
+};
+
 const parseBreakdownSource = (raw: unknown): BreakdownSource | string | undefined => {
   const source = toOptionalString(raw);
   if (!source) return undefined;
   return source;
+};
+
+const parseInterestOnlyRenewalRecord = (raw: unknown): InterestOnlyRenewalRecord | null => {
+  if (!isRecord(raw)) return null;
+
+  const type = toString(raw.type, '').toLowerCase();
+  if (type !== 'interest_only_renewal') return null;
+
+  const id = toString(raw.id, '');
+  const amount = toNumber(raw.amount, 0);
+  const paymentDate = toString(raw.paymentDate, '');
+
+  if (!id || !Number.isFinite(amount) || amount <= 0 || !paymentDate) {
+    return null;
+  }
+
+  return {
+    id,
+    type: 'interest_only_renewal',
+    amount: Number(amount.toFixed(2)),
+    paymentDate,
+    previousDueDate: toOptionalString(raw.previousDueDate),
+    newDueDate: toOptionalString(raw.newDueDate),
+    notes: toOptionalString(raw.notes),
+    principalUnchanged: toOptionalPositiveNumber(raw.principalUnchanged),
+    performedByUid: toOptionalString(raw.performedByUid),
+    performedByEmail: toOptionalString(raw.performedByEmail),
+    performedByName: toOptionalString(raw.performedByName),
+  };
 };
 
 const parseFrequency = (value: unknown): Frequency => {
@@ -148,6 +225,11 @@ export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installm
   const amount = toNumber(payload.amount ?? payload.value, 0);
   const paidAmount = toNumber(payload.paidAmount ?? payload.partialPaid, 0);
   const paymentBreakdown = parsePaymentBreakdown(payload.paymentBreakdown);
+  const paymentEntries = Array.isArray(payload.paymentEntries)
+    ? payload.paymentEntries
+        .map((entry) => parseInstallmentPaymentEntry(entry))
+        .filter((entry): entry is InstallmentPaymentEntry => Boolean(entry))
+    : [];
 
   return {
     id: toOptionalString(payload.id),
@@ -167,6 +249,7 @@ export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installm
     expectedPrincipal: toOptionalPositiveNumber(payload.expectedPrincipal),
     expectedInterest: toOptionalPositiveNumber(payload.expectedInterest),
     paymentBreakdown,
+    paymentEntries: paymentEntries.length > 0 ? paymentEntries : undefined,
     breakdownSource: parseBreakdownSource(payload.breakdownSource),
     needsFiscalReview: payload.needsFiscalReview === true ? true : undefined,
   };
@@ -176,6 +259,10 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
   const payload = isRecord(raw) ? raw : {};
   const installmentsRaw = Array.isArray(payload.installments) ? payload.installments : [];
   const installments = installmentsRaw.map((installment, index) => normalizeInstallment(installment, index + 1));
+  const renewalHistoryRaw = Array.isArray(payload.renewalHistory) ? payload.renewalHistory : [];
+  const renewalHistory = renewalHistoryRaw
+    .map((record) => parseInterestOnlyRenewalRecord(record))
+    .filter((record): record is InterestOnlyRenewalRecord => Boolean(record));
   const installmentsCount = Math.max(
     0,
     Math.trunc(toNumber(payload.installmentsCount ?? payload.installmentCount, installments.length)),
@@ -206,6 +293,11 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     installments,
     status: parseLoanStatus(payload.status),
     paidAmount: toNumber(payload.paidAmount, 0) || undefined,
+    renewCount: Math.max(0, Math.trunc(toNumber(payload.renewCount, 0))) || undefined,
+    lastRenewAt: toOptionalString(payload.lastRenewAt),
+    allowInterestOnlyRenewal:
+      typeof payload.allowInterestOnlyRenewal === 'boolean' ? payload.allowInterestOnlyRenewal : undefined,
+    renewalHistory: renewalHistory.length > 0 ? renewalHistory : undefined,
   };
 };
 
