@@ -1,5 +1,5 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
-import { Loan, Customer, CashMovement, Installment } from '../types';
+import { Loan, CashMovement, Installment } from '../types';
 import { TrendingUp, Users, FileText, Wallet, Activity, ChevronDown, Calendar as CalendarIcon, Clock, ArrowRight } from 'lucide-react';
 import {
   effectiveLoanStatus,
@@ -11,12 +11,11 @@ import { formatDateTimeBR, getLocalISODate } from '../utils/dateTime';
 
 interface DashboardProps {
   loans: Loan[];
-  customers: Customer[];
   cashMovements: CashMovement[];
   onNavigateToLoan: (loanId: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, onNavigateToLoan }) => {
+const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateToLoan }) => {
   const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
   const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState(getLocalISODate());
@@ -127,7 +126,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, customers, cashMovements, 
   });
 
   const stats = [
-    { label: 'Clientes Ativos', value: customers.length, icon: Users, color: 'text-blue-500' },
+    {
+      label: 'Clientes Ativos',
+      value: new Set(activeLoans.map((loan) => loan.customerId).filter(Boolean)).size,
+      icon: Users,
+      color: 'text-blue-500',
+    },
     { label: 'Contratos Ativos', value: activeLoans.length, icon: FileText, color: 'text-gold-500' },
     { 
       label: 'Contratos em Atraso', 

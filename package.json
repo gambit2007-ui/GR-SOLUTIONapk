@@ -14,7 +14,6 @@
     "migrate:breakdown:apply": "node --experimental-strip-types scripts/migrate-breakdown-legacy.ts --apply"
   },
   "dependencies": {
-    "@google/genai": "^1.42.0",
     "@tailwindcss/vite": "^4.2.1",
     "firebase": "^12.9.0",
     "html-to-image": "^1.11.11",

@@ -13,16 +13,18 @@ import { auth, storage, storageAppspotFallback, storageFirebasestorageFallback }
 interface CustomerSectionProps {
   customers: Customer[];
   loans: Loan[];
+  isLoadingCustomers?: boolean;
   onAddCustomer: (c: Customer) => Promise<void> | void;
   onUpdateCustomer: (c: Customer) => Promise<void> | void;
   onDeleteCustomer: (id: string) => Promise<void> | void;
 }
 
 const CustomerSection: React.FC<CustomerSectionProps> = ({
-  customers, loans, onAddCustomer, onUpdateCustomer, onDeleteCustomer
+  customers, loans, isLoadingCustomers = false, onAddCustomer, onUpdateCustomer, onDeleteCustomer
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [formData, setFormData] = useState<Partial<Customer>>({});
   const [isUploading, setIsUploading] = useState(false);
@@ -352,6 +354,24 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       c.cpf?.includes(searchTerm)
     );
 
+  const CUSTOMERS_PER_PAGE = 12;
+  const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / CUSTOMERS_PER_PAGE));
+  const currentPageSafe = Math.min(currentPage, totalPages);
+  const paginatedCustomers = filteredCustomers.slice(
+    (currentPageSafe - 1) * CUSTOMERS_PER_PAGE,
+    currentPageSafe * CUSTOMERS_PER_PAGE,
+  );
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
+  React.useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
   const isCustomerOverdue = (customerId: string) => {
     return loans.some(loan => 
       loan.customerId === customerId && 
@@ -447,8 +467,23 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         </button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filteredCustomers.map(customer => {
+      {isLoadingCustomers && customers.length === 0 ? (
+        <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 flex items-center justify-center gap-3">
+          <div className="h-4 w-4 rounded-full border-2 border-zinc-800 border-t-[#BF953F] animate-spin" />
+          <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+            Carregando clientes...
+          </span>
+        </div>
+      ) : filteredCustomers.length === 0 ? (
+        <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 text-center">
+          <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+            Nenhum cliente encontrado
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {paginatedCustomers.map(customer => {
           const customerLoans = loans.filter(l => l.customerId === customer.id);
           const hasOverdue = isCustomerOverdue(customer.id);
           const hasActiveLoan = customerLoans.some((loan) => effectiveLoanStatus(loan) === 'ACTIVE');
@@ -518,7 +553,35 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             </div>
           );
         })}
-      </div>
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#050505] border border-zinc-900 rounded-2xl px-4 py-3">
+              <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">
+                Pagina {currentPageSafe} de {totalPages}  •  {filteredCustomers.length} clientes
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((previous) => Math.max(previous - 1, 1))}
+                  disabled={currentPageSafe === 1}
+                  className="px-4 py-2 bg-zinc-900 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
+                >
+                  Anterior
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCurrentPage((previous) => Math.min(previous + 1, totalPages))}
+                  disabled={currentPageSafe === totalPages}
+                  className="px-4 py-2 bg-zinc-900 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
+                >
+                  Proxima
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/80 backdrop-blur-sm overflow-y-auto">

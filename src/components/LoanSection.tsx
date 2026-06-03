@@ -1,7 +1,6 @@
 ﻿import React, { useState } from 'react';
 import { Customer, Loan, LoanDraft, Installment, InstallmentPaymentEntry, LoanType, PaymentBreakdown } from '../types';
 import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban } from 'lucide-react';
-import { generateContractPDF } from '../utils/contractGenerator';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -21,6 +20,7 @@ import {
 interface LoanSectionProps {
   customers: Customer[];
   loans: Loan[];
+  isLoadingCustomers?: boolean;
   onAddLoan: (draft: LoanDraft) => Promise<string | void> | void;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onDeleteLoan: (loanId: string) => Promise<void>;
@@ -78,6 +78,7 @@ interface InterestOnlyRenewalModalState {
 const LoanSection: React.FC<LoanSectionProps> = ({ 
   customers, 
   loans, 
+  isLoadingCustomers = false,
   onAddLoan, 
   onUpdateLoan,
   onDeleteLoan,
@@ -109,6 +110,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [processingRenewal, setProcessingRenewal] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'>('ALL');
+  const [currentPage, setCurrentPage] = useState(1);
 
   const fromLegacyInterestType = (value: unknown): 'SIMPLE' | 'PRICE' | 'SPLIT' => {
     const normalized = String(value || '').toUpperCase();
@@ -464,6 +466,24 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (statusFilter === 'OVERDUE') return matchesSearch && isOverdue;
     return matchesSearch;
   });
+
+  const LOANS_PER_PAGE = 10;
+  const totalPages = Math.max(1, Math.ceil(filteredLoans.length / LOANS_PER_PAGE));
+  const currentPageSafe = Math.min(currentPage, totalPages);
+  const paginatedLoans = filteredLoans.slice(
+    (currentPageSafe - 1) * LOANS_PER_PAGE,
+    currentPageSafe * LOANS_PER_PAGE,
+  );
+
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, statusFilter]);
+
+  React.useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
 
   const paymentModalLoan = paymentModal ? loans.find((loan) => loan.id === paymentModal.loanId) : null;
   const paymentModalOutstandingTotal = paymentModalLoan
@@ -939,6 +959,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             id: createdLoanId || String(newLoan.contractNumber || Date.now()),
             createdAt: Date.now(),
           };
+          const { generateContractPDF } = await import('../utils/contractGenerator');
           generateContractPDF(customer, loanForPdf);
           showToast('Contrato efetivado e PDF gerado!', 'success');
         } catch (pdfError) {
@@ -1279,12 +1300,15 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       showToast('Contrato concluido/cancelado. Cobranca indisponivel.', 'error');
       return;
     }
+    const fallbackPhone = String(loan.customerPhone || '').trim();
     const customer = customers.find(c => c.id === loan.customerId);
-    if (!customer?.phone) {
+    const phoneValue = customer?.phone || fallbackPhone;
+    const customerName = customer?.name || loan.customerName;
+    if (!phoneValue) {
       return showToast('Cliente sem telefone cadastrado', 'error');
     }
-    const phone = customer.phone.replace(/\D/g, '');
-    const text = encodeURIComponent(`Ola ${customer.name}, estou entrando em contato sobre o seu contrato ${loan.id}.`);
+    const phone = phoneValue.replace(/\D/g, '');
+    const text = encodeURIComponent(`Ola ${customerName}, estou entrando em contato sobre o seu contrato ${loan.id}.`);
     window.open(`https://wa.me/55${phone}?text=${text}`, '_blank');
   };
 
@@ -1325,8 +1349,23 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         </div>
       </div>
 
+      {isLoadingCustomers && (
+        <div className="bg-[#050505] border border-zinc-900 rounded-2xl px-4 py-3 flex items-center gap-3">
+          <div className="h-4 w-4 rounded-full border-2 border-zinc-800 border-t-[#BF953F] animate-spin" />
+          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">
+            Carregando clientes para novos contratos...
+          </span>
+        </div>
+      )}
+
       <div className="space-y-4">
-        {filteredLoans.map(loan => {
+        {filteredLoans.length === 0 ? (
+          <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 text-center">
+            <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+              Nenhum contrato encontrado
+            </p>
+          </div>
+        ) : paginatedLoans.map(loan => {
           const loanInstallments = Array.isArray(loan.installments) ? loan.installments : [];
           const resolvedLoanStatus = effectiveLoanStatus(loan);
           const paidInstallmentsCount = loanInstallments.filter((inst) => normalizeInstallmentStatus(inst.status) === 'PAID').length;
@@ -1630,6 +1669,32 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           </div>
           );
         })}
+
+        {filteredLoans.length > 0 && totalPages > 1 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#050505] border border-zinc-900 rounded-2xl px-4 py-3">
+            <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">
+              Pagina {currentPageSafe} de {totalPages}  •  {filteredLoans.length} contratos
+            </p>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setCurrentPage((previous) => Math.max(previous - 1, 1))}
+                disabled={currentPageSafe === 1}
+                className="px-4 py-2 bg-zinc-900 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
+              >
+                Anterior
+              </button>
+              <button
+                type="button"
+                onClick={() => setCurrentPage((previous) => Math.min(previous + 1, totalPages))}
+                disabled={currentPageSafe === totalPages}
+                className="px-4 py-2 bg-zinc-900 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
+              >
+                Proxima
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* MODAL DE RENOVACAO POR JUROS */}
@@ -2050,7 +2115,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   value={formData.customerId}
                   onChange={e => setFormData({ ...formData, customerId: e.target.value })}
                 >
-                  <option value="">SELECIONE O CLIENTE</option>
+                  <option value="">
+                    {isLoadingCustomers ? 'CARREGANDO CLIENTES...' : 'SELECIONE O CLIENTE'}
+                  </option>
                   {customers.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
                 </select>
               </div>

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { Suspense, lazy, useState } from 'react';
 import {
   LayoutDashboard, Users, FileText, PieChart, Calculator,
   Activity, X, Menu, Lock, LogOut, Loader2,
@@ -6,11 +6,6 @@ import {
 import { FirebaseError } from 'firebase/app';
 
 import { Customer, Loan, LoanDraft, MovementType, View } from './types';
-import Dashboard from './components/Dashboard';
-import CustomerSection from './components/CustomerSection';
-import SimulationTab from './components/SimulationTab';
-import Reports from './components/Reports';
-import LoanSection from './components/LoanSection';
 import { getLocalISODate } from './utils/dateTime';
 import {
   effectiveLoanStatus,
@@ -23,18 +18,37 @@ import { useRealtimeData } from './hooks/useRealtimeData';
 import { useToasts } from './hooks/useToasts';
 import { useViewport } from './hooks/useViewport';
 import { addCashMovement, recalculateCashBalance } from './services/cashService';
-import { buildBackupPayload } from './services/backupService';
 import { createCustomer, deleteCustomerAndLoans, updateCustomer } from './services/customerService';
 import { createLoan, deleteLoan, updateLoan, updateLoanAndAddMovement } from './services/loanService';
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const CustomerSection = lazy(() => import('./components/CustomerSection'));
+const SimulationTab = lazy(() => import('./components/SimulationTab'));
+const Reports = lazy(() => import('./components/Reports'));
+const LoanSection = lazy(() => import('./components/LoanSection'));
+
+const ViewLoadingFallback: React.FC = () => (
+  <div className="min-h-[240px] flex items-center justify-center">
+    <div className="flex items-center gap-3 px-5 py-4 bg-[#050505] border border-zinc-900 rounded-2xl">
+      <Loader2 size={18} className="text-[#BF953F] animate-spin" />
+      <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+        Carregando modulo...
+      </span>
+    </div>
+  </div>
+);
 
 const App: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
+  const shouldLoadCustomers = currentView === 'CUSTOMERS' || currentView === 'LOANS';
 
   const { user, authLoading, loginLoading, login, logout } = useAuthState();
-  const { clientes, contratos, movimentacoes, caixa } = useRealtimeData(user);
+  const { clientes, contratos, movimentacoes, caixa, isCustomersLoading } = useRealtimeData(user, {
+    loadCustomers: shouldLoadCustomers,
+  });
   const { toasts, showToast, removeToast } = useToasts();
   const {
     isSidebarOpen,
@@ -277,6 +291,7 @@ const App: React.FC = () => {
 
   const handleDownloadBackup = async () => {
     try {
+      const { buildBackupPayload } = await import('./services/backupService');
       const payload = await buildBackupPayload();
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
@@ -287,10 +302,74 @@ const App: React.FC = () => {
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      showToast('Backup do banco baixado (clientes, contratos e financeiro do Firestore)!', 'success');
+      if (payload.assetSummary.failedAssets > 0) {
+        showToast(
+          `Backup baixado com ${payload.assetSummary.failedAssets} anexo(s) nao incorporado(s).`,
+          'info',
+        );
+      } else {
+        showToast('Backup completo baixado com clientes, contratos, financeiro e anexos!', 'success');
+      }
     } catch (error: unknown) {
       showToast('Erro ao gerar backup', 'error');
       throw error;
+    }
+  };
+
+  const renderCurrentView = () => {
+    switch (currentView) {
+      case 'DASHBOARD':
+        return (
+          <Dashboard
+            loans={contratos}
+            cashMovements={movimentacoes}
+            onNavigateToLoan={navigateToLoan}
+          />
+        );
+      case 'CUSTOMERS':
+        return (
+          <CustomerSection
+            customers={clientes}
+            loans={contratos}
+            isLoadingCustomers={isCustomersLoading}
+            onAddCustomer={handleAddCustomer}
+            onUpdateCustomer={handleUpdateCustomer}
+            onDeleteCustomer={handleDeleteCustomer}
+          />
+        );
+      case 'LOANS':
+        return (
+          <LoanSection
+            customers={clientes}
+            loans={contratos}
+            isLoadingCustomers={isCustomersLoading}
+            onAddLoan={handleAddLoan}
+            onUpdateLoan={handleUpdateLoan}
+            onDeleteLoan={handleDeleteLoan}
+            showToast={showToast}
+            initialExpandedLoanId={selectedLoanId}
+            currentActor={movementActor}
+            onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
+          />
+        );
+      case 'SIMULATION':
+        return <SimulationTab />;
+      case 'REPORTS':
+        return (
+          <Reports
+            loans={contratos}
+            cashMovements={movimentacoes}
+            caixa={caixa}
+            onAddTransaction={handleAddTransaction}
+            onUpdateLoan={handleUpdateLoan}
+            onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
+            onRecalculateCash={handleRecalculateCash}
+            onDownloadBackup={handleDownloadBackup}
+            showToast={showToast}
+          />
+        );
+      default:
+        return null;
     }
   };
 
@@ -476,50 +555,9 @@ const App: React.FC = () => {
         </header>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#000000] p-3 sm:p-4 md:p-6">
-          {currentView === 'DASHBOARD' && (
-            <Dashboard
-              loans={contratos}
-              customers={clientes}
-              cashMovements={movimentacoes}
-              onNavigateToLoan={navigateToLoan}
-            />
-          )}
-          {currentView === 'CUSTOMERS' && (
-            <CustomerSection
-              customers={clientes}
-              loans={contratos}
-              onAddCustomer={handleAddCustomer}
-              onUpdateCustomer={handleUpdateCustomer}
-              onDeleteCustomer={handleDeleteCustomer}
-            />
-          )}
-          {currentView === 'LOANS' && (
-            <LoanSection
-              customers={clientes}
-              loans={contratos}
-              onAddLoan={handleAddLoan}
-              onUpdateLoan={handleUpdateLoan}
-              onDeleteLoan={handleDeleteLoan}
-              showToast={showToast}
-              initialExpandedLoanId={selectedLoanId}
-              currentActor={movementActor}
-              onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
-            />
-          )}
-          {currentView === 'SIMULATION' && <SimulationTab customers={clientes} />}
-          {currentView === 'REPORTS' && (
-            <Reports
-              loans={contratos}
-              cashMovements={movimentacoes}
-              caixa={caixa}
-              onAddTransaction={handleAddTransaction}
-              onUpdateLoan={handleUpdateLoan}
-              onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
-              onRecalculateCash={handleRecalculateCash}
-              onDownloadBackup={handleDownloadBackup}
-              showToast={showToast}
-            />
-          )}
+          <Suspense fallback={<ViewLoadingFallback />}>
+            {renderCurrentView()}
+          </Suspense>
         </div>
 
         <div className="fixed top-3 sm:top-6 left-3 right-3 sm:left-auto sm:right-6 z-[200] flex flex-col gap-2 sm:gap-3 pointer-events-none">

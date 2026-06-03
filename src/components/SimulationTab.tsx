@@ -1,14 +1,13 @@
-﻿import React, { useState } from 'react';
+import React, { useState } from 'react';
 import { Customer } from '../types';
 import { Calculator, Percent, Calendar, Wallet, Download, MessageCircle, User, Phone } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 interface SimulationTabProps {
-  customers: Customer[];
+  customers?: Customer[];
 }
 
-const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
+const SimulationTab: React.FC<SimulationTabProps> = () => {
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     phone: '',
@@ -57,50 +56,64 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
     }
   }
 
-  const generatePDF = () => {
+  const generatePDF = async () => {
     if (!canSimulate) return;
-    const doc = new jsPDF();
-    const date = new Date().toLocaleDateString('pt-BR');
 
-    doc.setFontSize(20);
-    doc.setTextColor(191, 149, 63);
-    doc.text('SIMULACAO DE EMPRESTIMO', 105, 20, { align: 'center' });
+    setIsGeneratingPdf(true);
+    try {
+      const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+        import('jspdf'),
+        import('jspdf-autotable'),
+      ]);
 
-    doc.setFontSize(10);
-    doc.setTextColor(100);
-    doc.text(`Data: ${date}`, 105, 28, { align: 'center' });
+      const doc = new jsPDF();
+      const date = new Date().toLocaleDateString('pt-BR');
 
-    doc.setFontSize(12);
-    doc.setTextColor(0);
-    doc.text('DADOS DO CLIENTE', 14, 45);
-    doc.setFontSize(10);
-    doc.text(`Nome: ${formData.name || 'Nao informado'}`, 14, 52);
-    doc.text(`Telefone: ${formData.phone || 'Nao informado'}`, 14, 58);
+      doc.setFontSize(20);
+      doc.setTextColor(191, 149, 63);
+      doc.text('SIMULACAO DE EMPRESTIMO', 105, 20, { align: 'center' });
 
-    doc.setFontSize(12);
-    doc.text('DETALHES DA SIMULACAO', 14, 75);
+      doc.setFontSize(10);
+      doc.setTextColor(100);
+      doc.text(`Data: ${date}`, 105, 28, { align: 'center' });
 
-    const details = [
-      ['Valor Principal', `R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
-      ['Frequencia', frequencyLabel[formData.frequency]],
-      ['Numero de Parcelas', formData.installmentsCount],
-      ['Valor da Parcela', `R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
-    ];
+      doc.setFontSize(12);
+      doc.setTextColor(0);
+      doc.text('DADOS DO CLIENTE', 14, 45);
+      doc.setFontSize(10);
+      doc.text(`Nome: ${formData.name || 'Nao informado'}`, 14, 52);
+      doc.text(`Telefone: ${formData.phone || 'Nao informado'}`, 14, 58);
 
-    autoTable(doc, {
-      startY: 80,
-      head: [['Descricao', 'Valor']],
-      body: details,
-      theme: 'striped',
-      headStyles: { fillColor: [191, 149, 63] },
-    });
+      doc.setFontSize(12);
+      doc.text('DETALHES DA SIMULACAO', 14, 75);
 
-    const finalY = (doc as any).lastAutoTable.finalY || 150;
-    doc.setFontSize(8);
-    doc.setTextColor(150);
-    doc.text('Esta e apenas uma simulacao e nao garante a efetivacao do contrato.', 105, finalY + 20, { align: 'center' });
+      const details = [
+        ['Valor Principal', `R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
+        ['Frequencia', frequencyLabel[formData.frequency]],
+        ['Numero de Parcelas', formData.installmentsCount],
+        ['Valor da Parcela', `R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`],
+      ];
 
-    doc.save(`Simulacao_${formData.name || 'Cliente'}.pdf`);
+      autoTable(doc, {
+        startY: 80,
+        head: [['Descricao', 'Valor']],
+        body: details,
+        theme: 'striped',
+        headStyles: { fillColor: [191, 149, 63] },
+      });
+
+      const finalY = (doc as any).lastAutoTable.finalY || 150;
+      doc.setFontSize(8);
+      doc.setTextColor(150);
+      doc.text('Esta e apenas uma simulacao e nao garante a efetivacao do contrato.', 105, finalY + 20, { align: 'center' });
+
+      doc.save(`Simulacao_${formData.name || 'Cliente'}.pdf`);
+    } catch (error) {
+      console.error('Falha ao gerar PDF da simulacao:', error);
+      alert('Nao foi possivel gerar o PDF da simulacao.');
+    } finally {
+      setIsGeneratingPdf(false);
+    }
   };
 
   const sendWhatsApp = () => {
@@ -251,11 +264,11 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
 
         <div className="flex flex-col sm:flex-row gap-4">
           <button
-            onClick={generatePDF}
-            disabled={!canSimulate}
+            onClick={() => { void generatePDF(); }}
+            disabled={!canSimulate || isGeneratingPdf}
             className="flex-1 py-4 sm:py-5 bg-zinc-900 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-zinc-800 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Download size={18} /> Baixar PDF
+            <Download size={18} /> {isGeneratingPdf ? 'Gerando PDF...' : 'Baixar PDF'}
           </button>
           <button
             onClick={sendWhatsApp}
@@ -271,6 +284,3 @@ const SimulationTab: React.FC<SimulationTabProps> = ({ customers }) => {
 };
 
 export default SimulationTab;
-
-
-

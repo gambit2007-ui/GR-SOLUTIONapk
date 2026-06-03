@@ -10,6 +10,7 @@ interface RealtimeDataState {
   contratos: Loan[];
   movimentacoes: CashMovement[];
   caixa: number;
+  isCustomersLoading: boolean;
 }
 
 const initialState: RealtimeDataState = {
@@ -17,10 +18,16 @@ const initialState: RealtimeDataState = {
   contratos: [],
   movimentacoes: [],
   caixa: 0,
+  isCustomersLoading: false,
 };
 
-export const useRealtimeData = (user: User | null) => {
+interface UseRealtimeDataOptions {
+  loadCustomers?: boolean;
+}
+
+export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptions = {}) => {
   const [state, setState] = useState<RealtimeDataState>(initialState);
+  const { loadCustomers = true } = options;
 
   useEffect(() => {
     if (!user) {
@@ -28,13 +35,31 @@ export const useRealtimeData = (user: User | null) => {
       return;
     }
 
-    const clientesListener = onSnapshot(
-      query(collection(db, 'clientes'), orderBy('createdAt', 'desc')),
-      (snapshot) => {
-        const clientes = snapshot.docs.map((docSnap) => parseCustomer(docSnap.id, docSnap.data()));
-        setState((previous) => ({ ...previous, clientes }));
-      },
-    );
+    let clientesListener = () => {};
+
+    if (loadCustomers) {
+      setState((previous) => ({
+        ...previous,
+        isCustomersLoading: true,
+      }));
+
+      clientesListener = onSnapshot(
+        query(collection(db, 'clientes'), orderBy('createdAt', 'desc')),
+        (snapshot) => {
+          const clientes = snapshot.docs.map((docSnap) => parseCustomer(docSnap.id, docSnap.data()));
+          setState((previous) => ({ ...previous, clientes, isCustomersLoading: false }));
+        },
+        () => {
+          setState((previous) => ({ ...previous, clientes: [], isCustomersLoading: false }));
+        },
+      );
+    } else {
+      setState((previous) => (
+        previous.clientes.length > 0 || previous.isCustomersLoading
+          ? { ...previous, clientes: [], isCustomersLoading: false }
+          : previous
+      ));
+    }
 
     const contratosListener = onSnapshot(
       query(collection(db, 'loans'), orderBy('startDate', 'desc')),
@@ -63,8 +88,7 @@ export const useRealtimeData = (user: User | null) => {
       caixaListener();
       movimentacoesListener();
     };
-  }, [user]);
+  }, [loadCustomers, user]);
 
   return state;
 };
-

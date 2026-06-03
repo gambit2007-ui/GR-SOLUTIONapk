@@ -312,7 +312,7 @@ const Reports: React.FC<ReportsProps> = ({
       saidas: number
     } } = {};
 
-    for (let monthIndex = 0; monthIndex < 12; monthIndex += 1) {
+    for (let monthIndex = 0; monthIndex <= currentMonthIndex; monthIndex += 1) {
       const key = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}`;
       months[key] = {
         month: getMonthShortLabel(monthIndex, currentYear),
