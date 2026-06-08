@@ -1,30 +1,30 @@
 ﻿import React, { useState } from 'react';
 import { Plus, Search, User, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle } from 'lucide-react';
+import { collection, getDocs, limit, query, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes, type FirebaseStorage } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { Customer, Loan, CustomerDocument } from '../types';
+import { db, auth, storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebase';
+import { usePaginatedFirestoreList } from '../hooks/usePaginatedFirestoreList';
+import { parseCustomer } from '../utils/domainParsers';
 import {
   effectiveLoanStatus,
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
-import { auth, storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebase';
 
 interface CustomerSectionProps {
-  customers: Customer[];
   loans: Loan[];
-  isLoadingCustomers?: boolean;
   onAddCustomer: (c: Customer) => Promise<void> | void;
   onUpdateCustomer: (c: Customer) => Promise<void> | void;
   onDeleteCustomer: (id: string) => Promise<void> | void;
 }
 
 const CustomerSection: React.FC<CustomerSectionProps> = ({
-  customers, loans, isLoadingCustomers = false, onAddCustomer, onUpdateCustomer, onDeleteCustomer
+  loans, onAddCustomer, onUpdateCustomer, onDeleteCustomer
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [formData, setFormData] = useState<Partial<Customer>>({});
   const [isUploading, setIsUploading] = useState(false);
@@ -39,6 +39,34 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const ALLOWED_DOCUMENT_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
   const DEFAULT_AVATAR_DATA_URL =
     "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='24' fill='%23121212'/%3E%3Ccircle cx='64' cy='48' r='19' fill='%23BF953F' fill-opacity='0.85'/%3E%3Cpath d='M28 104c5-16 19-26 36-26s31 10 36 26' fill='none' stroke='%23BF953F' stroke-opacity='0.85' stroke-width='10' stroke-linecap='round'/%3E%3C/svg%3E";
+  const CUSTOMERS_PER_PAGE = 12;
+
+  const {
+    items: paginatedCustomers,
+    currentPage,
+    totalPages,
+    totalItems: filteredCustomersCount,
+    isLoading: isCustomersListLoading,
+    hasPreviousPage,
+    hasNextPage,
+    setCurrentPage,
+    refresh: refreshCustomers,
+  } = usePaginatedFirestoreList<Customer>({
+    collectionName: 'clientes',
+    enabled: true,
+    orderByField: 'name',
+    orderDirection: 'asc',
+    pageSize: CUSTOMERS_PER_PAGE,
+    searchTerm,
+    parser: parseCustomer,
+    matchesSearch: (customer, normalizedSearch) => {
+      const numericSearch = normalizedSearch.replace(/\D/g, '');
+      return (
+        String(customer.name || '').toLowerCase().includes(normalizedSearch) ||
+        (numericSearch.length > 0 && String(customer.cpf || '').includes(numericSearch))
+      );
+    },
+  });
 
   const getFileExtension = (fileName: string) => {
     const dotIndex = fileName.lastIndexOf('.');
@@ -347,31 +375,6 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     }));
   };
 
-  const filteredCustomers = [...customers]
-    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR', { sensitivity: 'base' }))
-    .filter(c =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.cpf?.includes(searchTerm)
-    );
-
-  const CUSTOMERS_PER_PAGE = 12;
-  const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / CUSTOMERS_PER_PAGE));
-  const currentPageSafe = Math.min(currentPage, totalPages);
-  const paginatedCustomers = filteredCustomers.slice(
-    (currentPageSafe - 1) * CUSTOMERS_PER_PAGE,
-    currentPageSafe * CUSTOMERS_PER_PAGE,
-  );
-
-  React.useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm]);
-
-  React.useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
-
   const isCustomerOverdue = (customerId: string) => {
     return loans.some(loan => 
       loan.customerId === customerId && 
@@ -383,6 +386,16 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         return normalizeInstallmentStatus(inst.status) !== 'PAID' && dueDate < today;
       })
     );
+  };
+
+  const hasCustomerDocumentConflict = async (documentNumber: string) => {
+    const duplicateSnapshot = await getDocs(query(
+      collection(db, 'clientes'),
+      where('cpf', '==', documentNumber),
+      limit(2),
+    ));
+
+    return duplicateSnapshot.docs.some((docSnap) => docSnap.id !== editingCustomer?.id);
   };
 
   const loanStatusLabel: Record<string, string> = {
@@ -403,9 +416,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     }
 
     // Verificar documento duplicado
-    const isDocumentDuplicate = customers.some(c => 
-      c.cpf?.replace(/\D/g, '') === cleanDocument && c.id !== editingCustomer?.id
-    );
+    const isDocumentDuplicate = await hasCustomerDocumentConflict(cleanDocument);
     if (isDocumentDuplicate) {
       alert('Este CPF/CNPJ ja esta cadastrado para outro cliente.');
       return;
@@ -436,6 +447,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       } else {
         await onAddCustomer(payload as Customer);
       }
+      refreshCustomers();
       setIsModalOpen(false);
       setEditingCustomer(null);
       setFormData({});
@@ -467,14 +479,14 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         </button>
       </div>
 
-      {isLoadingCustomers && customers.length === 0 ? (
+      {isCustomersListLoading && paginatedCustomers.length === 0 ? (
         <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 flex items-center justify-center gap-3">
           <div className="h-4 w-4 rounded-full border-2 border-zinc-800 border-t-[#BF953F] animate-spin" />
           <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
             Carregando clientes...
           </span>
         </div>
-      ) : filteredCustomers.length === 0 ? (
+      ) : filteredCustomersCount === 0 ? (
         <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 text-center">
           <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
             Nenhum cliente encontrado
@@ -487,8 +499,12 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
           const customerLoans = loans.filter(l => l.customerId === customer.id);
           const hasOverdue = isCustomerOverdue(customer.id);
           const hasActiveLoan = customerLoans.some((loan) => effectiveLoanStatus(loan) === 'ACTIVE');
-          const statusLabel = hasOverdue ? 'Atrasado' : hasActiveLoan ? 'Ativo' : 'Em dia';
-          const statusClasses = hasOverdue
+          const normalizedCustomerStatus = String(customer.status || '').trim().toUpperCase();
+          const isInactiveCustomer = normalizedCustomerStatus === 'INATIVO' || normalizedCustomerStatus === 'INACTIVE';
+          const statusLabel = isInactiveCustomer ? 'Inativo' : hasOverdue ? 'Atrasado' : hasActiveLoan ? 'Ativo' : 'Em dia';
+          const statusClasses = isInactiveCustomer
+            ? 'bg-zinc-800 text-zinc-400 border-zinc-700'
+            : hasOverdue
             ? 'bg-red-500/10 text-red-500 border-red-500/30'
             : hasActiveLoan
               ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/30'
@@ -558,13 +574,13 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
           {totalPages > 1 && (
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#050505] border border-zinc-900 rounded-2xl px-4 py-3">
               <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">
-                Pagina {currentPageSafe} de {totalPages}  •  {filteredCustomers.length} clientes
+                Pagina {currentPage} de {totalPages}  •  {filteredCustomersCount} clientes
               </p>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setCurrentPage((previous) => Math.max(previous - 1, 1))}
-                  disabled={currentPageSafe === 1}
+                  disabled={!hasPreviousPage}
                   className="px-4 py-2 bg-zinc-900 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
                 >
                   Anterior
@@ -572,7 +588,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 <button
                   type="button"
                   onClick={() => setCurrentPage((previous) => Math.min(previous + 1, totalPages))}
-                  disabled={currentPageSafe === totalPages}
+                  disabled={!hasNextPage}
                   className="px-4 py-2 bg-zinc-900 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
                 >
                   Proxima
@@ -785,6 +801,11 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                       <Star size={12} className="text-[#BF953F]" />
                       <span className="text-xs font-black gold-text">{calculateScore(viewingDetails.id)} PONTUACAO</span>
                     </div>
+                    {String(viewingDetails.status || '').trim().toUpperCase() === 'INATIVO' && (
+                      <div className="px-4 py-1 bg-zinc-800 border border-zinc-700 rounded-full flex items-center gap-2">
+                        <span className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Inativo</span>
+                      </div>
+                    )}
                     <button 
                       onClick={() => {
                         setEditingCustomer(viewingDetails);
@@ -803,7 +824,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                         setViewingDetails(null);
                       }}
                       className="p-2 bg-red-500/10 border border-red-500/20 rounded-xl text-red-500 hover:bg-red-500/20 transition-all"
-                      title="Excluir Cliente"
+                      title="Inativar / Arquivar Cliente"
                     >
                       <Trash2 size={16} />
                     </button>
@@ -924,9 +945,9 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
               <AlertTriangle size={32} className="text-red-500" />
             </div>
-            <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Excluir Cliente?</h3>
+            <h3 className="text-lg font-black text-white uppercase tracking-tighter mb-2">Inativar Cliente?</h3>
             <p className="text-[10px] text-zinc-500 uppercase tracking-widest leading-relaxed mb-8">
-              Esta acao e irreversivel. Todos os contratos e movimentacoes vinculados a este cliente serao <span className="text-red-500">apagados permanentemente</span>.
+              Se houver contratos vinculados, eles serao arquivados e o cliente sera inativado. Sem contratos vinculados, o cadastro sera removido.
             </p>
             <div className="flex gap-4">
               <button 
@@ -945,6 +966,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                   setIsDeleting(true);
                   try {
                     await onDeleteCustomer(deleteConfirmation);
+                    refreshCustomers();
                     setDeleteConfirmation(null);
                   } catch {
                     // Erro tratado no App.tsx; mantemos o dialogo aberto para nova tentativa.
@@ -954,7 +976,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 }}
                 className="flex-1 py-4 bg-red-500 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-red-600 transition-all shadow-lg shadow-red-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {isDeleting ? 'Excluindo...' : 'Confirmar'}
+                {isDeleting ? 'Processando...' : 'Confirmar'}
               </button>
             </div>
           </div>

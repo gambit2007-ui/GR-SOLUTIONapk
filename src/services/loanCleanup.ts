@@ -1,26 +1,12 @@
 import {
-  collection,
   doc,
-  getDocs,
-  query,
-  where,
   writeBatch,
-  type DocumentReference,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { recalculateCashBalance } from './cashService';
+import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
 
 const MAX_BATCH_SIZE = 450;
-
-const deleteRefsInBatches = async (refs: DocumentReference[]) => {
-  let index = 0;
-  while (index < refs.length) {
-    const batch = writeBatch(db);
-    refs.slice(index, index + MAX_BATCH_SIZE).forEach((ref) => batch.delete(ref));
-    await batch.commit();
-    index += MAX_BATCH_SIZE;
-  }
-};
 
 export const deleteLoansAndLinkedMovements = async (loanIds: string[]) => {
   const uniqueLoanIds = Array.from(new Set(loanIds.filter(Boolean)));
@@ -28,22 +14,26 @@ export const deleteLoansAndLinkedMovements = async (loanIds: string[]) => {
     return { removedLoans: 0, removedMovements: 0 };
   }
 
-  const movementRefsById = new Map<string, DocumentReference>();
-  for (const loanId of uniqueLoanIds) {
-    const movementSnap = await getDocs(query(collection(db, 'cashMovement'), where('loanId', '==', loanId)));
-    movementSnap.docs.forEach((movementDoc) => {
-      movementRefsById.set(movementDoc.id, movementDoc.ref);
+  let index = 0;
+  while (index < uniqueLoanIds.length) {
+    const batch = writeBatch(db);
+    uniqueLoanIds.slice(index, index + MAX_BATCH_SIZE).forEach((loanId) => {
+      batch.set(
+        doc(db, 'loans', loanId),
+        sanitizeFirestorePayload({
+          status: 'CANCELADO',
+          archivedAt: serverTimestamp(),
+          archiveReason: 'SAFE_DELETE',
+        }),
+        { merge: true },
+      );
     });
+    await batch.commit();
+    index += MAX_BATCH_SIZE;
   }
-
-  const loanRefs = uniqueLoanIds.map((loanId) => doc(db, 'loans', loanId));
-  const refsToDelete = [...loanRefs, ...movementRefsById.values()];
-
-  await deleteRefsInBatches(refsToDelete);
-  await recalculateCashBalance();
 
   return {
     removedLoans: uniqueLoanIds.length,
-    removedMovements: movementRefsById.size,
+    removedMovements: 0,
   };
 };

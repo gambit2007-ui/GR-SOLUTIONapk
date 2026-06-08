@@ -1,6 +1,8 @@
 ﻿import React, { useState } from 'react';
 import { Customer, Loan, LoanDraft, Installment, InstallmentPaymentEntry, LoanType, PaymentBreakdown } from '../types';
 import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban } from 'lucide-react';
+import { usePaginatedFirestoreList } from '../hooks/usePaginatedFirestoreList';
+import { parseLoan } from '../utils/domainParsers';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -110,7 +112,6 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [processingRenewal, setProcessingRenewal] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'>('ALL');
-  const [currentPage, setCurrentPage] = useState(1);
 
   const fromLegacyInterestType = (value: unknown): 'SIMPLE' | 'PRICE' | 'SPLIT' => {
     const normalized = String(value || '').toUpperCase();
@@ -445,12 +446,13 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     };
   };
 
-  const filteredLoans = loans.filter(loan => {
-    const matchesSearch = loan.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || loan.id.toLowerCase().includes(searchTerm.toLowerCase());
+  const LOANS_PER_PAGE = 10;
+
+  const isLoanOverdue = (loan: Loan) => {
     const installments = Array.isArray(loan.installments) ? loan.installments : [];
-    const loanStatus = effectiveLoanStatus(loan);
-    
-    const isOverdue = loanStatus === 'ACTIVE' && installments.some(inst => {
+    if (effectiveLoanStatus(loan) !== 'ACTIVE') return false;
+
+    return installments.some((inst) => {
       if (!inst?.dueDate || normalizeInstallmentStatus(inst.status) === 'PAID') return false;
       const dueDate = new Date(inst.dueDate + 'T00:00:00');
       if (Number.isNaN(dueDate.getTime())) return false;
@@ -458,34 +460,51 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       today.setHours(0, 0, 0, 0);
       return dueDate < today;
     });
+  };
 
-    if (statusFilter === 'ALL') return matchesSearch;
-    if (statusFilter === 'ACTIVE') return matchesSearch && loanStatus === 'ACTIVE' && !isOverdue;
-    if (statusFilter === 'COMPLETED') return matchesSearch && loanStatus === 'COMPLETED';
-    if (statusFilter === 'CANCELLED') return matchesSearch && loanStatus === 'CANCELLED';
-    if (statusFilter === 'OVERDUE') return matchesSearch && isOverdue;
-    return matchesSearch;
+  const {
+    items: paginatedLoanResults,
+    currentPage,
+    totalPages,
+    totalItems: filteredLoansCount,
+    isLoading: isLoansListLoading,
+    hasPreviousPage,
+    hasNextPage,
+    setCurrentPage,
+    refresh: refreshLoans,
+  } = usePaginatedFirestoreList<Loan>({
+    collectionName: 'loans',
+    enabled: true,
+    orderByField: 'startDate',
+    orderDirection: 'desc',
+    pageSize: LOANS_PER_PAGE,
+    searchTerm,
+    filterKey: statusFilter === 'ALL' ? '' : statusFilter,
+    parser: parseLoan,
+    matchesSearch: (loan, normalizedSearch) =>
+      String(loan.customerName || '').toLowerCase().includes(normalizedSearch) ||
+      String(loan.id || '').toLowerCase().includes(normalizedSearch),
+    matchesFilters: (loan) => {
+      const loanStatus = effectiveLoanStatus(loan);
+      const overdue = isLoanOverdue(loan);
+
+      if (statusFilter === 'ACTIVE') return loanStatus === 'ACTIVE' && !overdue;
+      if (statusFilter === 'COMPLETED') return loanStatus === 'COMPLETED';
+      if (statusFilter === 'CANCELLED') return loanStatus === 'CANCELLED';
+      if (statusFilter === 'OVERDUE') return overdue;
+      return true;
+    },
   });
 
-  const LOANS_PER_PAGE = 10;
-  const totalPages = Math.max(1, Math.ceil(filteredLoans.length / LOANS_PER_PAGE));
-  const currentPageSafe = Math.min(currentPage, totalPages);
-  const paginatedLoans = filteredLoans.slice(
-    (currentPageSafe - 1) * LOANS_PER_PAGE,
-    currentPageSafe * LOANS_PER_PAGE,
+  const paginatedLoans = paginatedLoanResults.map((loanPageItem) =>
+    loans.find((loan) => loan.id === loanPageItem.id) ?? loanPageItem,
   );
 
-  React.useEffect(() => {
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
-
-  React.useEffect(() => {
-    if (currentPage > totalPages) {
-      setCurrentPage(totalPages);
-    }
-  }, [currentPage, totalPages]);
-
-  const paymentModalLoan = paymentModal ? loans.find((loan) => loan.id === paymentModal.loanId) : null;
+  const paymentModalLoan = paymentModal
+    ? loans.find((loan) => loan.id === paymentModal.loanId) ??
+      paginatedLoanResults.find((loan) => loan.id === paymentModal.loanId) ??
+      null
+    : null;
   const paymentModalOutstandingTotal = paymentModalLoan
     ? getOutstandingFromInstallmentIndex(
         Array.isArray(paymentModalLoan.installments) ? paymentModalLoan.installments : [],
@@ -495,17 +514,22 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     : 0;
 
   React.useEffect(() => {
-    if (initialExpandedLoanId) {
-      setExpandedLoanId(initialExpandedLoanId);
-      // Scroll to the element if needed
-      setTimeout(() => {
-        const element = document.getElementById(`loan-${initialExpandedLoanId}`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
+    if (!initialExpandedLoanId) return;
+
+    setExpandedLoanId(initialExpandedLoanId);
+
+    if (!paginatedLoans.some((loan) => loan.id === initialExpandedLoanId) && !searchTerm) {
+      setSearchTerm(initialExpandedLoanId);
+      return;
     }
-  }, [initialExpandedLoanId]);
+
+    setTimeout(() => {
+      const element = document.getElementById(`loan-${initialExpandedLoanId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  }, [initialExpandedLoanId, paginatedLoans, searchTerm]);
   const [formData, setFormData] = useState(buildDefaultFormData);
 
   const calculateInstallments = () => {
@@ -630,6 +654,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
     try {
       await onUpdateLoan(loan.id, { status: 'CANCELADO' });
+      refreshLoans();
       showToast('Contrato cancelado com sucesso!', 'success');
     } catch (e) {
       showToast('Erro ao cancelar contrato', 'error');
@@ -641,6 +666,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
     try {
       await onDeleteLoan(loan.id);
+      refreshLoans();
       if (expandedLoanId === loan.id) {
         setExpandedLoanId(null);
       }
@@ -774,6 +800,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         `QUITACAO ANTECIPADA: ${loan.customerName} (DESCONTO R$ ${discountLabel})`
       );
 
+      refreshLoans();
       showToast(
         `Quitacao registrada! Desconto: R$ ${discountLabel} | Total pago: R$ ${settlementModal.payoffAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
         'success'
@@ -859,6 +886,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         `RENOVACAO JUROS (SEM AMORTIZACAO): ${loan.customerName}`
       );
 
+      refreshLoans();
       showToast('Renovacao registrada com pagamento de juros!', 'success');
       setRenewalModal(null);
     } catch (error) {
@@ -928,6 +956,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           ...payload,
           status: normalizeLoanStatus(currentLoan?.status) === 'CANCELLED' ? 'CANCELADO' : 'ATIVO'
         });
+        refreshLoans();
         showToast('Contrato atualizado com sucesso!', 'success');
       } else {
         const newLoan: LoanDraft = {
@@ -953,6 +982,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           installments: payload.installments || [],
         };
         const createdLoanId = await Promise.resolve(onAddLoan(newLoan));
+        refreshLoans();
         try {
           const loanForPdf: Loan = {
             ...newLoan,
@@ -1220,6 +1250,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         paymentLabel
       );
 
+      refreshLoans();
       if (remainingToApply > 0.000001) {
         showToast(
           `Pagamento aplicado: R$ ${appliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. Excedente nao aplicado: R$ ${remainingToApply.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`,
@@ -1289,6 +1320,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         amountToReverse,
         `ESTORNO PARCELA ${inst.number}: ${loan.customerName}`
       );
+      refreshLoans();
       showToast('Pagamento estornado!', 'success');
     } catch (e) {
       showToast('Erro ao estornar pagamento', 'error');
@@ -1307,8 +1339,27 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!phoneValue) {
       return showToast('Cliente sem telefone cadastrado', 'error');
     }
+    const targetInstallment = (Array.isArray(loan.installments) ? loan.installments : []).find(
+      (installment) => getRemainingInstallmentValue(installment) > 0,
+    );
+    if (!targetInstallment) {
+      return showToast('Contrato sem parcela pendente para cobranca', 'error');
+    }
+
+    const installmentValue = getRemainingInstallmentValue(targetInstallment);
+    const dueDate = targetInstallment.dueDate
+      ? new Date(`${targetInstallment.dueDate}T12:00:00`).toLocaleDateString('pt-BR')
+      : 'Nao informada';
     const phone = phoneValue.replace(/\D/g, '');
-    const text = encodeURIComponent(`Ola ${customerName}, estou entrando em contato sobre o seu contrato ${loan.id}.`);
+    const text = encodeURIComponent(
+      `Olá, ${customerName}. Tudo bem?\n\n` +
+      `Aqui é da GR SULTION.\n\n` +
+      `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n` +
+      `Caso já tenha realizado o pagamento, por favor envie o comprovante para darmos baixa em nosso sistema.\n\n` +
+      `Qualquer dúvida, estou à disposição.\n\n` +
+      `Atenciosamente,\n` +
+      `GR SULTION`
+    );
     window.open(`https://wa.me/55${phone}?text=${text}`, '_blank');
   };
 
@@ -1359,7 +1410,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       )}
 
       <div className="space-y-4">
-        {filteredLoans.length === 0 ? (
+        {isLoansListLoading && paginatedLoans.length === 0 ? (
+          <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 flex items-center justify-center gap-3">
+            <div className="h-4 w-4 rounded-full border-2 border-zinc-800 border-t-[#BF953F] animate-spin" />
+            <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+              Carregando contratos...
+            </p>
+          </div>
+        ) : filteredLoansCount === 0 ? (
           <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 text-center">
             <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
               Nenhum contrato encontrado
@@ -1518,7 +1576,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     handleDeleteLoan(loan);
                   }}
                   className="h-[42px] w-[42px] shrink-0 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-black transition-all flex items-center justify-center"
-                  title="Excluir contrato"
+                  title="Arquivar contrato"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -1670,16 +1728,16 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           );
         })}
 
-        {filteredLoans.length > 0 && totalPages > 1 && (
+        {filteredLoansCount > 0 && totalPages > 1 && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#050505] border border-zinc-900 rounded-2xl px-4 py-3">
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">
-              Pagina {currentPageSafe} de {totalPages}  •  {filteredLoans.length} contratos
+              Pagina {currentPage} de {totalPages}  •  {filteredLoansCount} contratos
             </p>
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => setCurrentPage((previous) => Math.max(previous - 1, 1))}
-                disabled={currentPageSafe === 1}
+                disabled={!hasPreviousPage}
                 className="px-4 py-2 bg-zinc-900 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
               >
                 Anterior
@@ -1687,7 +1745,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
               <button
                 type="button"
                 onClick={() => setCurrentPage((previous) => Math.min(previous + 1, totalPages))}
-                disabled={currentPageSafe === totalPages}
+                disabled={!hasNextPage}
                 className="px-4 py-2 bg-zinc-900 text-zinc-400 rounded-xl text-[9px] font-black uppercase tracking-widest disabled:opacity-40 disabled:cursor-not-allowed hover:bg-zinc-800"
               >
                 Proxima

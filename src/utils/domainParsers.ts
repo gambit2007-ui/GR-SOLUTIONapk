@@ -1,8 +1,11 @@
 import type {
   BreakdownSource,
   CashMovement,
+  CashMovementSourceType,
+  CashMovementStatus,
   CashMovementType,
   Customer,
+  CustomerStatus,
   Frequency,
   InstallmentPaymentEntry,
   InterestOnlyRenewalRecord,
@@ -25,6 +28,16 @@ const CASH_MOVEMENT_TYPES: readonly CashMovementType[] = [
 ];
 
 const ENTRY_MOVEMENT_TYPES = new Set<CashMovementType>(['APORTE', 'PAGAMENTO', 'ENTRADA']);
+const CASH_MOVEMENT_SOURCE_TYPES: readonly CashMovementSourceType[] = [
+  'MANUAL_ENTRY',
+  'MANUAL_EXIT',
+  'LOAN_DISBURSEMENT',
+  'LOAN_PAYMENT',
+  'LOAN_RENEWAL_INTEREST',
+  'REVERSAL',
+  'ADJUSTMENT',
+];
+const CASH_MOVEMENT_STATUSES: readonly CashMovementStatus[] = ['POSTED', 'REVERSED', 'CANCELLED'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -57,6 +70,33 @@ const toOptionalRoundedNumber = (value: unknown): number | undefined => {
   return Number(parsed.toFixed(2));
 };
 
+const normalizeCashMovementStatus = (value: unknown): CashMovementStatus => {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  return CASH_MOVEMENT_STATUSES.includes(normalized as CashMovementStatus)
+    ? (normalized as CashMovementStatus)
+    : 'POSTED';
+};
+
+const inferCashMovementSourceType = (type: CashMovementType, description: string, loanId?: string): CashMovementSourceType => {
+  const normalizedDescription = description.toUpperCase();
+
+  if (type === 'PAGAMENTO') {
+    if (normalizedDescription.includes('RENOVACAO JUROS')) return 'LOAN_RENEWAL_INTEREST';
+    return 'LOAN_PAYMENT';
+  }
+
+  if (type === 'RETIRADA') {
+    if (normalizedDescription.includes('EMPRESTIMO') || loanId) return 'LOAN_DISBURSEMENT';
+    return 'MANUAL_EXIT';
+  }
+
+  if (type === 'ESTORNO') return 'REVERSAL';
+  if (type === 'SAIDA') return 'MANUAL_EXIT';
+  if (type === 'APORTE' || type === 'ENTRADA') return 'MANUAL_ENTRY';
+
+  return 'ADJUSTMENT';
+};
+
 export const parseMovementType = (value: unknown): CashMovementType => {
   const normalized = String(value ?? '').trim().toUpperCase() as CashMovementType;
   return CASH_MOVEMENT_TYPES.includes(normalized) ? normalized : 'ENTRADA';
@@ -69,6 +109,10 @@ export const parseCashMovement = (id: string, raw: unknown): CashMovement => {
   const fallbackDate = new Date().toISOString();
   const date = toString(payload.date, fallbackDate);
   const description = toString(payload.description, 'MOVIMENTACAO');
+  const sourceType = CASH_MOVEMENT_SOURCE_TYPES.includes(String(payload.sourceType ?? '').trim().toUpperCase() as CashMovementSourceType)
+    ? (String(payload.sourceType).trim().toUpperCase() as CashMovementSourceType)
+    : inferCashMovementSourceType(type, description, toOptionalString(payload.loanId) ?? undefined);
+  const status = normalizeCashMovementStatus(payload.status);
 
   return {
     id,
@@ -78,6 +122,18 @@ export const parseCashMovement = (id: string, raw: unknown): CashMovement => {
     description,
     date,
     loanId: toOptionalString(payload.loanId),
+    sourceId: toOptionalString(payload.sourceId ?? payload.loanId),
+    sourceType,
+    status,
+    customerId: toOptionalString(payload.customerId),
+    customerName: toOptionalString(payload.customerName),
+    installmentId: toOptionalString(payload.installmentId),
+    installmentNumber: toOptionalPositiveNumber(payload.installmentNumber),
+    balanceBefore: toOptionalRoundedNumber(payload.balanceBefore),
+    balanceAfter: toOptionalRoundedNumber(payload.balanceAfter),
+    reversedMovementId: toOptionalString(payload.reversedMovementId),
+    createdAt: toOptionalString(payload.createdAt ?? payload.date),
+    notes: toOptionalString(payload.notes),
     createdByUid: toOptionalString(payload.createdByUid),
     createdByEmail: toOptionalString(payload.createdByEmail),
     createdByName: toOptionalString(payload.createdByName),
@@ -220,6 +276,13 @@ const parseLoanStatus = (value: unknown): LoanStatus => {
   return 'ATIVO';
 };
 
+const parseCustomerStatus = (value: unknown): CustomerStatus => {
+  const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'INATIVO' || normalized === 'INACTIVE') return 'INATIVO';
+  if (normalized === 'ACTIVE' || normalized === 'ATIVO') return 'ATIVO';
+  return 'ATIVO';
+};
+
 export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installment => {
   const payload = isRecord(raw) ? raw : {};
   const amount = toNumber(payload.amount ?? payload.value, 0);
@@ -307,6 +370,7 @@ export const parseCustomer = (id: string, raw: unknown): Customer => {
   return {
     id,
     name: toString(payload.name, ''),
+    status: parseCustomerStatus(payload.status),
     cpf: toOptionalString(payload.cpf),
     rg: toOptionalString(payload.rg),
     email: toOptionalString(payload.email),
@@ -338,6 +402,9 @@ export const isInstallmentOverdue = (installment: Installment, todayIso = getLoc
 };
 
 export const resolveCashDelta = (movement: CashMovement): number => {
+  const status = String(movement.status || '').trim().toUpperCase();
+  if (status === 'CANCELLED' || status === 'REVERSED') return 0;
+
   const amount = toNumber(movement.amount ?? movement.value, 0);
   if (amount === 0) return 0;
 

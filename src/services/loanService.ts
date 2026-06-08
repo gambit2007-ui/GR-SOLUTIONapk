@@ -16,6 +16,14 @@ export interface LoanMovementPayload {
   type: MovementType;
   amount: number;
   description: string;
+  customerId?: string;
+  customerName?: string;
+  sourceId?: string;
+  sourceType?: 'MANUAL_ENTRY' | 'MANUAL_EXIT' | 'LOAN_DISBURSEMENT' | 'LOAN_PAYMENT' | 'LOAN_RENEWAL_INTEREST' | 'REVERSAL' | 'ADJUSTMENT';
+  installmentId?: string;
+  installmentNumber?: number;
+  reversedMovementId?: string;
+  notes?: string;
   actor?: MovementActor;
 }
 
@@ -122,6 +130,10 @@ export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): P
       amount,
       description: `EMPRESTIMO: ${normalizedLoanDraft.customerName}`,
       loanId: loanRef.id,
+      sourceId: loanRef.id,
+      sourceType: 'LOAN_DISBURSEMENT',
+      customerId: normalizedLoanDraft.customerId,
+      customerName: normalizedLoanDraft.customerName,
       actor,
     }, { currentCashBalance: saldoAtual });
 
@@ -158,6 +170,14 @@ export const updateLoanAndAddMovement = async (
       amount: movement.amount,
       description: movement.description,
       loanId,
+      sourceId: movement.sourceId ?? loanId,
+      sourceType: movement.sourceType,
+      customerId: movement.customerId,
+      customerName: movement.customerName,
+      installmentId: movement.installmentId,
+      installmentNumber: movement.installmentNumber,
+      reversedMovementId: movement.reversedMovementId,
+      notes: movement.notes,
       actor: movement.actor,
     }, { currentCashBalance: saldoAtual });
 

@@ -1,30 +1,12 @@
 ﻿import React, { useState } from 'react';
-import { Loan, CashMovement, MovementType, PaymentBreakdown } from '../types';
-import { useMemo } from 'react';
-import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
+import { Loan, CashMovement, MovementType } from '../types';
+import { Suspense, lazy, useMemo } from 'react';
+import { Wallet, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
 import {
-  BarChart, 
-  Bar, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend,
-  ResponsiveContainer, 
-  Cell,
-  LabelList,
-  LineChart,
-  Line,
-  AreaChart,
-  Area
-} from 'recharts';
-import {
-  effectiveLoanStatus,
   installmentAmount,
-  installmentPaidAmount,
-  loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
+import { buildMonthlyCashLedger } from '../utils/cashLedger';
 
 interface ReportsProps {
   loans: Loan[];
@@ -38,17 +20,10 @@ interface ReportsProps {
   showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-interface FiscalMonthMetrics {
-  principalRecovered: number;
-  interestReceived: number;
-  lateFeesReceived: number;
-  serviceFeesReceived: number;
-  taxableRevenue: number;
-  totalPaid: number;
-}
+const ReportsMonthlyChart = lazy(() => import('./ReportsMonthlyChart'));
 
 const Reports: React.FC<ReportsProps> = ({
-  loans, cashMovements, caixa, onAddTransaction, onRecalculateCash, onDownloadBackup, showToast
+  cashMovements, caixa, onAddTransaction, onRecalculateCash, onDownloadBackup, showToast,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
@@ -59,7 +34,6 @@ const Reports: React.FC<ReportsProps> = ({
   });
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
-  const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 
   const calculateLateFee = (installment: Loan['installments'][number]) => {
     if (!installment?.dueDate || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
@@ -75,36 +49,6 @@ const Reports: React.FC<ReportsProps> = ({
     if (diffDays <= 0) return 0;
 
     return Number((installmentAmount(installment) * 0.015 * diffDays).toFixed(2));
-  };
-
-  const getRemainingInstallmentValue = (installment: Loan['installments'][number]) => {
-    if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-    const lateFee = calculateLateFee(installment);
-    const totalWithFee = roundMoney(installmentAmount(installment) + lateFee);
-    const remaining = roundMoney(totalWithFee - installmentPaidAmount(installment));
-    return remaining > 0 ? remaining : 0;
-  };
-
-  const getInstallmentPrincipalRecovered = (loan: Loan, installment: Loan['installments'][number]) => {
-    const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
-    if (paymentEntries.length > 0) {
-      return roundMoney(paymentEntries.reduce((sum, entry) => sum + Number(entry.principalPaid || 0), 0));
-    }
-
-    if (installment.paymentBreakdown) {
-      return roundMoney(Number(installment.paymentBreakdown.principalPaid || 0));
-    }
-
-    if (normalizeInstallmentStatus(installment.status) === 'PAID') {
-      if (Number.isFinite(Number(installment.expectedPrincipal)) && Number(installment.expectedPrincipal) > 0) {
-        return roundMoney(Number(installment.expectedPrincipal));
-      }
-
-      const installmentsCount = loanInstallmentsCount(loan) || 1;
-      return roundMoney(Number(loan.amount || 0) / installmentsCount);
-    }
-
-    return 0;
   };
 
   const parseAmountInput = (value: string): number => {
@@ -139,225 +83,14 @@ const Reports: React.FC<ReportsProps> = ({
     return Number.isFinite(parsed) ? parsed : Number.NaN;
   };
 
-  const makeMonthKey = (dateValue: string) => {
-    const date = new Date(dateValue);
-    if (Number.isNaN(date.getTime())) return null;
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  };
-
-  const getMonthShortLabel = (monthIndex: number, year: number) =>
-    `${monthNamesUpper[monthIndex]}/${String(year).slice(2)}`;
-
-  const fiscalData = useMemo(() => {
-    const monthly: Record<string, FiscalMonthMetrics> = {};
-
-    const totals = {
-      principalRecovered: 0,
-      interestReceived: 0,
-      lateFeesReceived: 0,
-      serviceFeesReceived: 0,
-      taxableRevenue: 0,
-      totalPaid: 0,
-    };
-
-    const registerMetrics = (monthKey: string, breakdown: PaymentBreakdown) => {
-      if (!monthly[monthKey]) {
-        monthly[monthKey] = {
-          principalRecovered: 0,
-          interestReceived: 0,
-          lateFeesReceived: 0,
-          serviceFeesReceived: 0,
-          taxableRevenue: 0,
-          totalPaid: 0,
-        };
-      }
-
-      const principalPaid = roundMoney(Number(breakdown.principalPaid || 0));
-      const interestPaid = roundMoney(Number(breakdown.interestPaid || 0));
-      const lateFeePaid = roundMoney(Number(breakdown.lateFeePaid || 0));
-      const serviceFeePaid = roundMoney(Number(breakdown.serviceFeePaid || 0));
-      const totalPaid = roundMoney(Number(breakdown.totalPaid || 0));
-      const taxableRevenue = roundMoney(interestPaid + lateFeePaid + serviceFeePaid);
-
-      monthly[monthKey].principalRecovered = roundMoney(monthly[monthKey].principalRecovered + principalPaid);
-      monthly[monthKey].interestReceived = roundMoney(monthly[monthKey].interestReceived + interestPaid);
-      monthly[monthKey].lateFeesReceived = roundMoney(monthly[monthKey].lateFeesReceived + lateFeePaid);
-      monthly[monthKey].serviceFeesReceived = roundMoney(monthly[monthKey].serviceFeesReceived + serviceFeePaid);
-      monthly[monthKey].taxableRevenue = roundMoney(monthly[monthKey].taxableRevenue + taxableRevenue);
-      monthly[monthKey].totalPaid = roundMoney(monthly[monthKey].totalPaid + totalPaid);
-
-      totals.principalRecovered = roundMoney(totals.principalRecovered + principalPaid);
-      totals.interestReceived = roundMoney(totals.interestReceived + interestPaid);
-      totals.lateFeesReceived = roundMoney(totals.lateFeesReceived + lateFeePaid);
-      totals.serviceFeesReceived = roundMoney(totals.serviceFeesReceived + serviceFeePaid);
-      totals.taxableRevenue = roundMoney(totals.taxableRevenue + taxableRevenue);
-      totals.totalPaid = roundMoney(totals.totalPaid + totalPaid);
-    };
-
-    loans.forEach((loan) => {
-      const installments = Array.isArray(loan.installments) ? loan.installments : [];
-      installments.forEach((installment) => {
-        const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
-        if (paymentEntries.length > 0) {
-          paymentEntries.forEach((entry) => {
-            const monthKey = makeMonthKey(entry.recordedAt);
-            if (!monthKey) return;
-            registerMetrics(monthKey, {
-              principalPaid: Number(entry.principalPaid || 0),
-              interestPaid: Number(entry.interestPaid || 0),
-              lateFeePaid: Number(entry.lateFeePaid || 0),
-              serviceFeePaid: Number(entry.serviceFeePaid || 0),
-              discountApplied: Number(entry.discountApplied || 0),
-              totalPaid: Number(entry.totalPaid || 0),
-            });
-          });
-          return;
-        }
-
-        if (normalizeInstallmentStatus(installment.status) !== 'PAID') return;
-        const breakdown = installment.paymentBreakdown;
-        if (!breakdown) return;
-
-        const paymentDate = installment.paidAt || installment.paymentDate || installment.lastPaymentDate;
-        if (!paymentDate) return;
-
-        const monthKey = makeMonthKey(paymentDate);
-        if (!monthKey) return;
-        registerMetrics(monthKey, breakdown);
-      });
-    });
-
-    return { monthly, totals };
-  }, [loans]);
-
-  // Calculos Financeiros
-  const totalAportes = cashMovements
-    .filter((m) => ['APORTE', 'ENTRADA'].includes(String(m.type || '').toUpperCase()))
-    .reduce((acc, m) => acc + Number(m.amount || 0), 0);
-
-  const totalRetiradas = cashMovements
-    .filter((m) => {
-      const type = String(m.type || '').toUpperCase();
-      const desc = String(m.description || '').toUpperCase();
-      const isManualWithdrawal = type === 'RETIRADA' && (desc.startsWith('RETIRADA:') || desc.includes('RETIRADA VIA CAIXA'));
-      return isManualWithdrawal || type === 'SAIDA';
-    })
-    .reduce((acc, m) => acc + Number(m.amount || 0), 0);
-
-  const totalEmprestado = loans.reduce((acc, l) => acc + Number(l.amount || 0), 0);
-
-  const totalRecebido = cashMovements
-    .reduce((acc, m) => {
-      if (m.type === 'PAGAMENTO') return acc + m.amount;
-      if (m.type === 'ESTORNO') return acc - m.amount;
-      return acc;
-    }, 0);
-
   const now = new Date();
   const currentYear = now.getFullYear();
   const currentMonthIndex = now.getMonth();
-  const currentMonthLabel = getMonthShortLabel(currentMonthIndex, currentYear);
-
-  const faturamentoAno = useMemo(() => {
-    return roundMoney(
-      (Object.entries(fiscalData.monthly) as Array<[string, FiscalMonthMetrics]>).reduce((sum, [monthKey, metrics]) => {
-        const [yearRaw] = monthKey.split('-');
-        if (Number(yearRaw) !== currentYear) return sum;
-        return sum + Number(metrics.taxableRevenue || 0);
-      }, 0),
-    );
-  }, [currentYear, fiscalData.monthly]);
-
-  const totalAReceber = loans.reduce((acc, loan) => {
-    if (effectiveLoanStatus(loan) !== 'ACTIVE') return acc;
-    const unpaid = loan.installments
-      .reduce((sum, installment) => sum + getRemainingInstallmentValue(installment), 0);
-    return acc + unpaid;
-  }, 0);
-
-  const getLoanExpectedTotal = (loan: Loan) => {
-    const installmentsTotal = (Array.isArray(loan.installments) ? loan.installments : [])
-      .reduce((acc, inst) => acc + Number(inst?.amount || 0), 0);
-
-    if (installmentsTotal > 0) {
-      return installmentsTotal;
-    }
-
-    return loan.amount * (1 + (loan.interestRate / 100));
-  };
-
-  // Valor em Rua (Principal Pendente)
-  const valorEmRua = loans.reduce((acc, loan) => {
-    if (effectiveLoanStatus(loan) !== 'ACTIVE') return acc;
-    const principalRecovered = roundMoney(
-      loan.installments.reduce((sum, installment) => sum + getInstallmentPrincipalRecovered(loan, installment), 0),
-    );
-    return acc + Math.max(roundMoney(Number(loan.amount || 0) - principalRecovered), 0);
-  }, 0);
-
-  const lucroEstimado = loans.reduce((acc, loan) => {
-    const totalExpected = getLoanExpectedTotal(loan);
-    const profit = Math.max(totalExpected - loan.amount, 0);
-    return acc + profit;
-  }, 0);
-
-  // Agrupamento mensal para o grafico e gavetas
-  const getMonthlyData = () => {
-    const months: { [key: string]: { 
-      month: string, 
-      lucro: number, 
-      recebido: number, 
-      emprestado: number, 
-      entradas: number, 
-      saidas: number
-    } } = {};
-
-    for (let monthIndex = 0; monthIndex <= currentMonthIndex; monthIndex += 1) {
-      const key = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}`;
-      months[key] = {
-        month: getMonthShortLabel(monthIndex, currentYear),
-        lucro: roundMoney(Number(fiscalData.monthly[key]?.taxableRevenue || 0)),
-        recebido: 0,
-        emprestado: 0,
-        entradas: 0,
-        saidas: 0,
-      };
-    }
-
-    cashMovements.forEach((movement) => {
-      const date = new Date(movement.date);
-      if (Number.isNaN(date.getTime()) || date.getFullYear() !== currentYear) return;
-
-      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-      if (!months[key]) return;
-
-      const movementType = String(movement.type || '').toUpperCase();
-      const amount = Number(movement.amount || 0);
-      const isEntrada = ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(movementType);
-      if (isEntrada) {
-        months[key].entradas = roundMoney(months[key].entradas + amount);
-      } else {
-        months[key].saidas = roundMoney(months[key].saidas + amount);
-      }
-
-      if (movementType === 'PAGAMENTO' || movementType === 'ESTORNO') {
-        const signedAmount = movementType === 'ESTORNO' ? -amount : amount;
-        months[key].recebido = roundMoney(months[key].recebido + signedAmount);
-      }
-
-      if (movementType === 'RETIRADA' && String(movement.description || '').toUpperCase().includes('EMPRESTIMO')) {
-        months[key].emprestado = roundMoney(months[key].emprestado + amount);
-      }
-    });
-
-    return Object.keys(months)
-      .sort()
-      .map((key) => months[key]);
-  };
-
-  const monthlyData = getMonthlyData();
-  const chartData = monthlyData;
-  const [expandedMonth, setExpandedMonth] = useState<string | null>(currentMonthLabel);
+  const ledgerMonths = useMemo(() => buildMonthlyCashLedger(cashMovements, currentYear), [cashMovements, currentYear]);
+  const currentLedgerMonth = ledgerMonths[currentMonthIndex] || ledgerMonths[ledgerMonths.length - 1];
+  const faturamentoAno = roundMoney(ledgerMonths.reduce((sum, month) => sum + Number(month.totalEntries || 0), 0));
+  const monthlyData = ledgerMonths.slice(0, currentMonthIndex + 1);
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -389,13 +122,13 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const financialCards = [
-    { label: 'Total a Receber', value: totalAReceber, color: 'text-[#BF953F]' },
-    { label: 'Valor em Rua', value: valorEmRua, color: 'text-blue-500' },
-    { label: 'Lucro Projetado', value: lucroEstimado, color: 'text-purple-500' },
-    { label: 'Total Emprestado', value: totalEmprestado, color: 'text-zinc-400' },
-    { label: 'Total Recebido', value: totalRecebido, color: 'text-emerald-500' },
-    { label: 'Total Aportes', value: totalAportes, color: 'text-cyan-500' },
-    { label: 'Total Retiradas', value: totalRetiradas, color: 'text-red-500' },
+    { label: 'Saldo Inicial do Mes', value: currentLedgerMonth?.openingBalance || 0, color: 'text-zinc-400' },
+    { label: 'Entradas do Mes', value: currentLedgerMonth?.totalEntries || 0, color: 'text-emerald-500' },
+    { label: 'Saidas do Mes', value: currentLedgerMonth?.totalExits || 0, color: 'text-red-500' },
+    { label: 'Estornos do Mes', value: currentLedgerMonth?.totalReversals || 0, color: 'text-violet-500' },
+    { label: 'Ajustes do Mes', value: currentLedgerMonth?.totalAdjustments || 0, color: 'text-amber-500' },
+    { label: 'Saldo Final do Mes', value: currentLedgerMonth?.closingBalance || caixa, color: 'text-[#BF953F]' },
+    { label: 'Saldo Consolidado', value: caixa, color: 'text-cyan-500' },
   ];
 
   return (
@@ -460,204 +193,196 @@ const Reports: React.FC<ReportsProps> = ({
         ))}
       </div>
 
-      {/* Resumo de lucratividade */}
+      {/* Resumo do livro caixa */}
       <div className="bg-[#050505] border border-zinc-900 rounded-[2.5rem] p-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-12">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-8">
           <div className="shrink-0">
-            <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Resumo de Lucratividade</h3>
-            <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">Indicadores de desempenho real</p>
+            <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Livro Caixa Mensal</h3>
+            <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">
+              Fechamento oficial do mes {currentLedgerMonth?.monthLabel || `${String(currentMonthIndex + 1).padStart(2, '0')}/${String(currentYear).slice(2)}`}
+            </p>
           </div>
-          
+
           <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="p-5 border-l-2 border-[#BF953F] bg-zinc-900/10 relative group cursor-help rounded-r-2xl">
+            <div className="p-5 border-l-2 border-[#BF953F] bg-zinc-900/10 rounded-r-2xl">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Media Mensal de Lucro Real</p>
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Saldo Inicial</p>
                 <Info size={10} className="text-zinc-700" />
               </div>
               <p className="text-xl font-black text-white">
-                R$ {(chartData.reduce((acc, curr) => acc + curr.lucro, 0) / (chartData.length || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                R$ {(currentLedgerMonth?.openingBalance || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </p>
-              
-              {/* Tooltip */}
-              <div className="absolute bottom-full left-0 mb-2 w-56 p-4 bg-[#0a0a0a] border border-zinc-800 rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl transform translate-y-2 group-hover:translate-y-0">
-                <p className="text-[8px] font-black text-[#BF953F] uppercase tracking-widest mb-2">Analise de Media</p>
-                <p className="text-[10px] text-zinc-500 leading-relaxed">
-                  Media aritmetica do lucro real (juros recebidos) nos ultimos {chartData.length} meses.
-                </p>
-              </div>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mt-2">
+                Saldo final: R$ {(currentLedgerMonth?.closingBalance || caixa).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
             </div>
 
-            <div className="p-5 border-l-2 border-emerald-500 bg-zinc-900/10 relative group cursor-help rounded-r-2xl">
+            <div className="p-5 border-l-2 border-emerald-500 bg-zinc-900/10 rounded-r-2xl">
               <div className="flex items-center justify-between mb-1">
-                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Recorde de Lucro Real</p>
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Movimento Liquido</p>
                 <Info size={10} className="text-zinc-700" />
               </div>
               <p className="text-xl font-black text-white">
-                {chartData.length > 0 ? chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).month : '---'}
+                R$ {(currentLedgerMonth?.netMovement || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </p>
-
-              {/* Tooltip */}
-              <div className="absolute bottom-full left-0 mb-2 w-56 p-4 bg-[#0a0a0a] border border-zinc-800 rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl transform translate-y-2 group-hover:translate-y-0">
-                <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest mb-2">Pico de Desempenho</p>
-                {chartData.length > 0 ? (
-                  <p className="text-[10px] text-zinc-500 leading-relaxed">
-                    Mes com maior volume de juros recebidos: {chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).month} (R$ {chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).lucro.toLocaleString('pt-BR')})
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-zinc-500">Dados insuficientes para analise.</p>
-                )}
-              </div>
+              <p className="text-[10px] text-zinc-500 uppercase tracking-widest mt-2">
+                Entradas R$ {(currentLedgerMonth?.totalEntries || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Saidas R$ {(currentLedgerMonth?.totalExits || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Desempenho mensal */}
+      {/* Detalhamento mensal */}
       <div className="bg-[#050505] border border-zinc-900 rounded-[3rem] p-6 sm:p-8 md:p-10">
         <div className="flex items-center justify-between mb-12">
           <div>
-            <h3 className="text-sm font-black gold-text uppercase tracking-[0.3em]">Desempenho Mensal</h3>
-            <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] mt-2">Historico detalhado de fluxo e rentabilidade</p>
+            <h3 className="text-sm font-black gold-text uppercase tracking-[0.3em]">Detalhamento Mensal</h3>
+            <p className="text-[10px] text-zinc-500 uppercase tracking-[0.2em] mt-2">Livro oficial baseado em cashMovement</p>
           </div>
           <div className="p-4 bg-zinc-900/50 rounded-2xl border border-zinc-800">
             <BarChart3 size={24} className="text-[#BF953F]" />
           </div>
         </div>
-        
-        <div className="space-y-6">
-            {monthlyData.map((data) => (
-              <div key={data.month} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#000000]/20">
-                <button 
-                  onClick={() => setExpandedMonth(expandedMonth === data.month ? null : data.month)}
-                  className="w-full p-6 flex items-center justify-between hover:bg-zinc-900/30 transition-colors"
-                >
-                  <div className="flex items-center gap-6">
-                    <span className="text-xs font-black text-white uppercase tracking-widest w-20">{data.month}</span>
-                    <div className="hidden sm:flex items-center gap-4">
-                      <div className="flex flex-col items-start">
-                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Entradas</span>
-                        <span className="text-[10px] font-black text-emerald-500">R$ {data.entradas.toLocaleString('pt-BR')}</span>
-                      </div>
-                      <div className="flex flex-col items-start">
-                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Saidas</span>
-                        <span className="text-[10px] font-black text-red-500">R$ {data.saidas.toLocaleString('pt-BR')}</span>
-                      </div>
-                    </div>
-                  </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Lucro Real</span>
-                        <span className={`text-xs font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
-                          R$ {data.lucro.toLocaleString('pt-BR')}
-                        </span>
-                    </div>
-                    <ChevronDown size={16} className={`text-zinc-500 transition-transform ${expandedMonth === data.month ? 'rotate-180' : ''}`} />
-                  </div>
-                </button>
-                
-                {expandedMonth === data.month && (
-                  <div className="p-6 border-t border-zinc-900 bg-zinc-950/30 animate-in slide-in-from-top duration-200">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
-                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total de Entradas</span>
-                          <span className="text-xs font-black text-emerald-500">R$ {data.entradas.toLocaleString('pt-BR')}</span>
-                        </div>
-                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
-                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total de Saidas</span>
-                          <span className="text-xs font-black text-red-500">R$ {data.saidas.toLocaleString('pt-BR')}</span>
-                        </div>
-                      </div>
-                      <div className="space-y-4">
-                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
-                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total Recebido</span>
-                          <span className="text-xs font-black text-zinc-300">R$ {data.recebido.toLocaleString('pt-BR')}</span>
-                        </div>
-                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
-                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Capital Emprestado</span>
-                          <span className="text-xs font-black text-zinc-300">R$ {data.emprestado.toLocaleString('pt-BR')}</span>
-                        </div>
-                      </div>
-                    </div>
 
-                    <div className="mt-6 p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
-                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Real do Mes</p>
-                      <p className={`text-2xl font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
-                        R$ {data.lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </p>
-                      <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
-                        Baseado em juros, multas e taxas
-                      </p>
+        <div className="space-y-6">
+          {monthlyData.map((data) => (
+            <div key={data.monthKey} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#000000]/20">
+              <button
+                onClick={() => setExpandedMonth(expandedMonth === data.monthKey ? null : data.monthKey)}
+                className="w-full p-6 flex items-center justify-between hover:bg-zinc-900/30 transition-colors"
+              >
+                <div className="flex items-center gap-6 flex-wrap">
+                  <span className="text-xs font-black text-white uppercase tracking-widest w-20">{data.monthLabel}</span>
+                  <div className="hidden sm:flex items-center gap-4">
+                    <div className="flex flex-col items-start">
+                      <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Saldo inicial</span>
+                      <span className="text-[10px] font-black text-zinc-300">R$ {data.openingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                     </div>
-                    
-                    <div className="mt-8 h-[350px] w-full bg-[#000000]/40 p-6 rounded-[2rem] border border-zinc-900/50">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={[data]} margin={{ top: 30, right: 30, left: 20, bottom: 20 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#1a1a1a" vertical={false} opacity={0.5} />
-                          <XAxis 
-                            dataKey="month" 
-                            axisLine={false} 
-                            tickLine={false}
-                            tick={{ fill: '#52525b', fontSize: 10, fontWeight: 900 }}
-                          />
-                          <YAxis 
-                            axisLine={false} 
-                            tickLine={false}
-                            tick={{ fill: '#52525b', fontSize: 10, fontWeight: 900 }}
-                            tickFormatter={(value) => `R$ ${value >= 1000 ? (value/1000).toFixed(0) + 'k' : value}`}
-                          />
-                          <Tooltip 
-                            cursor={{ fill: 'transparent' }}
-                            contentStyle={{ 
-                              backgroundColor: '#050505', 
-                              border: '1px solid #27272a', 
-                              borderRadius: '1.5rem',
-                              padding: '12px 16px',
-                              boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)'
-                            }}
-                            itemStyle={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', padding: '2px 0' }}
-                            formatter={(value: number) => [`R$ ${value.toLocaleString('pt-BR')}`, '']}
-                          />
-                          <Legend 
-                            verticalAlign="top" 
-                            align="right"
-                            iconType="circle"
-                            iconSize={8}
-                            wrapperStyle={{ paddingBottom: '20px', fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}
-                          />
-                          <Bar dataKey="entradas" name="Entradas" fill="#10b981" radius={[6, 6, 0, 0]} barSize={45}>
-                            <LabelList 
-                              dataKey="entradas" 
-                              position="top" 
-                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
-                              style={{ fill: '#10b981', fontSize: '9px', fontWeight: 900 }}
-                            />
-                          </Bar>
-                          <Bar dataKey="saidas" name="Saidas" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={45}>
-                            <LabelList 
-                              dataKey="saidas" 
-                              position="top" 
-                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
-                              style={{ fill: '#ef4444', fontSize: '9px', fontWeight: 900 }}
-                            />
-                          </Bar>
-                          <Bar dataKey="lucro" name="Lucro Real" fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
-                            <LabelList 
-                              dataKey="lucro" 
-                              position="top" 
-                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
-                              style={{ fill: '#BF953F', fontSize: '9px', fontWeight: 900 }}
-                            />
-                          </Bar>
-                        </BarChart>
-                      </ResponsiveContainer>
+                    <div className="flex flex-col items-start">
+                      <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Entradas</span>
+                      <span className="text-[10px] font-black text-emerald-500">R$ {data.totalEntries.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                    <div className="flex flex-col items-start">
+                      <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Saidas</span>
+                      <span className="text-[10px] font-black text-red-500">R$ {data.totalExits.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
                     </div>
                   </div>
-                )}
-              </div>
-            ))}
-          </div>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Saldo Final</span>
+                    <span className={`text-xs font-black ${data.closingBalance >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
+                      R$ {data.closingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <ChevronDown size={16} className={`text-zinc-500 transition-transform ${expandedMonth === data.monthKey ? 'rotate-180' : ''}`} />
+                </div>
+              </button>
+
+              {expandedMonth === data.monthKey && (
+                <div className="p-6 border-t border-zinc-900 bg-zinc-950/30 animate-in slide-in-from-top duration-200">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div className="p-4 bg-[#000000]/40 border border-zinc-900 rounded-2xl">
+                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-2">Entradas</p>
+                      <p className="text-sm font-black text-emerald-500">R$ {data.totalEntries.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div className="p-4 bg-[#000000]/40 border border-zinc-900 rounded-2xl">
+                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-2">Saidas</p>
+                      <p className="text-sm font-black text-red-500">R$ {data.totalExits.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div className="p-4 bg-[#000000]/40 border border-zinc-900 rounded-2xl">
+                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-2">Estornos</p>
+                      <p className="text-sm font-black text-violet-500">R$ {data.totalReversals.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    </div>
+                    <div className="p-4 bg-[#000000]/40 border border-zinc-900 rounded-2xl">
+                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-2">Ajustes</p>
+                      <p className="text-sm font-black text-amber-500">R$ {data.totalAdjustments.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
+                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Fechamento do mes</p>
+                    <p className={`text-2xl font-black ${data.closingBalance >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
+                      R$ {data.closingBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                    <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
+                      Base oficial: entradas, saidas, estornos e ajustes do `cashMovement`
+                    </p>
+                  </div>
+
+                  <Suspense
+                    fallback={(
+                      <div className="mt-8 h-[350px] w-full bg-[#000000]/40 p-6 rounded-[2rem] border border-zinc-900/50 flex items-center justify-center">
+                        <div className="flex items-center gap-3 px-5 py-4 bg-[#050505] border border-zinc-900 rounded-2xl">
+                          <div className="h-4 w-4 rounded-full border-2 border-zinc-800 border-t-[#BF953F] animate-spin" />
+                          <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400">
+                            Carregando grafico...
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  >
+                    <ReportsMonthlyChart data={data} />
+                  </Suspense>
+
+                  <div className="mt-8 space-y-3">
+                    {data.movements.length === 0 ? (
+                      <div className="p-4 bg-[#000000]/40 border border-zinc-900 rounded-2xl">
+                        <p className="text-[10px] text-zinc-500 uppercase tracking-widest">Sem movimentacoes neste mes</p>
+                      </div>
+                    ) : data.movements.map((movement) => (
+                      <div key={movement.id} className="p-4 bg-[#000000]/40 border border-zinc-900 rounded-2xl flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className={`text-[8px] font-black uppercase tracking-widest px-2 py-1 rounded-full ${
+                              movement.category === 'ENTRADA'
+                                ? 'bg-emerald-500/10 text-emerald-500'
+                                : movement.category === 'SAIDA'
+                                  ? 'bg-red-500/10 text-red-500'
+                                  : movement.category === 'ESTORNO'
+                                    ? 'bg-violet-500/10 text-violet-500'
+                                    : 'bg-amber-500/10 text-amber-500'
+                            }`}>
+                              {movement.category}
+                            </span>
+                            <span className="text-[9px] font-black text-white uppercase tracking-widest">{movement.description}</span>
+                          </div>
+                          <p className="text-[9px] text-zinc-500 uppercase tracking-widest">
+                            {movement.date} | {movement.actorName}
+                            {movement.customerName ? ` | ${movement.customerName}` : ''}
+                            {movement.loanId ? ` | Contrato ${movement.loanId}` : ''}
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-right">
+                          <div>
+                            <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Valor</p>
+                            <p className={`text-[10px] font-black ${movement.signedAmount >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                              R$ {Math.abs(movement.signedAmount).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Antes</p>
+                            <p className="text-[10px] font-black text-zinc-300">
+                              R$ {movement.balanceBefore.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Depois</p>
+                            <p className="text-[10px] font-black text-[#BF953F]">
+                              R$ {movement.balanceAfter.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
+      </div>
 
       {isModalOpen && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/80 backdrop-blur-sm overflow-y-auto">

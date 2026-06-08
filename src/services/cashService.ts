@@ -8,7 +8,7 @@ import {
   Transaction,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { CashMovement, MovementType } from '../types';
+import { CashMovement, CashMovementSourceType, CashMovementStatus, MovementType } from '../types';
 import { parseCashMovement, parseMovementType, resolveCashDelta } from '../utils/domainParsers';
 import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
 
@@ -23,6 +23,16 @@ export interface CashMovementPayload {
   amount: number;
   description: string;
   loanId?: string;
+  sourceId?: string;
+  sourceType?: CashMovementSourceType;
+  status?: CashMovementStatus;
+  customerId?: string;
+  customerName?: string;
+  installmentId?: string;
+  installmentNumber?: number;
+  balanceBefore?: number;
+  reversedMovementId?: string;
+  notes?: string;
   actor?: MovementActor;
 }
 
@@ -57,6 +67,21 @@ const buildMovementActorPayload = (actor?: MovementActor) => {
   return payload;
 };
 
+const inferSourceType = (type: MovementType, description: string, loanId?: string): CashMovementSourceType => {
+  const normalizedDescription = description.toUpperCase();
+  if (type === 'PAGAMENTO') {
+    if (normalizedDescription.includes('RENOVACAO JUROS')) return 'LOAN_RENEWAL_INTEREST';
+    return 'LOAN_PAYMENT';
+  }
+  if (type === 'RETIRADA') {
+    if (normalizedDescription.includes('EMPRESTIMO') || loanId) return 'LOAN_DISBURSEMENT';
+    return 'MANUAL_EXIT';
+  }
+  if (type === 'ESTORNO') return 'REVERSAL';
+  if (type === 'APORTE' || type === 'ENTRADA') return 'MANUAL_ENTRY';
+  return 'MANUAL_EXIT';
+};
+
 export const appendCashMovementInTransaction = async (
   tx: Transaction,
   payload: CashMovementPayload,
@@ -70,6 +95,12 @@ export const appendCashMovementInTransaction = async (
   const saldoAtual = Number.isFinite(providedCashBalance)
     ? providedCashBalance
     : await readCashBalanceInTransaction(tx);
+  const balanceBefore = Number(
+    Number.isFinite(Number(payload.balanceBefore)) ? Number(payload.balanceBefore) : saldoAtual,
+  );
+  const sourceType = payload.sourceType ?? inferSourceType(type, description, payload.loanId);
+  const status = payload.status ?? 'POSTED';
+  const balanceAfter = Number((balanceBefore + resolveCashDelta({ type, amount, description, date: new Date().toISOString() })).toFixed(2));
 
   const movement: CashMovement = {
     id: movementRef.id,
@@ -79,11 +110,23 @@ export const appendCashMovementInTransaction = async (
     description,
     date: new Date().toISOString(),
     loanId: payload.loanId,
+    sourceId: payload.sourceId ?? payload.loanId,
+    sourceType,
+    status,
+    customerId: payload.customerId,
+    customerName: payload.customerName,
+    installmentId: payload.installmentId,
+    installmentNumber: payload.installmentNumber,
+    balanceBefore,
+    balanceAfter,
+    reversedMovementId: payload.reversedMovementId,
+    createdAt: new Date().toISOString(),
+    notes: payload.notes,
     ...buildMovementActorPayload(payload.actor),
   };
   const sanitizedMovement = sanitizeFirestorePayload(movement);
 
-  const novoSaldo = Number((saldoAtual + resolveCashDelta(movement)).toFixed(2));
+  const novoSaldo = balanceAfter;
 
   tx.set(movementRef, sanitizedMovement);
   tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
