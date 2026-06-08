@@ -56,22 +56,6 @@ const SimulationTab: React.FC<SimulationTabProps> = () => {
     }
   }
 
-  const getEstimatedDueDate = () => {
-    const dueDate = new Date();
-
-    if (formData.frequency === 'DAILY') {
-      dueDate.setDate(dueDate.getDate() + 1);
-    } else if (formData.frequency === 'WEEKLY') {
-      dueDate.setDate(dueDate.getDate() + 7);
-    } else if (formData.frequency === 'BIWEEKLY') {
-      dueDate.setDate(dueDate.getDate() + 15);
-    } else {
-      dueDate.setMonth(dueDate.getMonth() + 1);
-    }
-
-    return dueDate.toLocaleDateString('pt-BR');
-  };
-
   const generatePDF = async () => {
     if (!canSimulate) return;
 
@@ -135,16 +119,15 @@ const SimulationTab: React.FC<SimulationTabProps> = () => {
   const sendWhatsApp = () => {
     if (!canSimulate) return;
     const phone = formData.phone.replace(/\D/g, '');
-    const customerName = formData.name || 'Cliente';
-    const dueDate = getEstimatedDueDate();
     const message = encodeURIComponent(
-      `Olá, ${customerName}. Tudo bem?\n\n` +
-      `Aqui é da GR SULTION.\n\n` +
-      `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n` +
-      `Caso já tenha realizado o pagamento, por favor envie o comprovante para darmos baixa em nosso sistema.\n\n` +
-      `Qualquer dúvida, estou à disposição.\n\n` +
-      `Atenciosamente,\n` +
-      `GR SULTION`
+      `*SIMULACAO DE EMPRESTIMO*\n\n` +
+      `*Cliente:* ${formData.name || 'Nao informado'}\n` +
+      `*Valor:* R$ ${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n` +
+      `*Modalidade:* ${interestTypeLabel[formData.interestType]}\n` +
+      `*Frequencia:* ${frequencyLabel[formData.frequency]}\n` +
+      `*Parcelas:* ${formData.installmentsCount}x de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n` +
+      `*Total Geral:* R$ ${totalWithInterest.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}\n\n` +
+      `_Simulacao realizada em ${new Date().toLocaleDateString('pt-BR')}_`
     );
 
     const url = phone ? `https://wa.me/55${phone}?text=${message}` : `https://wa.me/?text=${message}`;

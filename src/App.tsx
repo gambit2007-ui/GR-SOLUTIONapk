@@ -43,7 +43,7 @@ const App: React.FC = () => {
   const [password, setPassword] = useState('');
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
-  const shouldLoadCustomers = currentView === 'LOANS';
+  const shouldLoadCustomers = currentView === 'CUSTOMERS' || currentView === 'LOANS';
 
   const { user, authLoading, loginLoading, login, logout } = useAuthState();
   const { clientes, contratos, movimentacoes, caixa, isCustomersLoading } = useRealtimeData(user, {
@@ -260,12 +260,7 @@ const App: React.FC = () => {
   const handleDeleteCustomer = async (customerId: string) => {
     try {
       const removedLoansCount = await deleteCustomerAndLoans(customerId);
-      showToast(
-        removedLoansCount > 0
-          ? `Cliente inativado e ${removedLoansCount} contrato(s) arquivado(s)`
-          : 'Cliente removido com sucesso',
-        'info',
-      );
+      showToast(`Cliente removido com ${removedLoansCount} contrato(s)`, 'info');
     } catch (error: unknown) {
       showToast('Erro ao remover cliente', 'error');
       throw error;
@@ -287,7 +282,7 @@ const App: React.FC = () => {
   const handleDeleteLoan = async (loanId: string) => {
     try {
       await deleteLoan(loanId);
-      showToast('Contrato arquivado com sucesso!', 'success');
+      showToast('Contrato excluido com sucesso!', 'success');
     } catch (error: unknown) {
       showToast('Erro ao excluir contrato', 'error');
       throw error;
@@ -334,7 +329,9 @@ const App: React.FC = () => {
       case 'CUSTOMERS':
         return (
           <CustomerSection
+            customers={clientes}
             loans={contratos}
+            isLoadingCustomers={isCustomersLoading}
             onAddCustomer={handleAddCustomer}
             onUpdateCustomer={handleUpdateCustomer}
             onDeleteCustomer={handleDeleteCustomer}

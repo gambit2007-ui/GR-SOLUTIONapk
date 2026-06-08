@@ -25,16 +25,6 @@ export type LoanStatus =
 
 export type CashMovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
 export type MovementType = CashMovementType;
-export type CashMovementSourceType =
-  | 'MANUAL_ENTRY'
-  | 'MANUAL_EXIT'
-  | 'LOAN_DISBURSEMENT'
-  | 'LOAN_PAYMENT'
-  | 'LOAN_RENEWAL_INTEREST'
-  | 'REVERSAL'
-  | 'ADJUSTMENT';
-export type CashMovementStatus = 'POSTED' | 'REVERSED' | 'CANCELLED';
-export type CustomerStatus = 'ATIVO' | 'INATIVO' | 'ACTIVE' | 'INACTIVE';
 
 export interface FirestoreTimestampLike {
   toDate: () => Date;
@@ -55,18 +45,6 @@ export interface CashMovement {
   description: string;
   date: string;
   loanId?: string;
-  sourceId?: string;
-  sourceType?: CashMovementSourceType;
-  status?: CashMovementStatus;
-  customerId?: string;
-  customerName?: string;
-  installmentId?: string;
-  installmentNumber?: number;
-  balanceBefore?: number;
-  balanceAfter?: number;
-  reversedMovementId?: string;
-  createdAt?: string;
-  notes?: string;
   createdByUid?: string;
   createdByEmail?: string;
   createdByName?: string;
@@ -85,7 +63,6 @@ export interface CustomerDocument {
 export interface Customer {
   id: string;
   name: string;
-  status?: CustomerStatus;
   cpf?: string;
   rg?: string;
   email?: string;
