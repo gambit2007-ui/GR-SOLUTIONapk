@@ -1,6 +1,6 @@
 ﻿import React, { useState, useEffect, useRef } from 'react';
 import { Loan, CashMovement, Installment } from '../types';
-import { TrendingUp, Users, FileText, Wallet, Activity, ChevronDown, Calendar as CalendarIcon, Clock, ArrowRight } from 'lucide-react';
+import { TrendingUp, Users, FileText, Activity, Calendar as CalendarIcon, Clock, X } from 'lucide-react';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -8,6 +8,7 @@ import {
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { formatDateTimeBR, getLocalISODate } from '../utils/dateTime';
+import { resolveCashDelta } from '../utils/domainParsers';
 
 interface DashboardProps {
   loans: Loan[];
@@ -18,6 +19,7 @@ interface DashboardProps {
 const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateToLoan }) => {
   const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
   const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
+  const [selectedCashMovement, setSelectedCashMovement] = useState<CashMovement | null>(null);
   const [selectedDate, setSelectedDate] = useState(getLocalISODate());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
 
@@ -83,6 +85,17 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
   };
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+
+  const formatCurrency = (value: number) =>
+    roundMoney(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const getMovementDisplayAmount = (movement: CashMovement) =>
+    Math.abs(roundMoney(Number(movement.amount ?? movement.value ?? 0)));
+
+  const getMovementTime = (movement: CashMovement) => {
+    const timestamp = new Date(movement.date).getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  };
 
   const getRemainingInstallmentValue = (inst: Installment) => {
     if (normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
@@ -158,6 +171,26 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
 
   const loansByMonth = groupByMonth(loans, 'startDate');
   const movementsByMonth = groupByMonth(cashMovements, 'date');
+
+  const getMonthCashBalance = (monthMovements: CashMovement[]) => {
+    const firstMovement = monthMovements[0];
+    const monthDate = firstMovement ? new Date(firstMovement.date) : new Date();
+    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1).getTime();
+    const nextMonthStart = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1).getTime();
+
+    const openingBalance = cashMovements.reduce((total, movement) => {
+      return getMovementTime(movement) < monthStart ? roundMoney(total + resolveCashDelta(movement)) : total;
+    }, 0);
+
+    const closingBalance = cashMovements.reduce((total, movement) => {
+      return getMovementTime(movement) < nextMonthStart ? roundMoney(total + resolveCashDelta(movement)) : total;
+    }, 0);
+
+    return {
+      openingBalance: roundMoney(openingBalance),
+      closingBalance: roundMoney(closingBalance),
+    };
+  };
 
   return (
     <div className="space-y-8">
@@ -407,40 +440,61 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
           </div>
         </div>
 
-        {/* MOVIMENTACOES POR MES */}
+        {/* LIVRO CAIXA */}
         <div className="bg-[#050505] border border-zinc-900 p-8 rounded-[2rem]">
-          <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-6">Movimentacoes por Mes</h3>
+          <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-6">Livro Caixa</h3>
           <div className="space-y-3">
-            {Object.keys(movementsByMonth).map((month) => (
-              <div key={month} className="border border-zinc-900 rounded-2xl overflow-hidden">
-                <button 
-                  onClick={() => setExpandedMonthMovements(expandedMonthMovements === month ? null : month)}
-                  className="w-full p-4 flex items-center justify-between bg-[#000000]/40 hover:bg-zinc-900/50 transition-colors"
-                >
-                  <span className="text-[10px] font-black text-white uppercase tracking-widest truncate max-w-[70%] text-left">{month}</span>
-                  <span className="text-[9px] font-black text-[#BF953F] px-2 py-1 bg-[#BF953F]/10 rounded-lg">
-                    {movementsByMonth[month].length}
-                  </span>
-                </button>
-                {expandedMonthMovements === month && (
-                  <div className="p-4 bg-[#000000]/20 border-t border-zinc-900 animate-in slide-in-from-top duration-200">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      {/* COLUNA DE ENTRADAS */}
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between mb-3 px-1">
-                          <span className="text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em]">Entradas</span>
-                          <span className="text-[8px] font-black text-zinc-600 uppercase">
-                            Total: R$ {movementsByMonth[month]
-                              .filter((m: CashMovement) => ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type))
-                              .reduce((acc: number, m: CashMovement) => acc + m.amount, 0)
-                              .toLocaleString('pt-BR')}
-                          </span>
+            {Object.keys(movementsByMonth).map((month) => {
+              const monthMovements = movementsByMonth[month] as CashMovement[];
+              const entryMovements = monthMovements.filter((m) => ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type));
+              const exitMovements = monthMovements.filter((m) => !['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type));
+              const entryTotal = entryMovements.reduce((acc, m) => acc + getMovementDisplayAmount(m), 0);
+              const exitTotal = exitMovements.reduce((acc, m) => acc + getMovementDisplayAmount(m), 0);
+              const { openingBalance, closingBalance } = getMonthCashBalance(monthMovements);
+
+              return (
+                <div key={month} className="border border-zinc-900 rounded-2xl overflow-hidden">
+                  <button
+                    onClick={() => setExpandedMonthMovements(expandedMonthMovements === month ? null : month)}
+                    className="w-full p-4 flex items-center justify-between bg-[#000000]/40 hover:bg-zinc-900/50 transition-colors"
+                  >
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest truncate max-w-[70%] text-left">{month}</span>
+                    <span className="text-[9px] font-black text-[#BF953F] px-2 py-1 bg-[#BF953F]/10 rounded-lg">
+                      {monthMovements.length}
+                    </span>
+                  </button>
+                  {expandedMonthMovements === month && (
+                    <div className="p-4 bg-[#000000]/20 border-t border-zinc-900 animate-in slide-in-from-top duration-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+                        <div className="bg-zinc-950/60 border border-zinc-900 rounded-2xl p-3">
+                          <p className="text-[7px] font-black text-zinc-500 uppercase tracking-[0.2em]">Saldo inicial do mes</p>
+                          <p className="text-sm font-black text-white mt-1">{formatCurrency(openingBalance)}</p>
                         </div>
+                        <div className="bg-zinc-950/60 border border-zinc-900 rounded-2xl p-3">
+                          <p className="text-[7px] font-black text-zinc-500 uppercase tracking-[0.2em]">Saldo final do mes</p>
+                          <p className={`text-sm font-black mt-1 ${closingBalance >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            {formatCurrency(closingBalance)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        {/* COLUNA DE ENTRADAS */}
                         <div className="space-y-2">
-                          {movementsByMonth[month]
-                            .filter((m: CashMovement) => ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type))
-                            .map((m: CashMovement) => (
-                              <div key={m.id} className="flex items-start justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-emerald-500/30 transition-colors">
+                          <div className="flex items-center justify-between mb-3 px-1">
+                            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em]">Entradas</span>
+                            <span className="text-[8px] font-black text-zinc-600 uppercase">
+                              Total: {formatCurrency(entryTotal)}
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {entryMovements.map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onClick={() => setSelectedCashMovement(m)}
+                                className="w-full flex items-start justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-emerald-500/30 transition-colors text-left"
+                              >
                                 <div className="min-w-0 flex-1 mr-3">
                                   <p className="text-[9px] font-black text-white uppercase whitespace-normal break-words">{m.description}</p>
                                   <p className="text-[7px] text-zinc-500 uppercase tracking-tighter whitespace-normal break-words">
@@ -448,32 +502,32 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
                                   </p>
                                 </div>
                                 <span className="text-[9px] font-black text-emerald-500 whitespace-nowrap">
-                                  + R$ {m.amount.toLocaleString('pt-BR')}
+                                  + {formatCurrency(getMovementDisplayAmount(m))}
                                 </span>
-                              </div>
+                              </button>
                             ))}
-                          {movementsByMonth[month].filter((m: CashMovement) => ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type)).length === 0 && (
-                            <p className="text-[8px] text-zinc-700 italic text-center py-4">Nenhuma entrada</p>
-                          )}
+                            {entryMovements.length === 0 && (
+                              <p className="text-[8px] text-zinc-700 italic text-center py-4">Nenhuma entrada</p>
+                            )}
+                          </div>
                         </div>
-                      </div>
 
-                      {/* COLUNA DE SAIDAS */}
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between mb-3 px-1">
-                          <span className="text-[8px] font-black text-red-500 uppercase tracking-[0.2em]">Saidas</span>
-                          <span className="text-[8px] font-black text-zinc-600 uppercase">
-                            Total: R$ {movementsByMonth[month]
-                              .filter((m: CashMovement) => !['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type))
-                              .reduce((acc: number, m: CashMovement) => acc + m.amount, 0)
-                              .toLocaleString('pt-BR')}
-                          </span>
-                        </div>
+                        {/* COLUNA DE SAIDAS */}
                         <div className="space-y-2">
-                          {movementsByMonth[month]
-                            .filter((m: CashMovement) => !['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type))
-                            .map((m: CashMovement) => (
-                              <div key={m.id} className="flex items-start justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-red-500/30 transition-colors">
+                          <div className="flex items-center justify-between mb-3 px-1">
+                            <span className="text-[8px] font-black text-red-500 uppercase tracking-[0.2em]">Saidas</span>
+                            <span className="text-[8px] font-black text-zinc-600 uppercase">
+                              Total: {formatCurrency(exitTotal)}
+                            </span>
+                          </div>
+                          <div className="space-y-2">
+                            {exitMovements.map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onClick={() => setSelectedCashMovement(m)}
+                                className="w-full flex items-start justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-red-500/30 transition-colors text-left"
+                              >
                                 <div className="min-w-0 flex-1 mr-3">
                                   <p className="text-[9px] font-black text-white uppercase whitespace-normal break-words">{m.description}</p>
                                   <p className="text-[7px] text-zinc-500 uppercase tracking-tighter whitespace-normal break-words">
@@ -481,32 +535,77 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
                                   </p>
                                 </div>
                                 <span className="text-[9px] font-black text-red-500 whitespace-nowrap">
-                                  - R$ {m.amount.toLocaleString('pt-BR')}
+                                  - {formatCurrency(getMovementDisplayAmount(m))}
                                 </span>
-                              </div>
+                              </button>
                             ))}
-                          {movementsByMonth[month].filter((m: CashMovement) => !['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(m.type)).length === 0 && (
-                            <p className="text-[8px] text-zinc-700 italic text-center py-4">Nenhuma saida</p>
-                          )}
+                            {exitMovements.length === 0 && (
+                              <p className="text-[8px] text-zinc-700 italic text-center py-4">Nenhuma saida</p>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
+
+      {selectedCashMovement && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-2xl bg-[#050505] border border-zinc-800 rounded-[2rem] p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 mb-6">
+              <div>
+                <p className="text-[9px] font-black text-[#BF953F] uppercase tracking-[0.25em] mb-2">Detalhe do Livro Caixa</p>
+                <h4 className="text-xl font-black text-white uppercase leading-tight break-words">
+                  {selectedCashMovement.description}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCashMovement(null)}
+                className="shrink-0 p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 transition-colors"
+                aria-label="Fechar detalhe da movimentacao"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-black border border-zinc-900 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Valor</p>
+                <p className={`text-2xl font-black mt-1 ${resolveCashDelta(selectedCashMovement) >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                  {resolveCashDelta(selectedCashMovement) >= 0 ? '+' : '-'} {formatCurrency(getMovementDisplayAmount(selectedCashMovement))}
+                </p>
+              </div>
+              <div className="bg-black border border-zinc-900 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Tipo</p>
+                <p className="text-sm font-black text-white uppercase mt-2">{selectedCashMovement.type}</p>
+              </div>
+              <div className="bg-black border border-zinc-900 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Data</p>
+                <p className="text-sm font-black text-white uppercase mt-2">{formatDateTimeBR(selectedCashMovement.date)}</p>
+              </div>
+              <div className="bg-black border border-zinc-900 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Responsavel</p>
+                <p className="text-sm font-black text-white uppercase mt-2 break-words">{getMovementActorLabel(selectedCashMovement)}</p>
+              </div>
+              {selectedCashMovement.loanId && (
+                <div className="sm:col-span-2 bg-black border border-zinc-900 rounded-2xl p-4">
+                  <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Contrato vinculado</p>
+                  <p className="text-sm font-black text-white uppercase mt-2 break-all">{selectedCashMovement.loanId}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default Dashboard;
-
-
-
-
-
-
 
