@@ -459,6 +459,17 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
             onChange={e => setSearchTerm(e.target.value)}
           />
         </div>
+        <div className="w-full sm:w-auto min-w-44 bg-[#050505] border border-zinc-900 rounded-2xl px-5 py-3.5 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-[#BF953F]/10 border border-[#BF953F]/20 flex items-center justify-center shrink-0">
+            <User size={17} className="text-[#BF953F]" />
+          </div>
+          <div>
+            <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Total de clientes</p>
+            <p className="text-lg font-black text-white leading-none mt-1">
+              {isLoadingCustomers && customers.length === 0 ? '--' : customers.length}
+            </p>
+          </div>
+        </div>
         <button
           onClick={() => { setEditingCustomer(null); setFormData({}); setIsModalOpen(true); }}
           className="w-full sm:w-auto px-8 py-4 gold-gradient text-black rounded-2xl font-black text-[10px] tracking-widest uppercase flex items-center justify-center gap-2"

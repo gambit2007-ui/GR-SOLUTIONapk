@@ -496,6 +496,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
   React.useEffect(() => {
     if (initialExpandedLoanId) {
+      setStatusFilter('ALL');
+      setSearchTerm(initialExpandedLoanId);
+      setCurrentPage(1);
       setExpandedLoanId(initialExpandedLoanId);
       // Scroll to the element if needed
       setTimeout(() => {
@@ -924,11 +927,31 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     try {
       if (editingLoanId) {
         const currentLoan = loans.find(l => l.id === editingLoanId);
-        await onUpdateLoan(editingLoanId, {
+        if (!currentLoan) {
+          showToast('Contrato nao encontrado para atualizacao', 'error');
+          return;
+        }
+
+        const updatedPayload: Partial<Loan> = {
           ...payload,
           status: normalizeLoanStatus(currentLoan?.status) === 'CANCELLED' ? 'CANCELADO' : 'ATIVO'
-        });
-        showToast('Contrato atualizado com sucesso!', 'success');
+        };
+        await onUpdateLoan(editingLoanId, updatedPayload);
+
+        try {
+          const updatedLoan: Loan = {
+            ...currentLoan,
+            ...updatedPayload,
+            id: editingLoanId,
+            installments: updatedPayload.installments || currentLoan.installments,
+          };
+          const { generateContractPDF } = await import('../utils/contractGenerator');
+          generateContractPDF(customer, updatedLoan);
+          showToast('Contrato atualizado e novo PDF gerado!', 'success');
+        } catch (pdfError) {
+          console.error('Contrato atualizado, mas falhou ao gerar o novo PDF:', pdfError);
+          showToast('Contrato atualizado, mas falhou ao gerar o novo PDF.', 'error');
+        }
       } else {
         const newLoan: LoanDraft = {
           contractNumber: getNextContractNumber(),
@@ -1307,8 +1330,27 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!phoneValue) {
       return showToast('Cliente sem telefone cadastrado', 'error');
     }
+    const targetInstallment = (Array.isArray(loan.installments) ? loan.installments : []).find(
+      (installment) => getRemainingInstallmentValue(installment) > 0,
+    );
+    if (!targetInstallment) {
+      return showToast('Contrato sem parcela pendente para cobranca', 'error');
+    }
+
+    const installmentValue = getRemainingInstallmentValue(targetInstallment);
+    const dueDate = targetInstallment.dueDate
+      ? new Date(`${targetInstallment.dueDate}T12:00:00`).toLocaleDateString('pt-BR')
+      : 'Nao informada';
     const phone = phoneValue.replace(/\D/g, '');
-    const text = encodeURIComponent(`Ola ${customerName}, estou entrando em contato sobre o seu contrato ${loan.id}.`);
+    const text = encodeURIComponent(
+      `Ol\u00e1, ${customerName}. Tudo bem?\n\n` +
+      `Aqui \u00e9 da GR SULTION.\n\n` +
+      `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n` +
+      `Caso j\u00e1 tenha realizado o pagamento, por favor envie o comprovante para darmos baixa em nosso sistema.\n\n` +
+      `Qualquer d\u00favida, estou \u00e0 disposi\u00e7\u00e3o.\n\n` +
+      `Atenciosamente,\n` +
+      `GR SULTION`
+    );
     window.open(`https://wa.me/55${phone}?text=${text}`, '_blank');
   };
 
