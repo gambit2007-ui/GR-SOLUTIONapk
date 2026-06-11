@@ -92,6 +92,7 @@ export interface Installment {
   paymentAmount?: number;
   lastPaidValue?: number;
   originalValue?: number;
+  carriedLateFee?: number;
   expectedPrincipal?: number;
   expectedInterest?: number;
   paymentBreakdown?: PaymentBreakdown;
@@ -130,6 +131,10 @@ export interface InterestOnlyRenewalRecord {
   id: string;
   type: 'interest_only_renewal';
   amount: number;
+  interestPaid?: number;
+  lateFeePaid?: number;
+  lateFeeCarried?: number;
+  totalPaid?: number;
   paymentDate: string;
   previousDueDate?: string;
   newDueDate?: string;

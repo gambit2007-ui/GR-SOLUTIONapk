@@ -25,6 +25,7 @@ import {
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
+import { calculateInstallmentLateFee } from '../utils/lateFee';
 
 interface ReportsProps {
   loans: Loan[];
@@ -61,25 +62,9 @@ const Reports: React.FC<ReportsProps> = ({
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
   const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
 
-  const calculateLateFee = (installment: Loan['installments'][number]) => {
-    if (!installment?.dueDate || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-    const dueDate = new Date(`${installment.dueDate}T00:00:00`);
-    if (Number.isNaN(dueDate.getTime())) return 0;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (dueDate >= today) return 0;
-
-    const diffTime = today.getTime() - dueDate.getTime();
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    if (diffDays <= 0) return 0;
-
-    return Number((installmentAmount(installment) * 0.015 * diffDays).toFixed(2));
-  };
-
   const getRemainingInstallmentValue = (installment: Loan['installments'][number]) => {
     if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-    const lateFee = calculateLateFee(installment);
+    const lateFee = calculateInstallmentLateFee(installment);
     const totalWithFee = roundMoney(installmentAmount(installment) + lateFee);
     const remaining = roundMoney(totalWithFee - installmentPaidAmount(installment));
     return remaining > 0 ? remaining : 0;
@@ -224,6 +209,25 @@ const Reports: React.FC<ReportsProps> = ({
         const monthKey = makeMonthKey(paymentDate);
         if (!monthKey) return;
         registerMetrics(monthKey, breakdown);
+      });
+
+      const renewalHistory = Array.isArray(loan.renewalHistory) ? loan.renewalHistory : [];
+      renewalHistory.forEach((renewal) => {
+        const monthKey = makeMonthKey(renewal.paymentDate);
+        if (!monthKey) return;
+
+        const interestPaid = roundMoney(Number(renewal.interestPaid ?? renewal.amount ?? 0));
+        const lateFeePaid = roundMoney(Number(renewal.lateFeePaid || 0));
+        const totalPaid = roundMoney(Number(renewal.totalPaid ?? interestPaid + lateFeePaid));
+
+        registerMetrics(monthKey, {
+          principalPaid: 0,
+          interestPaid,
+          lateFeePaid,
+          serviceFeePaid: 0,
+          discountApplied: 0,
+          totalPaid,
+        });
       });
     });
 

@@ -11,9 +11,11 @@ import {
 } from '../utils/loanCompat';
 import { getLocalISODate } from '../utils/dateTime';
 import { buildPaymentBreakdown } from '../utils/paymentBreakdown';
+import { calculateInstallmentLateFee } from '../utils/lateFee';
 import {
   calculateInterestOnlyRenewalAmount,
   getCurrentContractDueDate,
+  getNextMonthlyDueDate,
   shiftPendingInstallmentsToNewDueDate,
 } from '../utils/interestOnlyRenewal';
 
@@ -70,6 +72,8 @@ interface InterestOnlyRenewalModalState {
   loanId: string;
   principalAmount: number;
   interestAmount: number;
+  lateFeeAmount: number;
+  payLateFee: boolean;
   previousDueDate: string;
   newDueDate: string;
   notes: string;
@@ -150,28 +154,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     return String(max + 1);
   };
 
-  const calculateLateFee = (inst: Installment | null | undefined) => {
-    if (!inst || normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
-    const baseInstallmentAmount = installmentAmount(inst);
-    if (!Number.isFinite(baseInstallmentAmount) || baseInstallmentAmount <= 0 || !inst.dueDate) {
-      return 0;
-    }
-
-    const dueDate = new Date(inst.dueDate + 'T00:00:00');
-    if (Number.isNaN(dueDate.getTime())) {
-      return 0;
-    }
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (dueDate < today) {
-      const diffTime = today.getTime() - dueDate.getTime();
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      if (diffDays <= 0) return 0;
-      return Number((baseInstallmentAmount * 0.015 * diffDays).toFixed(2));
-    }
-    return 0;
-  };
+  const calculateLateFee = calculateInstallmentLateFee;
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
@@ -197,7 +180,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!inst || normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
     const baseAmount = roundMoney(installmentAmount(inst));
     const paidAmount = roundMoney(installmentPaidAmount(inst));
-    const paidCappedToBase = roundMoney(Math.min(Math.max(paidAmount, 0), baseAmount));
+    const paidOutsideBase = roundMoney(
+      Number(inst.paymentBreakdown?.lateFeePaid || 0) +
+      Number(inst.paymentBreakdown?.serviceFeePaid || 0),
+    );
+    const paidTowardBase = roundMoney(Math.max(paidAmount - paidOutsideBase, 0));
+    const paidCappedToBase = roundMoney(Math.min(paidTowardBase, baseAmount));
     const remaining = roundMoney(baseAmount - paidCappedToBase);
     return remaining > 0 ? remaining : 0;
   };
@@ -677,6 +665,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const principalAmount = roundMoney(Number(loan.amount || 0));
     const interestAmount = roundMoney(calculateInterestOnlyRenewalAmount(loan));
     const previousDueDate = getCurrentContractDueDate(loan);
+    const currentInstallment = (Array.isArray(loan.installments) ? loan.installments : []).find(
+      (installment) => normalizeInstallmentStatus(installment.status) !== 'PAID',
+    );
 
     if (!previousDueDate) {
       showToast('Contrato sem vencimento valido para renovacao', 'error');
@@ -688,13 +679,29 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       return;
     }
 
+    const newDueDate = getNextMonthlyDueDate(previousDueDate);
+    if (!newDueDate) {
+      showToast('Nao foi possivel calcular o vencimento do mes seguinte', 'error');
+      return;
+    }
+
+    const lateFeeAmount = roundMoney(
+      Math.max(
+        calculateLateFee(currentInstallment) -
+          Number(currentInstallment?.paymentBreakdown?.lateFeePaid || 0),
+        0,
+      ),
+    );
+
     setRenewalModal({
       isOpen: true,
       loanId: loan.id,
       principalAmount,
       interestAmount,
+      lateFeeAmount,
+      payLateFee: lateFeeAmount > 0,
       previousDueDate,
-      newDueDate: previousDueDate,
+      newDueDate,
       notes: '',
     });
   };
@@ -827,6 +834,39 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       return;
     }
 
+    const pendingInstallmentIndex = (Array.isArray(loan.installments) ? loan.installments : []).findIndex(
+      (installment) => normalizeInstallmentStatus(installment.status) !== 'PAID',
+    );
+    if (pendingInstallmentIndex < 0) {
+      showToast('Contrato sem parcela pendente para renovacao', 'error');
+      return;
+    }
+
+    const currentInstallment = loan.installments[pendingInstallmentIndex];
+    const calculatedLateFee = roundMoney(
+      Math.max(
+        calculateLateFee(currentInstallment) -
+          Number(currentInstallment.paymentBreakdown?.lateFeePaid || 0),
+        0,
+      ),
+    );
+    if (Math.abs(renewalModal.lateFeeAmount - calculatedLateFee) > 0.01) {
+      showToast('Valor da multa desatualizado. Reabra a renovacao.', 'error');
+      return;
+    }
+
+    const lateFeePaid = renewalModal.payLateFee ? calculatedLateFee : 0;
+    const lateFeeCarried = renewalModal.payLateFee ? 0 : calculatedLateFee;
+    const totalPayment = roundMoney(calculatedInterest + lateFeePaid);
+    const renewedInstallments = dueDateShift.installments.map((installment, index) =>
+      index === pendingInstallmentIndex
+        ? {
+            ...installment,
+            carriedLateFee: lateFeeCarried > 0 ? lateFeeCarried : undefined,
+          }
+        : installment,
+    );
+
     setProcessingRenewal(loan.id);
     try {
       const renewalNow = new Date().toISOString();
@@ -837,6 +877,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         id: renewalRecordId,
         type: 'interest_only_renewal',
         amount: calculatedInterest,
+        interestPaid: calculatedInterest,
+        lateFeePaid: lateFeePaid > 0 ? lateFeePaid : undefined,
+        lateFeeCarried: lateFeeCarried > 0 ? lateFeeCarried : undefined,
+        totalPaid: totalPayment,
         paymentDate: renewalNow,
         previousDueDate: dueDateShift.previousDueDate,
         newDueDate: dueDateShift.newDueDate,
@@ -850,7 +894,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       await onUpdateLoanAndAddTransaction(
         loan.id,
         {
-          installments: dueDateShift.installments,
+          installments: renewedInstallments,
           dueDate: dueDateShift.contractDueDate,
           status: 'ATIVO',
           renewCount: nextRenewCount,
@@ -858,11 +902,20 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           renewalHistory,
         },
         'PAGAMENTO',
-        calculatedInterest,
-        `RENOVACAO JUROS (SEM AMORTIZACAO): ${loan.customerName}`
+        totalPayment,
+        lateFeePaid > 0
+          ? `RENOVACAO JUROS + MULTA (SEM AMORTIZACAO): ${loan.customerName}`
+          : `RENOVACAO JUROS (SEM AMORTIZACAO): ${loan.customerName}`
       );
 
-      showToast('Renovacao registrada com pagamento de juros!', 'success');
+      showToast(
+        lateFeePaid > 0
+          ? `Renovacao registrada: juros e multa pagos. Total R$ ${totalPayment.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`
+          : lateFeeCarried > 0
+            ? 'Renovacao registrada. A multa foi mantida em aberto para o proximo ciclo.'
+            : 'Renovacao registrada com pagamento de juros!',
+        'success',
+      );
       setRenewalModal(null);
     } catch (error) {
       showToast('Erro ao renovar contrato por juros', 'error');
@@ -1817,6 +1870,66 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     </p>
                   </div>
 
+                  {renewalModal.lateFeeAmount > 0 && (
+                    <button
+                      type="button"
+                      aria-pressed={renewalModal.payLateFee}
+                      onClick={() =>
+                        setRenewalModal((previous) =>
+                          previous
+                            ? {
+                                ...previous,
+                                payLateFee: !previous.payLateFee,
+                              }
+                            : previous,
+                        )
+                      }
+                      disabled={processingRenewal === renewalModal.loanId}
+                      className={`w-full rounded-2xl border p-4 flex items-center justify-between gap-4 text-left transition-colors disabled:opacity-60 ${
+                        renewalModal.payLateFee
+                          ? 'bg-red-500/10 border-red-500/40'
+                          : 'bg-[#000000] border-zinc-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div
+                          className={`w-6 h-6 rounded-lg border flex items-center justify-center shrink-0 ${
+                            renewalModal.payLateFee
+                              ? 'bg-red-500 border-red-400 text-black'
+                              : 'border-zinc-700 text-transparent'
+                          }`}
+                        >
+                          <CheckCircle size={15} />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[9px] font-black text-white uppercase tracking-widest">
+                            Pagar multa junto
+                          </p>
+                          <p className="text-[8px] text-zinc-500 uppercase tracking-widest mt-1 leading-relaxed">
+                            {renewalModal.payLateFee
+                              ? 'A multa sera quitada nesta renovacao'
+                              : 'A multa permanecera separada e em aberto'}
+                          </p>
+                        </div>
+                      </div>
+                      <p className="text-sm font-black text-red-400 shrink-0">
+                        R$ {renewalModal.lateFeeAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      </p>
+                    </button>
+                  )}
+
+                  <div className="bg-[#000000] border border-emerald-500/30 rounded-2xl p-4 flex items-center justify-between gap-4">
+                    <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">
+                      Total a pagar agora
+                    </p>
+                    <p className="text-lg font-black text-emerald-400">
+                      R$ {roundMoney(
+                        renewalModal.interestAmount +
+                        (renewalModal.payLateFee ? renewalModal.lateFeeAmount : 0),
+                      ).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div className="space-y-2">
                       <label className="text-[8px] font-black text-zinc-500 uppercase tracking-widest ml-1">
@@ -1831,7 +1944,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     </div>
                     <div className="space-y-2">
                       <label className="text-[8px] font-black text-zinc-500 uppercase tracking-widest ml-1">
-                        Novo Vencimento
+                        Novo Vencimento (mes seguinte)
                       </label>
                       <input
                         type="date"

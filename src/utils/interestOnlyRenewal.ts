@@ -11,6 +11,28 @@ const toDateOnly = (value: string): Date | null => {
 
 const toIsoDate = (value: Date): string => value.toISOString().split('T')[0];
 
+export const getNextMonthlyDueDate = (dueDate: string): string | null => {
+  const currentDueDate = toDateOnly(dueDate);
+  if (!currentDueDate) return null;
+
+  const originalDay = currentDueDate.getDate();
+  const nextMonth = new Date(
+    currentDueDate.getFullYear(),
+    currentDueDate.getMonth() + 1,
+    1,
+    12,
+  );
+  const lastDayOfNextMonth = new Date(
+    nextMonth.getFullYear(),
+    nextMonth.getMonth() + 1,
+    0,
+    12,
+  ).getDate();
+
+  nextMonth.setDate(Math.min(originalDay, lastDayOfNextMonth));
+  return toIsoDate(nextMonth);
+};
+
 const toLoanType = (interestType: unknown): 'SIMPLE' | 'PRICE' => {
   const normalized = String(interestType ?? '').trim().toUpperCase();
   return normalized === 'PRICE' ? 'PRICE' : 'SIMPLE';
@@ -138,19 +160,25 @@ export const shiftPendingInstallmentsToNewDueDate = (
   const rawOffset = (newDueDateParsed.getTime() - previousDueDateParsed.getTime()) / DAY_IN_MS;
   const dayOffset = Math.round(rawOffset);
   if (!Number.isFinite(dayOffset) || dayOffset <= 0) return null;
+  const automaticNextMonth = getNextMonthlyDueDate(firstPending.dueDate);
+  const shiftByCalendarMonth = automaticNextMonth === newDueDate;
 
-  // Regra conservadora: mover somente parcelas pendentes pelo mesmo delta de dias.
   const updatedInstallments = installments.map((installment, index) => {
     if (!pendingIndexes.includes(index)) return { ...installment };
     const originalDueDate = toDateOnly(installment.dueDate);
     if (!originalDueDate) return { ...installment };
 
-    const shifted = new Date(originalDueDate);
-    shifted.setDate(shifted.getDate() + dayOffset);
+    const shiftedDate = shiftByCalendarMonth
+      ? getNextMonthlyDueDate(installment.dueDate)
+      : (() => {
+          const shifted = new Date(originalDueDate);
+          shifted.setDate(shifted.getDate() + dayOffset);
+          return toIsoDate(shifted);
+        })();
 
     return {
       ...installment,
-      dueDate: toIsoDate(shifted),
+      dueDate: shiftedDate || installment.dueDate,
     };
   });
 

@@ -7,6 +7,7 @@ import { FirebaseError } from 'firebase/app';
 
 import { Customer, Loan, LoanDraft, MovementType, View } from './types';
 import { getLocalISODate } from './utils/dateTime';
+import { calculateInstallmentLateFee } from './utils/lateFee';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -80,25 +81,9 @@ const App: React.FC = () => {
     return '';
   };
 
-  const calculateLateFee = (dueDateValue: string | undefined, installmentValue: number, installmentStatus: unknown) => {
-    if (!dueDateValue || normalizeInstallmentStatus(installmentStatus) === 'PAID') return 0;
-    const dueDate = new Date(`${dueDateValue}T00:00:00`);
-    if (Number.isNaN(dueDate.getTime())) return 0;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (dueDate >= today) return 0;
-
-    const diffTime = today.getTime() - dueDate.getTime();
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    if (diffDays <= 0) return 0;
-
-    return Number((installmentValue * 0.015 * diffDays).toFixed(2));
-  };
-
   const getRemainingInstallmentValue = (installment: Loan['installments'][number] | null | undefined) => {
     if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-    const lateFee = calculateLateFee(installment.dueDate, Number(installmentAmount(installment) || 0), installment.status);
+    const lateFee = calculateInstallmentLateFee(installment);
     const totalWithFee = Number((Number(installmentAmount(installment) || 0) + lateFee).toFixed(2));
     const remaining = Number((totalWithFee - Number(installmentPaidAmount(installment) || 0)).toFixed(2));
     return remaining > 0 ? remaining : 0;

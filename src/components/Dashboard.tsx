@@ -9,6 +9,7 @@ import {
 } from '../utils/loanCompat';
 import { formatDateTimeBR, getLocalISODate } from '../utils/dateTime';
 import { resolveCashDelta } from '../utils/domainParsers';
+import { calculateInstallmentLateFee } from '../utils/lateFee';
 
 interface DashboardProps {
   loans: Loan[];
@@ -69,21 +70,6 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
 
   const activeLoans = loans.filter((l) => effectiveLoanStatus(l) === 'ACTIVE');
 
-  const calculateLateFee = (inst: Installment) => {
-    if (normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
-    const dueDate = new Date(inst.dueDate + 'T00:00:00');
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (dueDate < today) {
-      const diffTime = today.getTime() - dueDate.getTime();
-      const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-      if (diffDays <= 0) return 0;
-      return Number((installmentAmount(inst) * 0.015 * diffDays).toFixed(2));
-    }
-    return 0;
-  };
-
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
   const formatCurrency = (value: number) =>
@@ -99,7 +85,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
 
   const getRemainingInstallmentValue = (inst: Installment) => {
     if (normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
-    const lateFee = calculateLateFee(inst);
+    const lateFee = calculateInstallmentLateFee(inst);
     const totalWithFee = roundMoney(installmentAmount(inst) + lateFee);
     const remaining = roundMoney(totalWithFee - installmentPaidAmount(inst));
     return remaining > 0 ? remaining : 0;
@@ -126,7 +112,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
           getRemainingInstallmentValue(inst) > 0,
       )
       .map((inst) => {
-        const lateFee = calculateLateFee(inst);
+        const lateFee = calculateInstallmentLateFee(inst);
         const remainingWithFee = getRemainingInstallmentValue(inst);
         return {
           ...inst,
