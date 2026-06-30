@@ -26,6 +26,7 @@ import {
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { calculateInstallmentLateFee } from '../utils/lateFee';
+import { calculatePortfolioRoi } from '../utils/portfolioRoi';
 
 interface ReportsProps {
   loans: Loan[];
@@ -61,6 +62,13 @@ const Reports: React.FC<ReportsProps> = ({
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
   const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+  const formatPercentage = (value: number) =>
+    Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+  const getRoiColorClass = (roi: number) => {
+    if (roi >= 15) return 'text-emerald-500';
+    if (roi >= 8) return 'text-[#BF953F]';
+    return 'text-red-500';
+  };
 
   const getRemainingInstallmentValue = (installment: Loan['installments'][number]) => {
     if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
@@ -313,7 +321,8 @@ const Reports: React.FC<ReportsProps> = ({
       recebido: number, 
       emprestado: number, 
       entradas: number, 
-      saidas: number
+      saidas: number,
+      roi: number
     } } = {};
 
     for (let monthIndex = 0; monthIndex <= currentMonthIndex; monthIndex += 1) {
@@ -325,6 +334,7 @@ const Reports: React.FC<ReportsProps> = ({
         emprestado: 0,
         entradas: 0,
         saidas: 0,
+        roi: 0,
       };
     }
 
@@ -356,7 +366,10 @@ const Reports: React.FC<ReportsProps> = ({
 
     return Object.keys(months)
       .sort()
-      .map((key) => months[key]);
+      .map((key) => ({
+        ...months[key],
+        roi: calculatePortfolioRoi(months[key].lucro, months[key].emprestado),
+      }));
   };
 
   const monthlyData = getMonthlyData();
@@ -584,14 +597,36 @@ const Reports: React.FC<ReportsProps> = ({
                       </div>
                     </div>
 
-                    <div className="mt-6 p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
-                      <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Real do Mes</p>
-                      <p className={`text-2xl font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
-                        R$ {data.lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </p>
-                      <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
-                        Baseado em juros, multas e taxas
-                      </p>
+                    <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
+                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Real do Mes</p>
+                        <p className={`text-2xl font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
+                          R$ {data.lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </p>
+                        <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
+                          Baseado em juros, multas e taxas
+                        </p>
+                      </div>
+
+                      <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl relative group cursor-help">
+                        <div className="flex items-center justify-between gap-3 mb-2">
+                          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">ROI da Carteira</p>
+                          <Info size={12} className="text-zinc-700" />
+                        </div>
+                        <p className={`text-2xl font-black ${getRoiColorClass(data.roi)}`}>
+                          {formatPercentage(data.roi)}
+                        </p>
+                        <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
+                          Retorno sobre capital emprestado
+                        </p>
+
+                        <div className="absolute bottom-full left-0 mb-2 w-64 p-4 bg-[#0a0a0a] border border-zinc-800 rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl transform translate-y-2 group-hover:translate-y-0">
+                          <p className="text-[8px] font-black text-[#BF953F] uppercase tracking-widest mb-2">ROI da Carteira</p>
+                          <p className="text-[10px] text-zinc-500 leading-relaxed">
+                            Retorno percentual obtido sobre o capital emprestado no período selecionado.
+                          </p>
+                        </div>
+                      </div>
                     </div>
                     
                     <div className="mt-8 h-[350px] w-full bg-[#000000]/40 p-6 rounded-[2rem] border border-zinc-900/50">
