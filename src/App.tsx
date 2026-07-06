@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { FirebaseError } from 'firebase/app';
 
-import { Customer, Loan, LoanDraft, MovementType, View } from './types';
+import { CashOutflowCategory, Customer, Loan, LoanDraft, MovementType, View } from './types';
 import { getLocalISODate } from './utils/dateTime';
 import { calculateInstallmentLateFee } from './utils/lateFee';
 import {
@@ -130,9 +130,15 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddTransaction = async (type: MovementType, amount: number, description: string) => {
+  const handleAddTransaction = async (
+    type: MovementType,
+    amount: number,
+    description: string,
+    category?: CashOutflowCategory,
+  ) => {
     const valor = Number(amount);
     const motivo = String(description ?? '').trim();
+    const normalizedType = String(type || '').toUpperCase() as MovementType;
 
     if (!Number.isFinite(valor) || valor <= 0) {
       showToast('Valor invalido para movimentacao', 'error');
@@ -142,6 +148,11 @@ const App: React.FC = () => {
     if (!motivo) {
       showToast('Informe um motivo para a movimentacao', 'error');
       throw new Error('MOTIVO_OBRIGATORIO');
+    }
+
+    if (normalizedType === 'SAIDA' && !category) {
+      showToast('Selecione a categoria da saida', 'error');
+      throw new Error('CATEGORIA_SAIDA_OBRIGATORIA');
     }
 
     try {
@@ -154,6 +165,7 @@ const App: React.FC = () => {
             type: movementType,
             amount: valor,
             description: motivo,
+            category: movementType === 'SAIDA' ? category : undefined,
             actor: movementActor,
           });
           showToast('Caixa atualizado!', 'success');

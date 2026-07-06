@@ -25,6 +25,16 @@ export type LoanStatus =
 
 export type CashMovementType = 'APORTE' | 'RETIRADA' | 'PAGAMENTO' | 'ESTORNO' | 'ENTRADA' | 'SAIDA';
 export type MovementType = CashMovementType;
+export type CashOutflowCategory =
+  | 'DEVOLUCAO_APORTE'
+  | 'PAGAMENTO_EMPRESTIMO_EXTERNO'
+  | 'REPASSE_INVESTIDOR_PARCEIRO'
+  | 'PRO_LABORE'
+  | 'DESPESA_OPERACIONAL'
+  | 'IMPOSTO_MEI'
+  | 'MARKETING'
+  | 'COMISSAO'
+  | 'REINVESTIMENTO';
 
 export interface FirestoreTimestampLike {
   toDate: () => Date;
@@ -43,6 +53,7 @@ export interface CashMovement {
   amount: number;
   description: string;
   date: string;
+  category?: CashOutflowCategory;
   loanId?: string;
   createdByUid?: string;
   createdByEmail?: string;

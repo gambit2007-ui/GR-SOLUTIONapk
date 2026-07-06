@@ -13,6 +13,7 @@ import type {
   LoanStatus,
   PaymentBreakdown,
 } from '../types';
+import { parseCashOutflowCategory } from './cashCategories';
 import { getLocalISODate } from './dateTime';
 
 const CASH_MOVEMENT_TYPES: readonly CashMovementType[] = [
@@ -77,6 +78,7 @@ export const parseCashMovement = (id: string, raw: unknown): CashMovement => {
     value: amount,
     description,
     date,
+    category: parseCashOutflowCategory(payload.category),
     loanId: toOptionalString(payload.loanId),
     createdByUid: toOptionalString(payload.createdByUid),
     createdByEmail: toOptionalString(payload.createdByEmail),

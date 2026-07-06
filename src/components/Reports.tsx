@@ -1,5 +1,12 @@
 ﻿import React, { useState } from 'react';
-import { Loan, CashMovement, MovementType, PaymentBreakdown, MonthlySnapshot } from '../types';
+import {
+  Loan,
+  CashMovement,
+  CashOutflowCategory,
+  MovementType,
+  PaymentBreakdown,
+  MonthlySnapshot,
+} from '../types';
 import { useMemo } from 'react';
 import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
 import {
@@ -29,6 +36,13 @@ import { calculateInstallmentLateFee } from '../utils/lateFee';
 import { calculatePortfolioRoi } from '../utils/portfolioRoi';
 import { resolveCashDelta } from '../utils/domainParsers';
 import { generateMonthlySnapshot, saveMonthlySnapshot } from '../services/monthlySnapshotService';
+import {
+  CASH_OUTFLOW_CATEGORY_LABELS,
+  CASH_OUTFLOW_CATEGORY_OPTIONS,
+  CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS,
+  CashOutflowReportCategory,
+  resolveCashOutflowCategory,
+} from '../utils/cashCategories';
 
 interface ReportsProps {
   loans: Loan[];
@@ -37,7 +51,12 @@ interface ReportsProps {
   caixa: number;
   currentUserUid?: string;
   dailyLateFeeRate?: number;
-  onAddTransaction: (type: MovementType, amount: number, description: string) => Promise<void>;
+  onAddTransaction: (
+    type: MovementType,
+    amount: number,
+    description: string,
+    category?: CashOutflowCategory,
+  ) => Promise<void>;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onUpdateLoanAndAddTransaction: (loanId: string, newData: Partial<Loan>, type: MovementType, amount: number, description: string) => Promise<void>;
   onRecalculateCash: () => Promise<void>;
@@ -54,6 +73,8 @@ interface FiscalMonthMetrics {
   totalPaid: number;
 }
 
+type OutflowCategoryTotals = Record<CashOutflowReportCategory, number>;
+
 interface MonthlyData {
   key: string;
   month: string;
@@ -63,6 +84,7 @@ interface MonthlyData {
   emprestado: number;
   entradas: number;
   saidas: number;
+  saidasPorCategoria: OutflowCategoryTotals;
   roi: number;
   openingCash: number;
   closingCash: number;
@@ -88,11 +110,17 @@ const Reports: React.FC<ReportsProps> = ({
   const [formData, setFormData] = useState({
     type: 'ENTRADA' as MovementType,
     amount: '',
-    description: ''
+    description: '',
+    category: 'DESPESA_OPERACIONAL' as CashOutflowCategory,
   });
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
   const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+  const createEmptyOutflowCategoryTotals = (): OutflowCategoryTotals =>
+    CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS.reduce((totals, option) => {
+      totals[option.value] = 0;
+      return totals;
+    }, {} as OutflowCategoryTotals);
   const formatPercentage = (value: number) =>
     Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
   const getRoiColorClass = (roi: number) => {
@@ -214,6 +242,17 @@ const Reports: React.FC<ReportsProps> = ({
   const getMovementTime = (movement: CashMovement) => {
     const timestamp = new Date(movement.date).getTime();
     return Number.isFinite(timestamp) ? timestamp : 0;
+  };
+
+  const isCategorizedOutflowMovement = (movement: CashMovement) => {
+    const movementType = String(movement.type || '').toUpperCase();
+    if (movementType === 'SAIDA') return true;
+
+    const description = String(movement.description || '').toUpperCase();
+    return (
+      movementType === 'RETIRADA' &&
+      (description.startsWith('RETIRADA:') || description.includes('RETIRADA VIA CAIXA') || Boolean(movement.category))
+    );
   };
 
   const isMonthClosed = (monthKey: string) =>
@@ -376,6 +415,21 @@ const Reports: React.FC<ReportsProps> = ({
     );
   }, [currentYear, fiscalData.monthly]);
 
+  const yearlyOutflowCategoryTotals = cashMovements.reduce((totals, movement) => {
+    const date = new Date(movement.date);
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.getFullYear() !== currentYear ||
+      !isCategorizedOutflowMovement(movement)
+    ) {
+      return totals;
+    }
+
+    const category = resolveCashOutflowCategory(movement);
+    totals[category] = roundMoney(totals[category] + Number(movement.amount || 0));
+    return totals;
+  }, createEmptyOutflowCategoryTotals());
+
   const totalAReceber = loans.reduce((acc, loan) => {
     if (effectiveLoanStatus(loan) !== 'ACTIVE') return acc;
     const unpaid = loan.installments
@@ -424,6 +478,7 @@ const Reports: React.FC<ReportsProps> = ({
         emprestado: 0,
         entradas: 0,
         saidas: 0,
+        saidasPorCategoria: createEmptyOutflowCategoryTotals(),
         roi: 0,
         openingCash: 0,
         closingCash: 0,
@@ -456,6 +511,11 @@ const Reports: React.FC<ReportsProps> = ({
 
       if (movementType === 'RETIRADA' && String(movement.description || '').toUpperCase().includes('EMPRESTIMO')) {
         months[key].emprestado = roundMoney(months[key].emprestado + amount);
+      }
+
+      if (isCategorizedOutflowMovement(movement)) {
+        const category = resolveCashOutflowCategory(movement);
+        months[key].saidasPorCategoria[category] = roundMoney(months[key].saidasPorCategoria[category] + amount);
       }
     });
 
@@ -516,10 +576,25 @@ const Reports: React.FC<ReportsProps> = ({
       return;
     }
 
+    if (formData.type === 'SAIDA' && !formData.category) {
+      showToast('Selecione a categoria da saida', 'error');
+      return;
+    }
+
     try {
-      await onAddTransaction(formData.type, Number(amountValue.toFixed(2)), formData.description);
+      await onAddTransaction(
+        formData.type,
+        Number(amountValue.toFixed(2)),
+        formData.description,
+        formData.type === 'SAIDA' ? formData.category : undefined,
+      );
       setIsModalOpen(false);
-      setFormData({ type: 'ENTRADA', amount: '', description: '' });
+      setFormData({
+        type: 'ENTRADA',
+        amount: '',
+        description: '',
+        category: 'DESPESA_OPERACIONAL',
+      });
     } catch (e) {
       // Erro tratado no App.tsx
     }
@@ -574,6 +649,39 @@ const Reports: React.FC<ReportsProps> = ({
     } finally {
       setClosingMonth(null);
     }
+  };
+
+  const renderOutflowCategoryTotals = (totals: OutflowCategoryTotals) => {
+    const items = CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS
+      .map((option) => ({
+        category: option.value,
+        label: CASH_OUTFLOW_CATEGORY_LABELS[option.value],
+        total: roundMoney(totals[option.value] || 0),
+      }))
+      .filter((item) => item.total > 0);
+
+    if (items.length === 0) {
+      return (
+        <p className="py-4 text-center text-[9px] text-zinc-700 italic">
+          Nenhuma saída registrada
+        </p>
+      );
+    }
+
+    return (
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div key={item.category} className="flex items-center justify-between gap-3 border-b border-zinc-900 pb-2 last:border-b-0">
+            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest break-words">
+              {item.label}
+            </span>
+            <span className="text-[10px] font-black text-red-500 whitespace-nowrap">
+              R$ {item.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        ))}
+      </div>
+    );
   };
 
   const financialCards = [
@@ -794,6 +902,21 @@ const Reports: React.FC<ReportsProps> = ({
                       </div>
                     </div>
 
+                    <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="p-4 bg-[#000000]/40 border border-zinc-900 rounded-2xl">
+                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-4">
+                          Saídas por categoria no mês
+                        </p>
+                        {renderOutflowCategoryTotals(data.saidasPorCategoria)}
+                      </div>
+                      <div className="p-4 bg-[#000000]/40 border border-zinc-900 rounded-2xl">
+                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-4">
+                          Saídas por categoria no ano
+                        </p>
+                        {renderOutflowCategoryTotals(yearlyOutflowCategoryTotals)}
+                      </div>
+                    </div>
+
                     <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
                         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Real do Mes</p>
@@ -917,12 +1040,36 @@ const Reports: React.FC<ReportsProps> = ({
                   required
                   className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
                   value={formData.type}
-                  onChange={e => setFormData({ ...formData, type: e.target.value })}
+                  onChange={e => {
+                    const nextType = e.target.value as MovementType;
+                    setFormData({
+                      ...formData,
+                      type: nextType,
+                      category: nextType === 'SAIDA' ? formData.category : 'DESPESA_OPERACIONAL',
+                    });
+                  }}
                 >
                   <option value="ENTRADA">ENTRADA / APORTE</option>
                   <option value="SAIDA">SAIDA / RETIRADA</option>
                 </select>
               </div>
+              {formData.type === 'SAIDA' && (
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Categoria da Saida</label>
+                  <select
+                    required
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+                    value={formData.category}
+                    onChange={e => setFormData({ ...formData, category: e.target.value as CashOutflowCategory })}
+                  >
+                    {CASH_OUTFLOW_CATEGORY_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>
                 <input
