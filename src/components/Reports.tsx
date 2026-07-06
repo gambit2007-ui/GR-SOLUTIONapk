@@ -869,6 +869,14 @@ const Reports: React.FC<ReportsProps> = ({
                               style={{ fill: '#10b981', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
+                          <Bar dataKey="recebimentosPrevistos" name="Previsao Receb." fill="#38bdf8" radius={[6, 6, 0, 0]} barSize={45}>
+                            <LabelList
+                              dataKey="recebimentosPrevistos"
+                              position="top"
+                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
+                              style={{ fill: '#38bdf8', fontSize: '9px', fontWeight: 900 }}
+                            />
+                          </Bar>
                           <Bar dataKey="saidas" name="Saidas" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={45}>
                             <LabelList 
                               dataKey="saidas" 
