@@ -1,0 +1,29 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    match /clientes/{document=**} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /loans/{document=**} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /cashMovement/{document=**} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /settings/{document=**} {
+      allow read, write: if isSignedIn();
+    }
+
+    match /monthlySnapshots/{document=**} {
+      allow read, write: if isSignedIn();
+    }
+  }
+}

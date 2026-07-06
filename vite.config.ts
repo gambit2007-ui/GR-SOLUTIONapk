@@ -13,8 +13,8 @@ export default defineConfig({
         skipWaiting: true,
       },
       manifest: {
-        name: 'GR SULTION',
-        short_name: 'GR SULTION',
+        name: 'GR SOLUTION',
+        short_name: 'GR SOLUTION',
         theme_color: '#000000',
         background_color: '#000000',
         display: 'standalone',

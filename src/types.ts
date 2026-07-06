@@ -34,7 +34,6 @@ export interface AuthUser {
   id: string;
   name: string;
   email: string;
-  password?: string;
   createdAt: number;
 }
 
@@ -49,6 +48,31 @@ export interface CashMovement {
   createdByEmail?: string;
   createdByName?: string;
   value?: number;
+}
+
+export interface FeeSettings {
+  dailyLateFeeRate: number;
+}
+
+export interface MonthlySnapshot {
+  id?: string;
+  month: string;
+  openingCash: number;
+  closingCash: number;
+  totalIncome: number;
+  totalExpense: number;
+  principalReceived: number;
+  interestReceived: number;
+  lateFeesReceived: number;
+  serviceFeesReceived: number;
+  realProfit: number;
+  lentAmount: number;
+  roi: number;
+  movementCount: number;
+  createdLoansCount: number;
+  createdAt?: FirestoreTimestampLike | Date | number | string;
+  updatedAt?: FirestoreTimestampLike | Date | number | string;
+  closedByUid?: string;
 }
 
 export interface CustomerDocument {

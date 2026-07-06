@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Customer, Loan, LoanDraft, Installment, InstallmentPaymentEntry, LoanType, PaymentBreakdown } from '../types';
+import { Customer, Loan, LoanDraft, Installment, InstallmentPaymentEntry, LoanType, PaymentBreakdown } from '../../types';
 import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban } from 'lucide-react';
 import {
   effectiveLoanStatus,
@@ -8,16 +8,16 @@ import {
   loanInstallmentsCount,
   normalizeInstallmentStatus,
   normalizeLoanStatus,
-} from '../utils/loanCompat';
-import { getLocalISODate } from '../utils/dateTime';
-import { buildPaymentBreakdown } from '../utils/paymentBreakdown';
-import { calculateInstallmentLateFee } from '../utils/lateFee';
+} from '../../utils/loanCompat';
+import { getLocalISODate } from '../../utils/dateTime';
+import { buildPaymentBreakdown } from '../../utils/paymentBreakdown';
+import { calculateInstallmentLateFee } from '../../utils/lateFee';
 import {
   calculateInterestOnlyRenewalAmount,
   getCurrentContractDueDate,
   getNextMonthlyDueDate,
   shiftPendingInstallmentsToNewDueDate,
-} from '../utils/interestOnlyRenewal';
+} from '../../utils/interestOnlyRenewal';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -33,6 +33,7 @@ interface LoanSectionProps {
     email?: string | null;
     displayName?: string | null;
   };
+  dailyLateFeeRate?: number;
   onUpdateLoanAndAddTransaction: (
     loanId: string,
     newData: Partial<Loan>,
@@ -89,6 +90,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   showToast, 
   initialExpandedLoanId,
   currentActor,
+  dailyLateFeeRate,
   onUpdateLoanAndAddTransaction
 }) => {
   const buildDefaultFormData = () => ({
@@ -154,7 +156,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     return String(max + 1);
   };
 
-  const calculateLateFee = calculateInstallmentLateFee;
+  const calculateLateFee = (installment: Installment | null | undefined) =>
+    calculateInstallmentLateFee(installment, new Date(), dailyLateFeeRate);
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
@@ -998,7 +1001,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             id: editingLoanId,
             installments: updatedPayload.installments || currentLoan.installments,
           };
-          const { generateContractPDF } = await import('../utils/contractGenerator');
+          const { generateContractPDF } = await import('../../utils/contractGenerator');
           generateContractPDF(customer, updatedLoan);
           showToast('Contrato atualizado e novo PDF gerado!', 'success');
         } catch (pdfError) {
@@ -1035,7 +1038,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             id: createdLoanId || String(newLoan.contractNumber || Date.now()),
             createdAt: Date.now(),
           };
-          const { generateContractPDF } = await import('../utils/contractGenerator');
+          const { generateContractPDF } = await import('../../utils/contractGenerator');
           generateContractPDF(customer, loanForPdf);
           showToast('Contrato efetivado e PDF gerado!', 'success');
         } catch (pdfError) {
@@ -1397,12 +1400,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const phone = phoneValue.replace(/\D/g, '');
     const text = encodeURIComponent(
       `Ol\u00e1, ${customerName}. Tudo bem?\n\n` +
-      `Aqui \u00e9 da GR SULTION.\n\n` +
+      `Aqui \u00e9 da GR SOLUTION.\n\n` +
       `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n` +
       `Caso j\u00e1 tenha realizado o pagamento, por favor envie o comprovante para darmos baixa em nosso sistema.\n\n` +
       `Qualquer d\u00favida, estou \u00e0 disposi\u00e7\u00e3o.\n\n` +
       `Atenciosamente,\n` +
-      `GR SULTION`
+      `GR SOLUTION`
     );
     window.open(`https://wa.me/55${phone}?text=${text}`, '_blank');
   };

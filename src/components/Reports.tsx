@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Loan, CashMovement, MovementType, PaymentBreakdown } from '../types';
+import { Loan, CashMovement, MovementType, PaymentBreakdown, MonthlySnapshot } from '../types';
 import { useMemo } from 'react';
 import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
 import {
@@ -27,11 +27,16 @@ import {
 } from '../utils/loanCompat';
 import { calculateInstallmentLateFee } from '../utils/lateFee';
 import { calculatePortfolioRoi } from '../utils/portfolioRoi';
+import { resolveCashDelta } from '../utils/domainParsers';
+import { generateMonthlySnapshot, saveMonthlySnapshot } from '../services/monthlySnapshotService';
 
 interface ReportsProps {
   loans: Loan[];
   cashMovements: CashMovement[];
+  monthlySnapshots: MonthlySnapshot[];
   caixa: number;
+  currentUserUid?: string;
+  dailyLateFeeRate?: number;
   onAddTransaction: (type: MovementType, amount: number, description: string) => Promise<void>;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onUpdateLoanAndAddTransaction: (loanId: string, newData: Partial<Loan>, type: MovementType, amount: number, description: string) => Promise<void>;
@@ -49,11 +54,37 @@ interface FiscalMonthMetrics {
   totalPaid: number;
 }
 
+interface MonthlyData {
+  key: string;
+  month: string;
+  lucro: number;
+  recebido: number;
+  recebimentosPrevistos: number;
+  emprestado: number;
+  entradas: number;
+  saidas: number;
+  roi: number;
+  openingCash: number;
+  closingCash: number;
+  movementCount: number;
+  createdLoansCount: number;
+}
+
 const Reports: React.FC<ReportsProps> = ({
-  loans, cashMovements, caixa, onAddTransaction, onRecalculateCash, onDownloadBackup, showToast
+  loans,
+  cashMovements,
+  monthlySnapshots,
+  caixa,
+  currentUserUid,
+  dailyLateFeeRate,
+  onAddTransaction,
+  onRecalculateCash,
+  onDownloadBackup,
+  showToast,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
+  const [closingMonth, setClosingMonth] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     type: 'ENTRADA' as MovementType,
     amount: '',
@@ -72,7 +103,7 @@ const Reports: React.FC<ReportsProps> = ({
 
   const getRemainingInstallmentValue = (installment: Loan['installments'][number]) => {
     if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-    const lateFee = calculateInstallmentLateFee(installment);
+    const lateFee = calculateInstallmentLateFee(installment, new Date(), dailyLateFeeRate);
     const totalWithFee = roundMoney(installmentAmount(installment) + lateFee);
     const remaining = roundMoney(totalWithFee - installmentPaidAmount(installment));
     return remaining > 0 ? remaining : 0;
@@ -138,8 +169,73 @@ const Reports: React.FC<ReportsProps> = ({
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
   };
 
+  const makeDueDateMonthKey = (dateValue: string | undefined) => {
+    const normalized = String(dateValue || '').trim();
+    const isoMonth = normalized.match(/^(\d{4})-(\d{2})/);
+    if (isoMonth) return `${isoMonth[1]}-${isoMonth[2]}`;
+    return normalized ? makeMonthKey(normalized) : null;
+  };
+
   const getMonthShortLabel = (monthIndex: number, year: number) =>
     `${monthNamesUpper[monthIndex]}/${String(year).slice(2)}`;
+
+  const getDateFromUnknown = (value: unknown): Date | null => {
+    if (!value) return null;
+    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+    if (typeof value === 'number') {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    if (typeof value === 'object' && 'toDate' in value && typeof (value as { toDate?: unknown }).toDate === 'function') {
+      const date = (value as { toDate: () => Date }).toDate();
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+    const date = new Date(String(value));
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
+
+  const getLoanCreatedDate = (loan: Loan): Date | null => (
+    getDateFromUnknown(loan.createdAt) || getDateFromUnknown(`${loan.startDate}T12:00:00`)
+  );
+
+  const getMonthRange = (monthKey: string) => {
+    const [yearRaw, monthRaw] = monthKey.split('-');
+    const year = Number(yearRaw);
+    const monthIndex = Number(monthRaw) - 1;
+    if (!Number.isInteger(year) || !Number.isInteger(monthIndex) || monthIndex < 0 || monthIndex > 11) {
+      return null;
+    }
+    return {
+      start: new Date(year, monthIndex, 1).getTime(),
+      end: new Date(year, monthIndex + 1, 1).getTime(),
+    };
+  };
+
+  const getMovementTime = (movement: CashMovement) => {
+    const timestamp = new Date(movement.date).getTime();
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  };
+
+  const isMonthClosed = (monthKey: string) =>
+    monthlySnapshots.some((snapshot) => snapshot.month === monthKey);
+
+  const getProjectedInstallmentReceivable = (installment: Loan['installments'][number]) => {
+    const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
+    const entriesPaid = paymentEntries.length > 0
+      ? roundMoney(paymentEntries.reduce((sum, entry) => sum + Number(entry.totalPaid || 0), 0))
+      : 0;
+    const paidAmount = Math.max(
+      entriesPaid,
+      roundMoney(installmentPaidAmount(installment)),
+      roundMoney(Number(installment.paymentBreakdown?.totalPaid || 0)),
+    );
+
+    if (normalizeInstallmentStatus(installment.status) === 'PAID') {
+      return paidAmount > 0 ? paidAmount : roundMoney(installmentAmount(installment));
+    }
+
+    return roundMoney(paidAmount + getRemainingInstallmentValue(installment));
+  };
 
   const fiscalData = useMemo(() => {
     const monthly: Record<string, FiscalMonthMetrics> = {};
@@ -314,27 +410,25 @@ const Reports: React.FC<ReportsProps> = ({
   }, 0);
 
   // Agrupamento mensal para o grafico e gavetas
-  const getMonthlyData = () => {
-    const months: { [key: string]: { 
-      month: string, 
-      lucro: number, 
-      recebido: number, 
-      emprestado: number, 
-      entradas: number, 
-      saidas: number,
-      roi: number
-    } } = {};
+  const getMonthlyData = (): MonthlyData[] => {
+    const months: Record<string, MonthlyData> = {};
 
     for (let monthIndex = 0; monthIndex <= currentMonthIndex; monthIndex += 1) {
       const key = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}`;
       months[key] = {
+        key,
         month: getMonthShortLabel(monthIndex, currentYear),
         lucro: roundMoney(Number(fiscalData.monthly[key]?.taxableRevenue || 0)),
         recebido: 0,
+        recebimentosPrevistos: 0,
         emprestado: 0,
         entradas: 0,
         saidas: 0,
         roi: 0,
+        openingCash: 0,
+        closingCash: 0,
+        movementCount: 0,
+        createdLoansCount: 0,
       };
     }
 
@@ -347,6 +441,7 @@ const Reports: React.FC<ReportsProps> = ({
 
       const movementType = String(movement.type || '').toUpperCase();
       const amount = Number(movement.amount || 0);
+      months[key].movementCount += 1;
       const isEntrada = ['APORTE', 'PAGAMENTO', 'ENTRADA'].includes(movementType);
       if (isEntrada) {
         months[key].entradas = roundMoney(months[key].entradas + amount);
@@ -362,6 +457,42 @@ const Reports: React.FC<ReportsProps> = ({
       if (movementType === 'RETIRADA' && String(movement.description || '').toUpperCase().includes('EMPRESTIMO')) {
         months[key].emprestado = roundMoney(months[key].emprestado + amount);
       }
+    });
+
+    loans.forEach((loan) => {
+      if (effectiveLoanStatus(loan) === 'CANCELLED') return;
+      const installments = Array.isArray(loan.installments) ? loan.installments : [];
+
+      installments.forEach((installment) => {
+        const key = makeDueDateMonthKey(installment.dueDate);
+        if (!key || !months[key]) return;
+
+        months[key].recebimentosPrevistos = roundMoney(
+          months[key].recebimentosPrevistos + getProjectedInstallmentReceivable(installment),
+        );
+      });
+    });
+
+    Object.keys(months).forEach((key) => {
+      const range = getMonthRange(key);
+      if (!range) return;
+
+      months[key].openingCash = roundMoney(
+        cashMovements.reduce((total, movement) => (
+          getMovementTime(movement) < range.start ? total + resolveCashDelta(movement) : total
+        ), 0),
+      );
+      months[key].closingCash = roundMoney(
+        cashMovements.reduce((total, movement) => (
+          getMovementTime(movement) < range.end ? total + resolveCashDelta(movement) : total
+        ), 0),
+      );
+      months[key].createdLoansCount = loans.filter((loan) => {
+        const createdDate = getLoanCreatedDate(loan);
+        if (!createdDate) return false;
+        const timestamp = createdDate.getTime();
+        return timestamp >= range.start && timestamp < range.end;
+      }).length;
     });
 
     return Object.keys(months)
@@ -402,6 +533,46 @@ const Reports: React.FC<ReportsProps> = ({
       // Erro tratado no App.tsx.
     } finally {
       setIsDownloadingBackup(false);
+    }
+  };
+
+  const handleCloseMonth = async (data: MonthlyData) => {
+    setClosingMonth(data.key);
+    try {
+      const fiscalMetrics = fiscalData.monthly[data.key] || {
+        principalRecovered: 0,
+        interestReceived: 0,
+        lateFeesReceived: 0,
+        serviceFeesReceived: 0,
+        taxableRevenue: 0,
+        totalPaid: 0,
+      };
+
+      const snapshot = generateMonthlySnapshot({
+        month: data.key,
+        openingCash: data.openingCash,
+        closingCash: data.closingCash,
+        totalIncome: data.entradas,
+        totalExpense: data.saidas,
+        principalReceived: fiscalMetrics.principalRecovered,
+        interestReceived: fiscalMetrics.interestReceived,
+        lateFeesReceived: fiscalMetrics.lateFeesReceived,
+        serviceFeesReceived: fiscalMetrics.serviceFeesReceived,
+        realProfit: data.lucro,
+        lentAmount: data.emprestado,
+        roi: data.roi,
+        movementCount: data.movementCount,
+        createdLoansCount: data.createdLoansCount,
+        closedByUid: currentUserUid,
+      });
+
+      await saveMonthlySnapshot(snapshot);
+      showToast(`Mes ${data.month} fechado com sucesso`, 'success');
+    } catch (error) {
+      console.error('Falha ao fechar mes:', error);
+      showToast('Erro ao fechar o mes', 'error');
+    } finally {
+      setClosingMonth(null);
     }
   };
 
@@ -543,7 +714,7 @@ const Reports: React.FC<ReportsProps> = ({
         
         <div className="space-y-6">
             {monthlyData.map((data) => (
-              <div key={data.month} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#000000]/20">
+              <div key={data.key} className="border border-zinc-900 rounded-3xl overflow-hidden bg-[#000000]/20">
                 <button 
                   onClick={() => setExpandedMonth(expandedMonth === data.month ? null : data.month)}
                   className="w-full p-6 flex items-center justify-between hover:bg-zinc-900/30 transition-colors"
@@ -574,6 +745,28 @@ const Reports: React.FC<ReportsProps> = ({
                 
                 {expandedMonth === data.month && (
                   <div className="p-6 border-t border-zinc-900 bg-zinc-950/30 animate-in slide-in-from-top duration-200">
+                    <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <span className={`px-3 py-2 rounded-xl text-[8px] font-black uppercase tracking-widest border ${
+                          isMonthClosed(data.key)
+                            ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                            : 'bg-[#BF953F]/10 text-[#BF953F] border-[#BF953F]/20'
+                        }`}>
+                          {isMonthClosed(data.key) ? 'Fechado' : 'Em aberto / tempo real'}
+                        </span>
+                        <span className="text-[8px] text-zinc-600 uppercase tracking-widest">
+                          Competencia {data.key}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { void handleCloseMonth(data); }}
+                        disabled={closingMonth === data.key}
+                        className="px-5 py-3 bg-zinc-900 border border-zinc-800 text-[#BF953F] rounded-2xl font-black uppercase text-[9px] tracking-widest hover:border-[#BF953F]/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      >
+                        {closingMonth === data.key ? 'Fechando...' : 'Fechar Mês'}
+                      </button>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                       <div className="space-y-4">
                         <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
@@ -589,6 +782,10 @@ const Reports: React.FC<ReportsProps> = ({
                         <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
                           <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Total Recebido</span>
                           <span className="text-xs font-black text-zinc-300">R$ {data.recebido.toLocaleString('pt-BR')}</span>
+                        </div>
+                        <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
+                          <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Previsão de Recebimentos</span>
+                          <span className="text-xs font-black text-[#BF953F]">R$ {data.recebimentosPrevistos.toLocaleString('pt-BR')}</span>
                         </div>
                         <div className="flex items-center justify-between border-b border-zinc-900 pb-2">
                           <span className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">Capital Emprestado</span>

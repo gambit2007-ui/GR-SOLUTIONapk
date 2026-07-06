@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useState } from 'react';
 import {
   LayoutDashboard, Users, FileText, PieChart, Calculator,
   Activity, X, Menu, Lock, LogOut, Loader2,
@@ -47,10 +47,23 @@ const App: React.FC = () => {
   const shouldLoadCustomers = currentView === 'CUSTOMERS' || currentView === 'LOANS';
 
   const { user, authLoading, loginLoading, login, logout } = useAuthState();
-  const { clientes, contratos, movimentacoes, caixa, isCustomersLoading } = useRealtimeData(user, {
-    loadCustomers: shouldLoadCustomers,
-  });
   const { toasts, showToast, removeToast } = useToasts();
+  const handleRealtimeError = useCallback((message: string) => {
+    showToast(message, 'error');
+  }, [showToast]);
+  const {
+    clientes,
+    contratos,
+    movimentacoes,
+    monthlySnapshots,
+    feeSettings,
+    caixa,
+    isCustomersLoading,
+  } = useRealtimeData(user, {
+    loadCustomers: shouldLoadCustomers,
+    onError: handleRealtimeError,
+  });
+  const dailyLateFeeRate = feeSettings.dailyLateFeeRate;
   const {
     isSidebarOpen,
     setIsSidebarOpen,
@@ -83,7 +96,7 @@ const App: React.FC = () => {
 
   const getRemainingInstallmentValue = (installment: Loan['installments'][number] | null | undefined) => {
     if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-    const lateFee = calculateInstallmentLateFee(installment);
+    const lateFee = calculateInstallmentLateFee(installment, new Date(), dailyLateFeeRate);
     const totalWithFee = Number((Number(installmentAmount(installment) || 0) + lateFee).toFixed(2));
     const remaining = Number((totalWithFee - Number(installmentPaidAmount(installment) || 0)).toFixed(2));
     return remaining > 0 ? remaining : 0;
@@ -308,6 +321,7 @@ const App: React.FC = () => {
           <Dashboard
             loans={contratos}
             cashMovements={movimentacoes}
+            dailyLateFeeRate={dailyLateFeeRate}
             onNavigateToLoan={navigateToLoan}
           />
         );
@@ -334,6 +348,7 @@ const App: React.FC = () => {
             showToast={showToast}
             initialExpandedLoanId={selectedLoanId}
             currentActor={movementActor}
+            dailyLateFeeRate={dailyLateFeeRate}
             onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
           />
         );
@@ -344,7 +359,10 @@ const App: React.FC = () => {
           <Reports
             loans={contratos}
             cashMovements={movimentacoes}
+            monthlySnapshots={monthlySnapshots}
             caixa={caixa}
+            currentUserUid={user?.uid}
+            dailyLateFeeRate={dailyLateFeeRate}
             onAddTransaction={handleAddTransaction}
             onUpdateLoan={handleUpdateLoan}
             onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
@@ -375,7 +393,7 @@ const App: React.FC = () => {
             <div className="inline-flex p-4 bg-zinc-900 rounded-2xl mb-4 border border-zinc-800">
               <Lock size={32} className="text-[#BF953F]" />
             </div>
-            <h1 className="text-2xl font-black gold-text tracking-tighter">GR SULTION</h1>
+            <h1 className="text-2xl font-black gold-text tracking-tighter">GR SOLUTION</h1>
             <p className="text-[9px] text-zinc-500 uppercase tracking-[0.4em] mt-2 text-center">Acesso ao Painel de Controle</p>
           </div>
           <form onSubmit={handleLogin} className="space-y-4">
@@ -466,7 +484,7 @@ const App: React.FC = () => {
         }`}
       >
         <div className="h-24 flex items-center justify-between px-6 border-b border-zinc-900">
-          {(isSidebarOpen || isMobileViewport) && <span className="font-black text-lg gold-text tracking-tighter">GR SULTION</span>}
+          {(isSidebarOpen || isMobileViewport) && <span className="font-black text-lg gold-text tracking-tighter">GR SOLUTION</span>}
           <button
             onClick={() => {
               if (isMobileViewport) {

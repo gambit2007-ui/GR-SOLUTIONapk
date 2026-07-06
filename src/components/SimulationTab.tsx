@@ -139,12 +139,12 @@ const SimulationTab: React.FC<SimulationTabProps> = () => {
     const dueDate = getEstimatedDueDate();
     const message = encodeURIComponent(
       `Ol\u00e1, ${customerName}. Tudo bem?\n\n` +
-      `Aqui \u00e9 da GR SULTION.\n\n` +
+      `Aqui \u00e9 da GR SOLUTION.\n\n` +
       `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n` +
       `Caso j\u00e1 tenha realizado o pagamento, por favor envie o comprovante para darmos baixa em nosso sistema.\n\n` +
       `Qualquer d\u00favida, estou \u00e0 disposi\u00e7\u00e3o.\n\n` +
       `Atenciosamente,\n` +
-      `GR SULTION`
+      `GR SOLUTION`
     );
 
     const url = phone ? `https://wa.me/55${phone}?text=${message}` : `https://wa.me/?text=${message}`;

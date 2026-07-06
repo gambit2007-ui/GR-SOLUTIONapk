@@ -14,10 +14,11 @@ import { calculateInstallmentLateFee } from '../utils/lateFee';
 interface DashboardProps {
   loans: Loan[];
   cashMovements: CashMovement[];
+  dailyLateFeeRate?: number;
   onNavigateToLoan: (loanId: string) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateToLoan }) => {
+const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, dailyLateFeeRate, onNavigateToLoan }) => {
   const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
   const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
   const [selectedCashMovement, setSelectedCashMovement] = useState<CashMovement | null>(null);
@@ -85,7 +86,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
 
   const getRemainingInstallmentValue = (inst: Installment) => {
     if (normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
-    const lateFee = calculateInstallmentLateFee(inst);
+    const lateFee = calculateInstallmentLateFee(inst, new Date(), dailyLateFeeRate);
     const totalWithFee = roundMoney(installmentAmount(inst) + lateFee);
     const remaining = roundMoney(totalWithFee - installmentPaidAmount(inst));
     return remaining > 0 ? remaining : 0;
@@ -112,7 +113,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, onNavigateT
           getRemainingInstallmentValue(inst) > 0,
       )
       .map((inst) => {
-        const lateFee = calculateInstallmentLateFee(inst);
+        const lateFee = calculateInstallmentLateFee(inst, new Date(), dailyLateFeeRate);
         const remainingWithFee = getRemainingInstallmentValue(inst);
         return {
           ...inst,

@@ -7,9 +7,17 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
+node_modules/
+dist/
 dist-ssr
+.git/
+.firebase/
+.vercel/
+.vs/
+_reference/
+diagnostics/
+output/
+.env
 *.local
 
 # Editor directories and files
@@ -22,8 +30,4 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
-.vercel
-diagnostics/
-output/vercel-preview-deploy/
-output/vercel-preview-deploy.tgz
 scripts/tmp-*.ts
