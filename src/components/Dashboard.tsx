@@ -92,6 +92,22 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, dailyLateFe
     return remaining > 0 ? remaining : 0;
   };
 
+  const getOverdueDays = (dueDateValue: string) => {
+    const dueDate = new Date(`${dueDateValue}T00:00:00`);
+    if (Number.isNaN(dueDate.getTime())) return 0;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (dueDate >= today) return 0;
+
+    return Math.floor((today.getTime() - dueDate.getTime()) / (24 * 60 * 60 * 1000));
+  };
+
+  const getMaxOverdueDays = (installments: Installment[]) =>
+    installments.reduce((maxDays, installment) => Math.max(maxDays, getOverdueDays(installment.dueDate)), 0);
+
+  const formatOverdueDays = (days: number) => `${days} ${days === 1 ? 'dia' : 'dias'}`;
+
   // Identificar contratos em atraso
   const overdueLoans = loans.filter(loan => {
     if (effectiveLoanStatus(loan) !== 'ACTIVE') return false;
@@ -351,6 +367,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, dailyLateFe
                 const overdueValue = roundMoney(
                   overdueInstallments.reduce((sum, i) => sum + getRemainingInstallmentValue(i), 0),
                 );
+                const overdueDays = getMaxOverdueDays(overdueInstallments);
 
                 return (
                   <button
@@ -364,8 +381,8 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, dailyLateFe
                         <p className="text-[10px] font-black text-white uppercase group-hover:text-red-500 transition-colors break-words">{loan.customerName}</p>
                         <p className="text-[8px] text-zinc-500 uppercase tracking-widest mt-1 break-all">ID: {loan.id}</p>
                       </div>
-                      <span className="text-[8px] font-black text-red-500 bg-red-500/10 px-2 py-1 rounded-lg uppercase">
-                        {overdueCount}x
+                      <span className="text-[8px] font-black text-red-500 bg-red-500/10 px-2 py-1 rounded-lg uppercase whitespace-nowrap">
+                        {overdueCount}x - {formatOverdueDays(overdueDays)}
                       </span>
                     </div>
                     <div className="mt-auto">

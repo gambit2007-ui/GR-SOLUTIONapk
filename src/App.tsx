@@ -343,6 +343,7 @@ const App: React.FC = () => {
             customers={clientes}
             loans={contratos}
             isLoadingCustomers={isCustomersLoading}
+            dailyLateFeeRate={dailyLateFeeRate}
             onAddCustomer={handleAddCustomer}
             onUpdateCustomer={handleUpdateCustomer}
             onDeleteCustomer={handleDeleteCustomer}

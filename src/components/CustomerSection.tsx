@@ -8,19 +8,21 @@ import {
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
+import { calculateCustomerFinancialSummary } from '../utils/customerFinancialSummary';
 import { auth, storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebase';
 
 interface CustomerSectionProps {
   customers: Customer[];
   loans: Loan[];
   isLoadingCustomers?: boolean;
+  dailyLateFeeRate?: number;
   onAddCustomer: (c: Customer) => Promise<void> | void;
   onUpdateCustomer: (c: Customer) => Promise<void> | void;
   onDeleteCustomer: (id: string) => Promise<void> | void;
 }
 
 const CustomerSection: React.FC<CustomerSectionProps> = ({
-  customers, loans, isLoadingCustomers = false, onAddCustomer, onUpdateCustomer, onDeleteCustomer
+  customers, loans, isLoadingCustomers = false, dailyLateFeeRate, onAddCustomer, onUpdateCustomer, onDeleteCustomer
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -39,6 +41,19 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   const ALLOWED_DOCUMENT_EXTENSIONS = ['.pdf', '.jpg', '.jpeg', '.png'];
   const DEFAULT_AVATAR_DATA_URL =
     "data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='128' height='128' viewBox='0 0 128 128'%3E%3Crect width='128' height='128' rx='24' fill='%23121212'/%3E%3Ccircle cx='64' cy='48' r='19' fill='%23BF953F' fill-opacity='0.85'/%3E%3Cpath d='M28 104c5-16 19-26 36-26s31 10 36 26' fill='none' stroke='%23BF953F' stroke-opacity='0.85' stroke-width='10' stroke-linecap='round'/%3E%3C/svg%3E";
+
+  const viewingFinancialSummary = React.useMemo(
+    () =>
+      viewingDetails
+        ? calculateCustomerFinancialSummary(viewingDetails.id, loans, dailyLateFeeRate)
+        : null,
+    [dailyLateFeeRate, loans, viewingDetails],
+  );
+
+  const formatCurrency = (value: number) =>
+    value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const formatCount = (value: number) => value.toLocaleString('pt-BR');
 
   const getFileExtension = (fileName: string) => {
     const dotIndex = fileName.lastIndexOf('.');
@@ -848,6 +863,80 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 </div>
               </div>
             </div>
+
+            {viewingFinancialSummary && (
+              <section className="mb-8">
+                <h3 className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-4">
+                  Resumo financeiro do cliente
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+                  {[
+                    {
+                      label: '💵 Total emprestado',
+                      value: formatCurrency(viewingFinancialSummary.totalBorrowed),
+                      valueClassName: 'text-white',
+                    },
+                    {
+                      label: '📥 Total recebido',
+                      value: formatCurrency(viewingFinancialSummary.totalReceived),
+                      valueClassName: 'text-emerald-500',
+                    },
+                    {
+                      label: '💰 Lucro real gerado',
+                      value: formatCurrency(viewingFinancialSummary.realProfit),
+                      valueClassName: 'text-[#BF953F]',
+                    },
+                    {
+                      label: '📈 Lucro projetado',
+                      value: formatCurrency(viewingFinancialSummary.projectedProfit),
+                      valueClassName: 'text-blue-400',
+                    },
+                    {
+                      label: '🚶 Valor em aberto',
+                      value: formatCurrency(viewingFinancialSummary.openAmount),
+                      valueClassName: 'text-white',
+                    },
+                    {
+                      label: '⚠️ Valor em atraso',
+                      value: formatCurrency(viewingFinancialSummary.overdueAmount),
+                      valueClassName: viewingFinancialSummary.overdueAmount > 0 ? 'text-red-500' : 'text-zinc-300',
+                    },
+                    {
+                      label: '📄 Contratos totais',
+                      value: formatCount(viewingFinancialSummary.totalContracts),
+                      valueClassName: 'text-white',
+                    },
+                    {
+                      label: '✅ Contratos quitados',
+                      value: formatCount(viewingFinancialSummary.completedContracts),
+                      valueClassName: 'text-blue-400',
+                    },
+                    {
+                      label: '🟢 Contratos ativos',
+                      value: formatCount(viewingFinancialSummary.activeContracts),
+                      valueClassName: 'text-emerald-500',
+                    },
+                    {
+                      label: '🔴 Contratos em atraso',
+                      value: formatCount(viewingFinancialSummary.overdueContracts),
+                      valueClassName: viewingFinancialSummary.overdueContracts > 0 ? 'text-red-500' : 'text-zinc-300',
+                    },
+                  ].map((item) => (
+                    <div
+                      key={item.label}
+                      className="p-4 bg-[#000000] border border-zinc-900 rounded-2xl min-h-[92px]"
+                    >
+                      <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-2">
+                        {item.label}
+                      </p>
+                      <p className={`text-sm font-black break-words ${item.valueClassName}`}>
+                        {item.value}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               <div>
