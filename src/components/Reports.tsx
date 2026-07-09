@@ -42,6 +42,7 @@ import {
   CASH_OUTFLOW_CATEGORY_OPTIONS,
   CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS,
   CashOutflowReportCategory,
+  isLoanCashOutflowMovement,
   resolveCashOutflowCategory,
 } from '../utils/cashCategories';
 
@@ -252,6 +253,7 @@ const Reports: React.FC<ReportsProps> = ({
   const isCategorizedOutflowMovement = (movement: CashMovement) => {
     const movementType = String(movement.type || '').toUpperCase();
     if (movementType === 'SAIDA') return true;
+    if (isLoanCashOutflowMovement(movement)) return true;
 
     const description = String(movement.description || '').toUpperCase();
     return (
@@ -529,7 +531,7 @@ const Reports: React.FC<ReportsProps> = ({
         months[key].recebido = roundMoney(months[key].recebido + signedAmount);
       }
 
-      if (movementType === 'RETIRADA' && String(movement.description || '').toUpperCase().includes('EMPRESTIMO')) {
+      if (isLoanCashOutflowMovement(movement)) {
         months[key].emprestado = roundMoney(months[key].emprestado + amount);
       }
 

@@ -15,12 +15,13 @@ export const CASH_OUTFLOW_CATEGORY_OPTIONS: ReadonlyArray<{
   { value: 'REINVESTIMENTO', label: 'Reinvestimento' },
 ];
 
-export type CashOutflowReportCategory = CashOutflowCategory | 'SEM_CATEGORIA';
+export type CashOutflowReportCategory = CashOutflowCategory | 'EMPRESTIMO' | 'SEM_CATEGORIA';
 
 export const CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS: ReadonlyArray<{
   value: CashOutflowReportCategory;
   label: string;
 }> = [
+  { value: 'EMPRESTIMO', label: 'Emprestimos' },
   ...CASH_OUTFLOW_CATEGORY_OPTIONS,
   { value: 'SEM_CATEGORIA', label: 'Sem categoria' },
 ];
@@ -43,7 +44,23 @@ export const parseCashOutflowCategory = (value: unknown): CashOutflowCategory | 
   return CASH_OUTFLOW_CATEGORY_VALUES.has(normalized) ? normalized : undefined;
 };
 
+const normalizeSearchText = (value: unknown) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+
+export const isLoanCashOutflowMovement = (movement: CashMovement): boolean => {
+  const movementType = String(movement.type || '').trim().toUpperCase();
+  if (movementType !== 'RETIRADA') return false;
+
+  const description = normalizeSearchText(movement.description);
+  return Boolean(movement.loanId) || description.includes('EMPRESTIMO');
+};
+
 export const resolveCashOutflowCategory = (movement: CashMovement): CashOutflowReportCategory => {
+  if (isLoanCashOutflowMovement(movement)) return 'EMPRESTIMO';
+
   const parsedCategory = parseCashOutflowCategory(movement.category);
   if (parsedCategory) return parsedCategory;
 
