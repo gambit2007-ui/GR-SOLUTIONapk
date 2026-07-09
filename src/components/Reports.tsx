@@ -1,6 +1,7 @@
 ﻿import React, { useState } from 'react';
 import {
   Loan,
+  Customer,
   CashMovement,
   CashOutflowCategory,
   MovementType,
@@ -46,6 +47,7 @@ import {
 
 interface ReportsProps {
   loans: Loan[];
+  customers: Customer[];
   cashMovements: CashMovement[];
   monthlySnapshots: MonthlySnapshot[];
   caixa: number;
@@ -94,6 +96,7 @@ interface MonthlyData {
 
 const Reports: React.FC<ReportsProps> = ({
   loans,
+  customers,
   cashMovements,
   monthlySnapshots,
   caixa,
@@ -106,6 +109,8 @@ const Reports: React.FC<ReportsProps> = ({
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
+  const [isGeneratingAnnualReport, setIsGeneratingAnnualReport] = useState(false);
+  const [reportYear, setReportYear] = useState(() => new Date().getFullYear());
   const [closingMonth, setClosingMonth] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     type: 'ENTRADA' as MovementType,
@@ -404,6 +409,21 @@ const Reports: React.FC<ReportsProps> = ({
   const currentYear = now.getFullYear();
   const currentMonthIndex = now.getMonth();
   const currentMonthLabel = getMonthShortLabel(currentMonthIndex, currentYear);
+  const reportYearOptions = useMemo(() => {
+    const years = new Set<number>([currentYear, reportYear]);
+
+    loans.forEach((loan) => {
+      const createdDate = getLoanCreatedDate(loan);
+      if (createdDate) years.add(createdDate.getFullYear());
+    });
+
+    cashMovements.forEach((movement) => {
+      const movementDate = new Date(movement.date);
+      if (!Number.isNaN(movementDate.getTime())) years.add(movementDate.getFullYear());
+    });
+
+    return Array.from(years).sort((a, b) => b - a);
+  }, [cashMovements, currentYear, loans, reportYear]);
 
   const faturamentoAno = useMemo(() => {
     return roundMoney(
@@ -611,6 +631,27 @@ const Reports: React.FC<ReportsProps> = ({
     }
   };
 
+  const handleAnnualReportDownload = async () => {
+    setIsGeneratingAnnualReport(true);
+    try {
+      const { generateAnnualCashReportPdf } = await import('../utils/annualCashReportPdf');
+      await generateAnnualCashReportPdf({
+        year: reportYear,
+        caixa,
+        loans,
+        cashMovements,
+        customers,
+        dailyLateFeeRate,
+      });
+      showToast('Relatorio anual gerado com sucesso', 'success');
+    } catch (error) {
+      console.error('Falha ao gerar relatorio anual do caixa:', error);
+      showToast('Erro ao gerar relatorio anual', 'error');
+    } finally {
+      setIsGeneratingAnnualReport(false);
+    }
+  };
+
   const handleCloseMonth = async (data: MonthlyData) => {
     setClosingMonth(data.key);
     try {
@@ -728,6 +769,22 @@ const Reports: React.FC<ReportsProps> = ({
         </div>
         
         <div className="relative z-10 shrink-0 flex flex-col sm:flex-row gap-3">
+          <div className="flex flex-col gap-1">
+            <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest ml-1">
+              Ano do relatorio
+            </span>
+            <select
+              value={reportYear}
+              onChange={(event) => setReportYear(Number(event.target.value))}
+              className="h-full min-h-[52px] px-4 bg-zinc-900 border border-zinc-800 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest outline-none focus:border-[#BF953F]"
+            >
+              {reportYearOptions.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
+          </div>
           <button 
             onClick={() => { setFormData({ ...formData, type: 'ENTRADA' }); setIsModalOpen(true); }}
             className="px-6 sm:px-10 py-4 sm:py-6 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.2em] hover:scale-105 transition-all shadow-[0_0_40px_rgba(191,149,63,0.15)] flex items-center gap-2 sm:gap-3"
@@ -740,6 +797,13 @@ const Reports: React.FC<ReportsProps> = ({
             className="px-6 sm:px-8 py-4 sm:py-6 bg-zinc-900 border border-zinc-800 text-white rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.15em] hover:border-[#BF953F]/50 transition-all flex items-center gap-2 sm:gap-3 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Download size={18} /> {isDownloadingBackup ? 'Gerando Backup...' : 'Backup do Banco'}
+          </button>
+          <button
+            onClick={() => { void handleAnnualReportDownload(); }}
+            disabled={isGeneratingAnnualReport}
+            className="px-6 sm:px-8 py-4 sm:py-6 bg-[#BF953F]/10 border border-[#BF953F]/30 text-[#BF953F] rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.15em] hover:bg-[#BF953F]/15 transition-all flex items-center gap-2 sm:gap-3 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <Download size={18} /> {isGeneratingAnnualReport ? 'Gerando PDF...' : 'Gerar Relatorio Anual'}
           </button>
         </div>
       </div>

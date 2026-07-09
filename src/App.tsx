@@ -371,6 +371,7 @@ const App: React.FC = () => {
         return (
           <Reports
             loans={contratos}
+            customers={clientes}
             cashMovements={movimentacoes}
             monthlySnapshots={monthlySnapshots}
             caixa={caixa}
