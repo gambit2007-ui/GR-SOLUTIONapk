@@ -768,7 +768,7 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         </div>
         
-        <div className="relative z-10 shrink-0 flex flex-col sm:flex-row gap-3">
+        <div className="relative z-10 shrink-0 flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-end gap-2">
           <div className="flex flex-col gap-1">
             <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest ml-1">
               Ano do relatorio
@@ -776,7 +776,7 @@ const Reports: React.FC<ReportsProps> = ({
             <select
               value={reportYear}
               onChange={(event) => setReportYear(Number(event.target.value))}
-              className="h-full min-h-[52px] px-4 bg-zinc-900 border border-zinc-800 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest outline-none focus:border-[#BF953F]"
+              className="min-h-[42px] px-3 bg-zinc-950/80 border border-zinc-800 text-white rounded-xl font-black uppercase text-[9px] tracking-widest outline-none focus:border-[#BF953F]"
             >
               {reportYearOptions.map((year) => (
                 <option key={year} value={year}>
@@ -787,23 +787,23 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
           <button 
             onClick={() => { setFormData({ ...formData, type: 'ENTRADA' }); setIsModalOpen(true); }}
-            className="px-6 sm:px-10 py-4 sm:py-6 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.2em] hover:scale-105 transition-all shadow-[0_0_40px_rgba(191,149,63,0.15)] flex items-center gap-2 sm:gap-3"
+            className="min-h-[42px] px-4 bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] rounded-xl font-black uppercase text-[9px] tracking-[0.16em] hover:bg-[#BF953F]/20 transition-colors flex items-center justify-center gap-2"
           >
-            <Plus size={18} /> Novo Lancamento
+            <Plus size={14} /> Novo Lancamento
           </button>
           <button
             onClick={handleBackupDownload}
             disabled={isDownloadingBackup}
-            className="px-6 sm:px-8 py-4 sm:py-6 bg-zinc-900 border border-zinc-800 text-white rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.15em] hover:border-[#BF953F]/50 transition-all flex items-center gap-2 sm:gap-3 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="min-h-[42px] px-4 bg-zinc-950/80 border border-zinc-800 text-zinc-300 rounded-xl font-black uppercase text-[9px] tracking-[0.14em] hover:border-[#BF953F]/40 hover:text-white transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Download size={18} /> {isDownloadingBackup ? 'Gerando Backup...' : 'Backup do Banco'}
+            <Download size={14} /> {isDownloadingBackup ? 'Gerando...' : 'Backup'}
           </button>
           <button
             onClick={() => { void handleAnnualReportDownload(); }}
             disabled={isGeneratingAnnualReport}
-            className="px-6 sm:px-8 py-4 sm:py-6 bg-[#BF953F]/10 border border-[#BF953F]/30 text-[#BF953F] rounded-2xl font-black uppercase text-[10px] sm:text-[11px] tracking-[0.15em] hover:bg-[#BF953F]/15 transition-all flex items-center gap-2 sm:gap-3 disabled:opacity-60 disabled:cursor-not-allowed"
+            className="min-h-[42px] px-4 bg-[#BF953F]/5 border border-[#BF953F]/25 text-[#BF953F] rounded-xl font-black uppercase text-[9px] tracking-[0.14em] hover:bg-[#BF953F]/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <Download size={18} /> {isGeneratingAnnualReport ? 'Gerando PDF...' : 'Gerar Relatorio Anual'}
+            <Download size={14} /> {isGeneratingAnnualReport ? 'Gerando...' : 'Relatorio Anual'}
           </button>
         </div>
       </div>
