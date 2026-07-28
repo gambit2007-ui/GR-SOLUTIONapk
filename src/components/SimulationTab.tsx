@@ -137,11 +137,19 @@ const SimulationTab: React.FC<SimulationTabProps> = () => {
     const phone = formData.phone.replace(/\D/g, '');
     const customerName = formData.name || 'Cliente';
     const dueDate = getEstimatedDueDate();
+    const currencyFormatter = { minimumFractionDigits: 2, maximumFractionDigits: 2 };
     const message = encodeURIComponent(
       `Ol\u00e1, ${customerName}. Tudo bem?\n\n` +
       `Aqui \u00e9 da GR SOLUTION.\n\n` +
-      `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n` +
-      `Caso j\u00e1 tenha realizado o pagamento, por favor envie o comprovante para darmos baixa em nosso sistema.\n\n` +
+      `Segue a simula\u00e7\u00e3o do empr\u00e9stimo solicitada:\n\n` +
+      `Valor solicitado: R$ ${amount.toLocaleString('pt-BR', currencyFormatter)}\n` +
+      `Tipo de juros: ${interestTypeLabel[formData.interestType]}\n` +
+      `Frequ\u00eancia: ${frequencyLabel[formData.frequency]}\n` +
+      `Quantidade de parcelas: ${formData.installmentsCount}\n` +
+      `Valor estimado da parcela: R$ ${installmentValue.toLocaleString('pt-BR', currencyFormatter)}\n` +
+      `Total estimado a pagar: R$ ${totalWithInterest.toLocaleString('pt-BR', currencyFormatter)}\n` +
+      `Primeiro vencimento estimado: ${dueDate}\n\n` +
+      `Esta \u00e9 apenas uma simula\u00e7\u00e3o e n\u00e3o garante a efetiva\u00e7\u00e3o do contrato.\n\n` +
       `Qualquer d\u00favida, estou \u00e0 disposi\u00e7\u00e3o.\n\n` +
       `Atenciosamente,\n` +
       `GR SOLUTION`
