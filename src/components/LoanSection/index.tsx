@@ -1002,7 +1002,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             installments: updatedPayload.installments || currentLoan.installments,
           };
           const { generateContractPDF } = await import('../../utils/contractGenerator');
-          generateContractPDF(customer, updatedLoan);
+          generateContractPDF(customer, updatedLoan, { dailyLateFeeRate });
           showToast('Contrato atualizado e novo PDF gerado!', 'success');
         } catch (pdfError) {
           console.error('Contrato atualizado, mas falhou ao gerar o novo PDF:', pdfError);
@@ -1039,7 +1039,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             createdAt: Date.now(),
           };
           const { generateContractPDF } = await import('../../utils/contractGenerator');
-          generateContractPDF(customer, loanForPdf);
+          generateContractPDF(customer, loanForPdf, { dailyLateFeeRate });
           showToast('Contrato efetivado e PDF gerado!', 'success');
         } catch (pdfError) {
           console.error('Contrato salvo, mas falhou ao gerar PDF:', pdfError);
