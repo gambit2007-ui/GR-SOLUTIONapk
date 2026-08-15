@@ -238,20 +238,38 @@ const ensureSpace = (doc: jsPDF, y: number, heightNeeded: number) =>
   y + heightNeeded > PAGE_BOTTOM ? addContentPage(doc) : y;
 
 const drawClause = (doc: jsPDF, title: string, paragraphs: string[], startY: number) => {
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10.2);
-  const lines = paragraphs.map((paragraph) => doc.splitTextToSize(paragraph, CONTENT_WIDTH) as string[]);
-  const heightNeeded = 10 + lines.reduce((sum, paragraphLines) => sum + paragraphLines.length * 5 + 4, 0);
-  let y = ensureSpace(doc, startY, heightNeeded);
+  const titleLines = doc.splitTextToSize(title, CONTENT_WIDTH - 5) as string[];
+  const titleHeight = Math.max(8, titleLines.length * 5);
+  let y = ensureSpace(doc, startY, titleHeight + 10);
 
-  y = drawSectionTitle(doc, title, y);
+  doc.setFillColor(...COLORS.gold);
+  doc.rect(MARGIN, y - 4.5, 1.8, titleHeight, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11.5);
+  doc.setTextColor(...COLORS.navy);
+  doc.text(titleLines, MARGIN + 5, y);
+  y += titleLines.length * 5 + 4;
+
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(10.2);
+  doc.setFontSize(9.6);
   doc.setTextColor(...COLORS.slate);
 
-  lines.forEach((paragraphLines) => {
-    doc.text(paragraphLines, MARGIN, y);
-    y += paragraphLines.length * 5 + 4;
+  paragraphs.forEach((paragraph) => {
+    let remainingLines = doc.splitTextToSize(paragraph, CONTENT_WIDTH) as string[];
+
+    while (remainingLines.length > 0) {
+      if (y + 5 > PAGE_BOTTOM) y = addContentPage(doc);
+
+      const availableLineCount = Math.max(1, Math.floor((PAGE_BOTTOM - y) / 4.7));
+      const pageLines = remainingLines.slice(0, availableLineCount);
+      doc.text(pageLines, MARGIN, y);
+      y += pageLines.length * 4.7;
+      remainingLines = remainingLines.slice(pageLines.length);
+
+      if (remainingLines.length > 0) y = addContentPage(doc);
+    }
+
+    y += 3;
   });
 
   return y + 2;
@@ -306,6 +324,84 @@ const drawSignature = (doc: jsPDF, y: number, name: string, role: string) => {
   doc.text(role.toUpperCase(), MARGIN, y + 13);
 };
 
+const drawGuaranteeAnnex = (doc: jsPDF) => {
+  let y = addContentPage(doc);
+  y = drawSectionTitle(doc, 'Anexo 1 - Garantias da operação', y);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9.5);
+  doc.setTextColor(...COLORS.slate);
+  const guidance = doc.splitTextToSize(
+    'Preencher e assinar este anexo somente quando houver garantia ou avalista vinculado à operação. Campos não preenchidos não constituem garantia.',
+    CONTENT_WIDTH,
+  ) as string[];
+  doc.text(guidance, MARGIN, y);
+  y += guidance.length * 4.7 + 5;
+
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    head: [['Selecionar', 'Modalidade de garantia']],
+    body: [
+      ['[ ]', 'Aval'],
+      ['[ ]', 'Fiança'],
+      ['[ ]', 'Alienação fiduciária de veículo'],
+      ['[ ]', 'Caução'],
+      ['[ ]', 'Penhor'],
+      ['[ ]', 'Cessão fiduciária de recebíveis'],
+      ['[ ]', 'Outra: ________________________________________________'],
+    ],
+    theme: 'grid',
+    styles: { font: 'helvetica', fontSize: 9, textColor: COLORS.slate, cellPadding: 2.8 },
+    headStyles: { fillColor: COLORS.navy, textColor: COLORS.white, fontStyle: 'bold' },
+    alternateRowStyles: { fillColor: COLORS.surface },
+    columnStyles: { 0: { cellWidth: 28, halign: 'center' }, 1: { cellWidth: 148 } },
+  });
+
+  y = Number((doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || y) + 8;
+  y = drawSectionTitle(doc, 'Dados da garantia', y);
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    body: [
+      ['Descrição', '____________________________________________________________'],
+      ['Valor estimado', 'R$ ______________________________'],
+      ['Observações', '____________________________________________________________'],
+    ],
+    theme: 'grid',
+    styles: { font: 'helvetica', fontSize: 8.8, textColor: COLORS.slate, cellPadding: 2.4 },
+    columnStyles: {
+      0: { cellWidth: 38, fontStyle: 'bold', fillColor: COLORS.surface },
+      1: { cellWidth: 138 },
+    },
+  });
+
+  y = Number((doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || y) + 8;
+  y = drawSectionTitle(doc, 'Avalista ou fiador (quando houver)', y);
+  autoTable(doc, {
+    startY: y,
+    margin: { left: MARGIN, right: MARGIN },
+    body: [
+      ['Nome completo', '____________________________________________________________'],
+      ['CPF/MF', '______________________________'],
+      ['RG', '______________________________'],
+      ['Estado civil', '______________________________'],
+      ['Telefone', '______________________________'],
+      ['Endereço', '____________________________________________________________'],
+    ],
+    theme: 'grid',
+    styles: { font: 'helvetica', fontSize: 8.8, textColor: COLORS.slate, cellPadding: 2.2 },
+    columnStyles: {
+      0: { cellWidth: 38, fontStyle: 'bold', fillColor: COLORS.surface },
+      1: { cellWidth: 138 },
+    },
+  });
+
+  y = Number((doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || y) + 15;
+  y = ensureSpace(doc, y, 20);
+  drawSignature(doc, y, 'Nome e CPF', 'Avalista ou fiador');
+};
+
 export const buildContractPDFDocument = (
   customer: Customer,
   loan: Loan,
@@ -340,8 +436,8 @@ export const buildContractPDFDocument = (
   const lastDueDate = formatDateBR(lastInstallment?.dueDate || loan.dueDate);
 
   doc.setProperties({
-    title: `Contrato de empréstimo ${contractNumber}`,
-    subject: `Contrato particular de empréstimo de dinheiro - ${customerName}`,
+    title: `Contrato de mútuo civil ${contractNumber}`,
+    subject: `Contrato particular de mútuo civil com confissão de dívida - ${customerName}`,
     author: CREDITOR_NAME,
     creator: CREDITOR_NAME,
     keywords: `contrato, empréstimo, parcelas, ${CREDITOR_NAME}`,
@@ -359,13 +455,17 @@ export const buildContractPDFDocument = (
 
   doc.setFontSize(28);
   doc.setTextColor(...COLORS.white);
-  const coverTitle = doc.splitTextToSize('Contrato particular de empréstimo', CONTENT_WIDTH) as string[];
+  const coverTitle = doc.splitTextToSize(
+    'Contrato particular de mútuo civil com confissão de dívida',
+    CONTENT_WIDTH,
+  ) as string[];
   doc.text(coverTitle, MARGIN, 83);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(13);
   doc.setTextColor(192, 203, 219);
-  doc.text(`${formatCurrency(loan.amount)}  |  ${customerName}`, MARGIN, 120);
+  doc.text('Constituição de título executivo extrajudicial e outras avenças', MARGIN, 113);
+  doc.text(`${formatCurrency(loan.amount)}  |  ${customerName}`, MARGIN, 130);
 
   doc.setFontSize(10);
   doc.text(`Número do contrato: ${contractNumber}`, MARGIN, 229);
@@ -473,16 +573,7 @@ export const buildContractPDFDocument = (
     },
   });
 
-  // Cláusulas contratuais
-  y = addContentPage(doc);
-  y = drawClause(doc, '1. Objeto', [
-    `O CREDOR concede ao DEVEDOR um empréstimo no valor principal de ${formatCurrency(loan.amount)}, nas condições registradas neste instrumento.`,
-    'O DEVEDOR declara ciência de que os valores, vencimentos e encargos aplicáveis constam no resumo financeiro e no cronograma de pagamentos.',
-  ], y);
-  y = drawClause(doc, '2. Forma de pagamento', [
-    `O pagamento será realizado em ${installmentCount} parcela(s), com frequência ${frequencyLabel.toLowerCase()}, conforme os vencimentos indicados no cronograma.`,
-    'Os pagamentos serão reconhecidos após a confirmação e o registro nos controles financeiros do CREDOR.',
-  ], y);
+  y = Number((doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || y) + 10;
 
   const interestParagraphs = interestType === 'SPLIT'
     ? [
@@ -495,24 +586,176 @@ export const buildContractPDFDocument = (
       : [
           `A operação utiliza juros simples à taxa contratada de ${formatPercent(loan.interestRate)}% sobre o capital, já refletida no valor total do contrato.`,
         ];
-  y = drawClause(doc, '3. Juros remuneratórios', interestParagraphs, y);
-  y = drawClause(doc, '4. Atraso e inadimplemento', [
-    `Em caso de atraso, o saldo vencido ficará sujeito ao encargo de mora de ${formatPercent(dailyLateFeeRate * 100, 3)}% ao dia, calculado pelo sistema sobre o valor remanescente da parcela.`,
-    'O inadimplemento poderá motivar cobrança extrajudicial ou judicial, observada a legislação aplicável.',
+
+  // Cláusulas contratuais baseadas no modelo jurídico fornecido pela empresa.
+  y = ensureSpace(doc, y, 35);
+  y = drawClause(doc, 'Instrumento contratual', [
+    `Pelo presente instrumento particular, de um lado, ${CREDITOR_NAME}, inscrita no CNPJ sob o nº ${formatDocument(CREDITOR_DOCUMENT)}, doravante denominada CREDOR, e, de outro lado, ${customerName}, inscrito(a) no CPF/CNPJ sob o nº ${formatDocument(customer.cpf)}, doravante denominado(a) DEVEDOR, resolvem celebrar o presente CONTRATO PARTICULAR DE MÚTUO CIVIL COM CONFISSÃO DE DÍVIDA.`,
+    'Este contrato será regido pelos artigos 586 e seguintes, 389, 394, 395 e 397 do Código Civil, pelo artigo 784, inciso III, do Código de Processo Civil, e pelas cláusulas e condições seguintes.',
   ], y);
-  y = drawClause(doc, '5. Liquidação antecipada', [
-    'O DEVEDOR poderá solicitar a liquidação antecipada do saldo. Eventual desconto será calculado conforme o tipo de juros do contrato e o saldo efetivamente pendente na data da solicitação.',
-  ], y);
-  y = drawClause(doc, '6. Comunicações e cobrança', [
-    'O DEVEDOR autoriza o envio de avisos de vencimento e cobranças pelos meios de contato cadastrados, incluindo telefone, WhatsApp e e-mail.',
-  ], y);
-  y = drawClause(doc, '7. Registros financeiros', [
-    'Pagamentos, abatimentos, renovações, descontos e eventuais estornos serão reconhecidos quando registrados nos controles financeiros do CREDOR.',
-    'Este documento reflete os dados cadastrados no sistema na data de sua emissão.',
-  ], y);
-  y = drawClause(doc, '8. Foro', [
-    'Fica eleito o foro legalmente competente para dirimir questões decorrentes deste contrato, respeitadas as normas de competência aplicáveis.',
-  ], y);
+
+  const contractClauses: Array<{ title: string; paragraphs: string[] }> = [
+    {
+      title: 'I. Cláusula Primeira - Do objeto',
+      paragraphs: [
+        `Constitui objeto deste contrato a concessão de mútuo financeiro pelo CREDOR ao DEVEDOR, mediante a entrega da quantia principal de ${formatCurrency(loan.amount)}, obrigando-se o DEVEDOR a restituí-la acrescida dos encargos expressamente pactuados neste instrumento.`,
+        'Parágrafo Primeiro. O valor mutuado será disponibilizado mediante PIX, TED, transferência bancária ou outro meio eletrônico que permita identificar a operação, constituindo o respectivo comprovante prova suficiente da liberação dos recursos.',
+        'Parágrafo Segundo. O DEVEDOR declara que recebeu ou receberá integralmente o valor objeto deste contrato, dando quitação quanto ao recebimento após a efetiva disponibilização dos recursos.',
+        'Parágrafo Terceiro. A entrega dos recursos caracteriza a tradição do mútuo, passando a obrigação de restituição a produzir todos os seus efeitos legais e contratuais.',
+      ],
+    },
+    {
+      title: 'II. Cláusula Segunda - Da licitude da operação',
+      paragraphs: [
+        'O DEVEDOR declara expressamente que contrata a operação por sua livre e espontânea vontade; possui capacidade civil para assumir a obrigação; compreendeu as cláusulas; teve oportunidade de esclarecer dúvidas; e reconhece que os recursos possuem origem lícita e serão utilizados para finalidade igualmente lícita.',
+      ],
+    },
+    {
+      title: 'III. Cláusula Terceira - Do valor, dos encargos remuneratórios e da forma de pagamento',
+      paragraphs: [
+        `O valor principal corresponde a ${formatCurrency(loan.amount)} e o valor total previsto para pagamento corresponde a ${formatCurrency(totalToReturn)}.`,
+        ...interestParagraphs,
+        `O pagamento ocorrerá em ${installmentCount} parcela(s), com frequência ${frequencyLabel.toLowerCase()}, nos vencimentos e valores individualizados no cronograma deste contrato.`,
+        'Parágrafo Primeiro. Os valores das parcelas já contemplam os juros remuneratórios pactuados, inexistindo cobrança oculta.',
+        'Parágrafo Segundo. Os pagamentos deverão ser efetuados por PIX, TED, depósito identificado ou outro meio indicado pelo CREDOR.',
+        'Parágrafo Terceiro. A obrigação somente será considerada quitada após a efetiva compensação financeira do pagamento. O simples envio de comprovante não implica quitação caso o crédito não seja recebido.',
+      ],
+    },
+    {
+      title: 'IV. Cláusula Quarta - Da imputação dos pagamentos',
+      paragraphs: [
+        'Os pagamentos serão imputados aos componentes financeiros vinculados à obrigação, considerando primeiro os encargos vencidos efetivamente registrados e, em seguida, os juros remuneratórios e o principal da parcela, conforme a composição financeira do contrato.',
+        'Parágrafo Primeiro. O recebimento parcial não importará quitação integral, permanecendo exigível o saldo remanescente e os encargos incidentes.',
+        'Parágrafo Segundo. Pagamentos recebidos após o vencimento não implicam novação, renúncia, remissão ou alteração das condições pactuadas.',
+        'Parágrafo Terceiro. Eventual tolerância do CREDOR quanto ao recebimento em atraso constituirá mera liberalidade e não modificará as condições deste contrato.',
+      ],
+    },
+    {
+      title: 'V. Cláusula Quinta - Dos encargos moratórios e do inadimplemento',
+      paragraphs: [
+        'O não pagamento, total ou parcial, de obrigação prevista neste contrato constituirá automaticamente o DEVEDOR em mora, independentemente de interpelação judicial ou extrajudicial.',
+        `Sobre o saldo remanescente de cada parcela vencida incidirá encargo de mora de ${formatPercent(dailyLateFeeRate * 100, 3)}% ao dia, calculado pelo sistema até a efetiva liquidação.`,
+        'Despesas de cobrança, custas e honorários somente poderão ser exigidos quando efetivamente incorridos e admitidos pela legislação aplicável, sem alterar retroativamente os valores registrados no sistema.',
+        'O inadimplemento de uma parcela não antecipa os encargos de mora das demais parcelas ainda não vencidas.',
+        'Permanecendo o inadimplemento, o CREDOR poderá adotar as medidas extrajudiciais e judiciais legalmente cabíveis, inclusive protesto, negativação e execução deste instrumento.',
+      ],
+    },
+    {
+      title: 'VI. Cláusula Sexta - Das despesas de cobrança',
+      paragraphs: [
+        'As despesas comprovadamente necessárias à recuperação do crédito, incluindo custas cartorárias, protesto, notificações, registros, localização patrimonial, custas judiciais e honorários legalmente exigíveis, poderão ser suportadas pelo DEVEDOR nos limites da legislação aplicável.',
+        'Parágrafo único. Honorários contratuais eventualmente exigíveis não se confundem com honorários sucumbenciais fixados pelo Poder Judiciário.',
+      ],
+    },
+    {
+      title: 'VII. Cláusula Sétima - Do vencimento antecipado',
+      paragraphs: [
+        'Independentemente de aviso prévio, poderá ser considerado antecipadamente vencido o saldo exigível caso ocorra: atraso superior a 15 dias; descumprimento contratual; informação falsa ou omissão relevante; insolvência civil; fraude contra credores; gravame judicial que comprometa a solvência; falecimento, observadas as regras legais; inadimplemento de garantia; ou ato que coloque em risco a satisfação do crédito.',
+        'Parágrafo Primeiro. Declarado o vencimento antecipado, tornar-se-á exigível o saldo devedor, acrescido apenas dos encargos legal e contratualmente aplicáveis.',
+        'Parágrafo Segundo. O vencimento antecipado não impede a adoção simultânea das medidas de cobrança previstas neste instrumento.',
+      ],
+    },
+    {
+      title: 'VIII. Cláusula Oitava - Da confissão irrevogável da dívida e do título executivo extrajudicial',
+      paragraphs: [
+        'O DEVEDOR reconhece que a obrigação assumida é líquida, certa e exigível, confessando, de forma livre e irrevogável, ser devedor da quantia apurada na forma deste instrumento.',
+        'A confissão é realizada de forma consciente, sem vício de consentimento, e o presente instrumento, quando assinado pelo DEVEDOR e por duas testemunhas, constitui título executivo extrajudicial nos termos do artigo 784, inciso III, do Código de Processo Civil.',
+        'O DEVEDOR declara ter recebido uma via, compreendido o conteúdo e reconhece que renegociação, recebimento parcial, prazo adicional ou tolerância não importam novação da dívida.',
+      ],
+    },
+    {
+      title: 'IX. Cláusula Nona - Das garantias da operação',
+      paragraphs: [
+        'O cumprimento das obrigações poderá ser garantido por aval, fiança, alienação fiduciária, cessão fiduciária, caução, penhor ou outra garantia legalmente admitida, desde que expressamente identificada e assinada no Anexo 1.',
+        'Parágrafo Primeiro. A ausência de preenchimento e assinatura do Anexo 1 significa que não há garantia específica constituída por este documento, sem afastar a responsabilidade patrimonial do DEVEDOR nos limites legais.',
+        'Parágrafo Segundo. Garantias constituídas permanecerão válidas até a quitação integral, e eventual substituição ou complementação deverá ser formalizada por escrito.',
+      ],
+    },
+    {
+      title: 'X. Cláusula Décima - Do avalista ou devedor solidário (quando houver)',
+      paragraphs: [
+        'Esta cláusula somente se aplica quando houver avalista ou devedor solidário devidamente identificado e signatário no Anexo 1. Nessa hipótese, ele responderá solidariamente pelas obrigações garantidas, nos limites indicados no anexo e na legislação.',
+        'A concessão de prazo, renegociação, parcelamento ou tolerância não exonerará o avalista quando sua anuência for dispensada por lei ou tiver sido expressamente formalizada.',
+      ],
+    },
+    {
+      title: 'XI. Cláusula Décima Primeira - Da cessão do crédito',
+      paragraphs: [
+        'O CREDOR poderá ceder ou transferir, total ou parcialmente, os créditos decorrentes deste contrato, independentemente de autorização prévia do DEVEDOR.',
+        'A cessão produzirá efeitos perante o DEVEDOR após sua regular comunicação, quando exigida pela legislação, e não alterará as condições originalmente pactuadas.',
+      ],
+    },
+    {
+      title: 'XII. Cláusula Décima Segunda - Do protesto, da cobrança e dos órgãos de proteção ao crédito',
+      paragraphs: [
+        'Caracterizado o inadimplemento, o CREDOR poderá promover protesto, encaminhar o débito aos órgãos de proteção ao crédito, realizar cobrança administrativa ou judicial, executar este título e requerer medidas legalmente admitidas.',
+        'As despesas comprovadas decorrentes dessas medidas poderão ser suportadas pelo DEVEDOR nos limites legais. A adoção de uma medida não impedirá a utilização simultânea de outras.',
+      ],
+    },
+    {
+      title: 'XIII. Cláusula Décima Terceira - Das comunicações entre as partes',
+      paragraphs: [
+        'As comunicações poderão ser realizadas por carta, notificação extrajudicial, e-mail, WhatsApp, SMS ou outro meio idôneo capaz de comprovar o envio ou a disponibilização.',
+        'Presumir-se-ão válidas as comunicações encaminhadas aos endereços, telefones e e-mails informados pelo DEVEDOR. Recusa, ausência de resposta, bloqueio ou dado desatualizado não invalidará comunicação regularmente encaminhada.',
+        'Registros de mensagens eletrônicas poderão ser utilizados como meio de prova, observadas as regras legais de admissibilidade.',
+      ],
+    },
+    {
+      title: 'XIV. Cláusula Décima Quarta - Da atualização cadastral',
+      paragraphs: [
+        'O DEVEDOR obriga-se a manter atualizados seu endereço residencial, telefone, e-mail, estado civil quando relevante e demais informações necessárias à correta identificação das partes.',
+        'Qualquer alteração deverá ser comunicada ao CREDOR no prazo máximo de cinco dias úteis. A ausência de comunicação implicará presunção de validade das notificações encaminhadas aos dados constantes deste contrato.',
+      ],
+    },
+    {
+      title: 'XV. Cláusula Décima Quinta - Do tratamento de dados pessoais',
+      paragraphs: [
+        'Os dados pessoais fornecidos serão tratados para formalização e execução da operação, análise cadastral e de risco, registros fiscais e contábeis, cobrança, recuperação de crédito, cumprimento de obrigações legais, prevenção à fraude e proteção do crédito, observada a Lei nº 13.709/2018 (LGPD).',
+        'Quando necessário, os dados poderão ser compartilhados com escritórios de advocacia, empresas de cobrança, cartórios, órgãos de proteção ao crédito, instituições responsáveis pela liquidação dos pagamentos e autoridades públicas.',
+        'O tratamento limitar-se-á ao período necessário às finalidades contratuais e aos prazos legais de guarda.',
+      ],
+    },
+    {
+      title: 'XVI. Cláusula Décima Sexta - Das assinaturas eletrônicas',
+      paragraphs: [
+        'As partes reconhecem a validade jurídica das assinaturas eletrônicas apostas neste contrato, inclusive por certificado ICP-Brasil, Gov.br, Clicksign, DocuSign ou plataforma capaz de comprovar autoria, integridade e autenticidade.',
+        'O contrato poderá ser celebrado em meio físico ou eletrônico, produzindo os efeitos legalmente cabíveis, desde que preservados os requisitos de autenticidade e integridade.',
+      ],
+    },
+    {
+      title: 'XVII. Cláusula Décima Sétima - Da ausência de novação e da integralidade das obrigações',
+      paragraphs: [
+        'Recebimento parcial, prazo adicional, renegociação, parcelamento, tolerância ou liberalidade não importarão novação, remissão, transação, renúncia de direitos ou alteração das obrigações.',
+        'Garantias eventualmente formalizadas permanecerão válidas, salvo manifestação escrita em contrário. A nulidade de uma disposição não prejudicará as demais, e a tolerância não impedirá o exercício futuro de direitos.',
+      ],
+    },
+    {
+      title: 'XVIII. Cláusula Décima Oitava - Das disposições gerais',
+      paragraphs: [
+        'Este contrato obriga as partes, seus herdeiros e sucessores. Constitui a integral manifestação de vontade quanto ao seu objeto e substitui entendimentos anteriores.',
+        'Qualquer alteração somente produzirá efeitos mediante instrumento escrito e assinado, ressalvadas as hipóteses legais e os registros operacionais de pagamento, abatimento, renovação ou estorno realizados no sistema.',
+        'O DEVEDOR declara que recebeu uma via antes da assinatura, leu todas as cláusulas, compreendeu seu conteúdo e teve oportunidade de esclarecer dúvidas.',
+      ],
+    },
+    {
+      title: 'XIX. Cláusula Décima Nona - Do foro',
+      paragraphs: [
+        'Fica eleito o foro legalmente competente para dirimir controvérsias decorrentes deste instrumento, respeitadas as normas de competência aplicáveis.',
+        'A eleição não impede a adoção de medidas no foro do domicílio do DEVEDOR ou em outro foro competente na forma da legislação processual.',
+      ],
+    },
+    {
+      title: 'XX. Cláusula Vigésima - Das declarações finais',
+      paragraphs: [
+        'O DEVEDOR declara que recebeu previamente uma via; leu e compreendeu todas as cláusulas; teve oportunidade de esclarecer dúvidas; contratou de forma livre e consciente; confirma a veracidade das informações prestadas; e compromete-se a cumprir as obrigações assumidas.',
+        'As partes reconhecem que este contrato foi celebrado conforme os princípios da boa-fé objetiva, autonomia privada, equilíbrio contratual e função social do contrato.',
+      ],
+    },
+  ];
+
+  contractClauses.forEach((clause) => {
+    y = drawClause(doc, clause.title, clause.paragraphs, y);
+  });
 
   // Assinaturas
   y = addContentPage(doc);
@@ -520,11 +763,11 @@ export const buildContractPDFDocument = (
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
   doc.setTextColor(...COLORS.slate);
-  doc.text(
-    'Por estarem de acordo, as partes firmam o presente instrumento na data indicada abaixo.',
-    MARGIN,
-    y + 4,
-  );
+  const signatureIntroduction = doc.splitTextToSize(
+    'Por estarem justas e contratadas, as partes firmam este instrumento, juntamente com duas testemunhas, para que produza seus efeitos legais.',
+    CONTENT_WIDTH,
+  ) as string[];
+  doc.text(signatureIntroduction, MARGIN, y + 4);
 
   drawSignature(doc, 73, CREDITOR_NAME, 'Credor');
   drawSignature(doc, 112, customerName, 'Devedor');
@@ -536,6 +779,7 @@ export const buildContractPDFDocument = (
   doc.setTextColor(...COLORS.slate);
   doc.text('Data: ____/____/________', MARGIN, 260);
 
+  drawGuaranteeAnnex(doc);
   drawPageFooters(doc, contractNumber, customerName);
   return doc;
 };
