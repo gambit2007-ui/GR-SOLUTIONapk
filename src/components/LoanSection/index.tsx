@@ -1,6 +1,6 @@
 ﻿import React, { useState } from 'react';
 import { Customer, Loan, LoanDraft, Installment, InstallmentPaymentEntry, LoanType, PaymentBreakdown } from '../../types';
-import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban } from 'lucide-react';
+import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban, FileDown } from 'lucide-react';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -114,6 +114,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [settlementModal, setSettlementModal] = useState<EarlySettlementQuote | null>(null);
   const [renewalModal, setRenewalModal] = useState<InterestOnlyRenewalModalState | null>(null);
   const [processingRenewal, setProcessingRenewal] = useState<string | null>(null);
+  const [generatingContractPdfId, setGeneratingContractPdfId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
@@ -613,6 +614,28 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       startDate: loan.startDate || getLocalISODate()
     });
     setIsModalOpen(true);
+  };
+
+  const handleDownloadContract = async (loan: Loan) => {
+    if (generatingContractPdfId) return;
+
+    const customer = customers.find((item) => item.id === loan.customerId);
+    if (!customer) {
+      showToast('Cliente nao encontrado para gerar o contrato', 'error');
+      return;
+    }
+
+    setGeneratingContractPdfId(loan.id);
+    try {
+      const { generateContractPDF } = await import('../../utils/contractGenerator');
+      generateContractPDF(customer, loan, { dailyLateFeeRate });
+      showToast('Contrato atualizado gerado em PDF!', 'success');
+    } catch (error) {
+      console.error('Falha ao gerar o contrato em PDF:', error);
+      showToast('Nao foi possivel gerar o contrato em PDF.', 'error');
+    } finally {
+      setGeneratingContractPdfId(null);
+    }
   };
 
   const handleCancelLoan = async (loan: Loan) => {
@@ -1584,6 +1607,22 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   disabled={!canChargeLoan}
                 >
                   <MessageCircle size={18} />
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    void handleDownloadContract(loan);
+                  }}
+                  disabled={generatingContractPdfId !== null}
+                  className="h-[42px] w-[42px] shrink-0 bg-[#BF953F]/10 text-[#BF953F] rounded-xl hover:bg-[#BF953F] hover:text-black transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Baixar contrato atualizado em PDF"
+                  aria-label="Baixar contrato atualizado em PDF"
+                >
+                  {generatingContractPdfId === loan.id ? (
+                    <Loader2 size={16} className="animate-spin" />
+                  ) : (
+                    <FileDown size={16} />
+                  )}
                 </button>
                 <button
                   onClick={(e) => {
