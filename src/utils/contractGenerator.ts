@@ -1,5 +1,7 @@
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import guilhermeSignature from '../assets/signatures/guilherme-geovane-sobral.png?inline';
+import robsonSignature from '../assets/signatures/robson-leandro-da-silva.png?inline';
 import type { Customer, Installment, Loan } from '../types';
 import {
   effectiveLoanStatus,
@@ -310,7 +312,18 @@ const drawPageFooters = (doc: jsPDF, contractNumber: string, customerName: strin
   }
 };
 
-const drawSignature = (doc: jsPDF, y: number, name: string, role: string) => {
+const drawSignature = (doc: jsPDF, y: number, name: string, role: string, signatureImage?: string) => {
+  if (signatureImage) {
+    const properties = doc.getImageProperties(signatureImage);
+    const maxWidth = 72;
+    const maxHeight = 25;
+    const aspectRatio = properties.width / properties.height;
+    const imageWidth = Math.min(maxWidth, maxHeight * aspectRatio);
+    const imageHeight = imageWidth / aspectRatio;
+    const imageX = MARGIN + (CONTENT_WIDTH - imageWidth) / 2;
+    doc.addImage(signatureImage, 'PNG', imageX, y - imageHeight - 2, imageWidth, imageHeight, undefined, 'FAST');
+  }
+
   doc.setDrawColor(...COLORS.slate);
   doc.setLineWidth(0.25);
   doc.line(MARGIN, y, PAGE_WIDTH - MARGIN, y);
@@ -771,8 +784,20 @@ export const buildContractPDFDocument = (
 
   drawSignature(doc, 73, CREDITOR_NAME, 'Credor');
   drawSignature(doc, 112, customerName, 'Devedor');
-  drawSignature(doc, 164, 'Nome e CPF', 'Testemunha 1');
-  drawSignature(doc, 203, 'Nome e CPF', 'Testemunha 2');
+  drawSignature(
+    doc,
+    164,
+    'Guilherme Geovane Sobral',
+    'Testemunha 1 - assinatura digitalizada',
+    guilhermeSignature,
+  );
+  drawSignature(
+    doc,
+    203,
+    'Robson Leandro da Silva',
+    'Testemunha 2 - assinatura digitalizada',
+    robsonSignature,
+  );
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10);
