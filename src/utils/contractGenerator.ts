@@ -127,13 +127,6 @@ const formatPercent = (value: number, maximumFractionDigits = 4) =>
     maximumFractionDigits,
   });
 
-const getLoanInterestType = (loan: Loan): 'SIMPLE' | 'PRICE' | 'SPLIT' => {
-  const normalized = String(loan.interestType || '').trim().toUpperCase();
-  if (normalized === 'PRICE') return 'PRICE';
-  if (normalized === 'SPLIT' || normalized === 'PERSONALIZADO') return 'SPLIT';
-  return 'SIMPLE';
-};
-
 const getFrequencyLabel = (frequency: unknown) => {
   const normalized = String(frequency || '').trim().toUpperCase();
   if (normalized === 'DIARIO' || normalized === 'DAILY') return 'Diária';
@@ -420,7 +413,6 @@ export const buildContractPDFDocument = (
     options.dailyLateFeeRate ?? DEFAULT_DAILY_LATE_FEE_RATE,
   );
   const frequencyLabel = getFrequencyLabel(loan.frequency);
-  const interestType = getLoanInterestType(loan);
   const issueDate = formatDateBR(generatedAt);
   const startDate = formatDateBR(loan.startDate || loan.createdAt);
   const firstDueDate = formatDateBR(firstInstallment?.dueDate || loan.startDate);
@@ -555,18 +547,6 @@ export const buildContractPDFDocument = (
 
   y = Number((doc as jsPDF & { lastAutoTable?: { finalY?: number } }).lastAutoTable?.finalY || y) + 10;
 
-  const interestParagraphs = interestType === 'SPLIT'
-    ? [
-        `A operação utiliza juros divididos à taxa total de ${formatPercent(loan.interestRate)}% ao mês, sendo ${formatPercent(Number(loan.monthlyPaidInterestRate || 0))}% pagos mensalmente e ${formatPercent(Number(loan.monthlyAccruedInterestRate || 0))}% acumulados ao saldo.`,
-      ]
-    : interestType === 'PRICE'
-      ? [
-          `A operação utiliza a Tabela PRICE à taxa contratada de ${formatPercent(loan.interestRate)}% por parcela, já refletida nos valores do cronograma.`,
-        ]
-      : [
-          `A operação utiliza juros simples à taxa contratada de ${formatPercent(loan.interestRate)}% sobre o capital, já refletida no valor total do contrato.`,
-        ];
-
   // Cláusulas contratuais baseadas no modelo jurídico fornecido pela empresa.
   y = ensureSpace(doc, y, 35);
   y = drawClause(doc, 'Instrumento contratual', [
@@ -594,7 +574,6 @@ export const buildContractPDFDocument = (
       title: 'III. Cláusula Terceira - Do valor, dos encargos remuneratórios e da forma de pagamento',
       paragraphs: [
         `O valor principal corresponde a ${formatCurrency(loan.amount)} e o valor total previsto para pagamento corresponde a ${formatCurrency(totalToReturn)}.`,
-        ...interestParagraphs,
         `O pagamento ocorrerá em ${installmentCount} parcela(s), com frequência ${frequencyLabel.toLowerCase()}, nos vencimentos e valores individualizados no cronograma deste contrato.`,
         'Parágrafo Primeiro. Os valores das parcelas já contemplam os juros remuneratórios pactuados, inexistindo cobrança oculta.',
         'Parágrafo Segundo. Os pagamentos deverão ser efetuados por PIX, TED, depósito identificado ou outro meio indicado pelo CREDOR.',
