@@ -4,7 +4,6 @@ import guilhermeSignature from '../assets/signatures/guilherme-geovane-sobral.pn
 import robsonSignature from '../assets/signatures/robson-leandro-da-silva.png?inline';
 import type { Customer, Installment, Loan } from '../types';
 import {
-  effectiveLoanStatus,
   installmentAmount,
   installmentPaidAmount,
   normalizeInstallmentStatus,
@@ -135,33 +134,12 @@ const getLoanInterestType = (loan: Loan): 'SIMPLE' | 'PRICE' | 'SPLIT' => {
   return 'SIMPLE';
 };
 
-const getInterestTypeLabel = (loan: Loan) => {
-  const type = getLoanInterestType(loan);
-  if (type === 'PRICE') return 'Tabela PRICE';
-  if (type === 'SPLIT') return 'Juros divididos';
-  return 'Juros simples';
-};
-
-const getInterestRateLabel = (loan: Loan) => {
-  const type = getLoanInterestType(loan);
-  if (type === 'SPLIT') return `${formatPercent(loan.interestRate)}% ao mês`;
-  if (type === 'PRICE') return `${formatPercent(loan.interestRate)}% por parcela`;
-  return `${formatPercent(loan.interestRate)}% sobre o capital`;
-};
-
 const getFrequencyLabel = (frequency: unknown) => {
   const normalized = String(frequency || '').trim().toUpperCase();
   if (normalized === 'DIARIO' || normalized === 'DAILY') return 'Diária';
   if (normalized === 'SEMANAL' || normalized === 'WEEKLY') return 'Semanal';
   if (normalized === 'QUINZENAL' || normalized === 'BIWEEKLY') return 'Quinzenal';
   return 'Mensal';
-};
-
-const getLoanStatusLabel = (loan: Loan) => {
-  const status = effectiveLoanStatus(loan);
-  if (status === 'COMPLETED') return 'Quitado';
-  if (status === 'CANCELLED') return 'Cancelado';
-  return 'Ativo';
 };
 
 const getInstallmentPaidValue = (installment: Installment) => {
@@ -517,19 +495,8 @@ export const buildContractPDFDocument = (
     { label: 'Primeiro vencimento', value: firstDueDate },
   ], y);
 
-  // Condições e cronograma
+  // Cronograma de pagamentos
   y = addContentPage(doc);
-  y = drawSectionTitle(doc, 'Condições do empréstimo', y);
-  y = drawInfoGrid(doc, [
-    { label: 'Tipo de juros', value: getInterestTypeLabel(loan) },
-    { label: 'Taxa contratada', value: getInterestRateLabel(loan) },
-    { label: 'Data do contrato', value: startDate },
-    { label: 'Último vencimento', value: lastDueDate },
-    { label: 'Situação', value: getLoanStatusLabel(loan) },
-    { label: 'Observações', value: normalizeText(loan.notes, 'Sem observações') },
-  ], y);
-
-  y += 2;
   y = drawSectionTitle(doc, 'Cronograma de pagamentos', y);
   const installmentRows = installments.length > 0
     ? installments.map((installment, index) => {
