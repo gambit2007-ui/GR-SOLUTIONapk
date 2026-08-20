@@ -126,6 +126,66 @@ describe('firestore.rules', () => {
     }));
   });
 
+  it('aceita pagamento atomico em contrato legado sem versao', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      const { version: _version, ...legacyLoan } = validLoan;
+      await setDoc(doc(db, 'loans', 'loan-1'), legacyLoan);
+      await setDoc(doc(db, 'settings', 'caixa'), { value: 562.5 });
+      await setDoc(doc(db, 'settings', 'accessControl'), { enforced: true });
+      await setDoc(doc(db, 'authorizedUsers', 'admin-1'), { role: 'ADMIN' });
+    });
+
+    const db = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertSucceeds(runTransaction(db, async (tx) => {
+      const loanRef = doc(db, 'loans', 'loan-1');
+      const movementRef = doc(db, 'cashMovement', 'payment-loan-1');
+      const cashRef = doc(db, 'settings', 'caixa');
+      const feesRef = doc(db, 'settings', 'fees');
+      await tx.get(loanRef);
+      await tx.get(movementRef);
+      await tx.get(feesRef);
+      await tx.get(cashRef);
+
+      tx.set(movementRef, {
+        type: 'PAGAMENTO',
+        amount: 520,
+        value: 520,
+        description: 'PAGAMENTO: CLIENTE TESTE',
+        date: '2026-08-20T17:18:40.000Z',
+        loanId: loanRef.id,
+        operationId: movementRef.id,
+        createdByUid: 'admin-1',
+        recordedAt: serverTimestamp(),
+      });
+      tx.set(cashRef, {
+        value: 1082.5,
+        lastMovementId: movementRef.id,
+        updatedByUid: 'admin-1',
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+      tx.update(loanRef, {
+        installments: [{
+          number: 1,
+          amount: 520,
+          dueDate: '2026-08-29',
+          status: 'PAGO',
+          paidAmount: 520,
+        }],
+        installmentsCount: 1,
+        installmentCount: 1,
+        totalToReturn: 520,
+        status: 'QUITADO',
+        version: 1,
+        hasFinancialHistory: true,
+        lastOperationId: movementRef.id,
+        lastOperationType: 'PAYMENT',
+        lastOperationAt: serverTimestamp(),
+        lastOperationByUid: 'admin-1',
+      });
+    }));
+  });
+
   it('impede exclusao fisica de clientes e movimentos', async () => {
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();

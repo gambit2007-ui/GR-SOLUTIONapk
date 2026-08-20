@@ -1,5 +1,5 @@
 type FirestoreFieldValueLike = {
-  constructor?: { name?: string };
+  _methodName?: string;
   isEqual?: (other: unknown) => boolean;
 };
 
@@ -17,8 +17,9 @@ const isTimestampLike = (value: unknown): value is FirestoreTimestampLike =>
 
 const isFieldValueLike = (value: unknown): value is FirestoreFieldValueLike => {
   if (!isRecord(value)) return false;
-  const ctorName = String((value as FirestoreFieldValueLike).constructor?.name || '').toLowerCase();
-  return ctorName.includes('fieldvalue');
+  const fieldValue = value as FirestoreFieldValueLike;
+  return typeof fieldValue._methodName === 'string' &&
+    typeof fieldValue.isEqual === 'function';
 };
 
 export const sanitizeFirestorePayload = <T,>(value: T): T => {
@@ -45,4 +46,3 @@ export const sanitizeFirestorePayload = <T,>(value: T): T => {
 
   return value;
 };
-
