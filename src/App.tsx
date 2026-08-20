@@ -5,13 +5,11 @@ import {
 } from 'lucide-react';
 import { FirebaseError } from 'firebase/app';
 
-import { CashOutflowCategory, Customer, Loan, LoanDraft, MovementType, View } from './types';
+import { CashOutflowCategory, Customer, Loan, LoanDraft, LoanPaymentRequest, MovementType, View } from './types';
 import { getLocalISODate } from './utils/dateTime';
-import { calculateInstallmentLateFee } from './utils/lateFee';
+import { getInstallmentOutstanding } from './utils/financialEngine';
 import {
   effectiveLoanStatus,
-  installmentAmount,
-  installmentPaidAmount,
   normalizeInstallmentStatus,
 } from './utils/loanCompat';
 import { useAuthState } from './hooks/useAuthState';
@@ -20,7 +18,7 @@ import { useToasts } from './hooks/useToasts';
 import { useViewport } from './hooks/useViewport';
 import { addCashMovement, recalculateCashBalance } from './services/cashService';
 import { createCustomer, deleteCustomerAndLoans, updateCustomer } from './services/customerService';
-import { createLoan, deleteLoan, updateLoan, updateLoanAndAddMovement } from './services/loanService';
+import { applyLoanPayment, createLoan, deleteLoan, updateLoan, updateLoanAndAddMovement } from './services/loanService';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const CustomerSection = lazy(() => import('./components/CustomerSection'));
@@ -45,6 +43,9 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
   const shouldLoadCustomers = currentView === 'CUSTOMERS' || currentView === 'LOANS';
+  const shouldLoadLoans = currentView !== 'SIMULATION';
+  const shouldLoadCashMovements = currentView === 'DASHBOARD' || currentView === 'REPORTS';
+  const shouldLoadMonthlySnapshots = currentView === 'REPORTS';
 
   const { user, authLoading, loginLoading, login, logout } = useAuthState();
   const { toasts, showToast, removeToast } = useToasts();
@@ -61,6 +62,9 @@ const App: React.FC = () => {
     isCustomersLoading,
   } = useRealtimeData(user, {
     loadCustomers: shouldLoadCustomers,
+    loadLoans: shouldLoadLoans,
+    loadCashMovements: shouldLoadCashMovements,
+    loadMonthlySnapshots: shouldLoadMonthlySnapshots,
     onError: handleRealtimeError,
   });
   const dailyLateFeeRate = feeSettings.dailyLateFeeRate;
@@ -95,11 +99,7 @@ const App: React.FC = () => {
   };
 
   const getRemainingInstallmentValue = (installment: Loan['installments'][number] | null | undefined) => {
-    if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-    const lateFee = calculateInstallmentLateFee(installment, new Date(), dailyLateFeeRate);
-    const totalWithFee = Number((Number(installmentAmount(installment) || 0) + lateFee).toFixed(2));
-    const remaining = Number((totalWithFee - Number(installmentPaidAmount(installment) || 0)).toFixed(2));
-    return remaining > 0 ? remaining : 0;
+    return getInstallmentOutstanding(installment, new Date(), dailyLateFeeRate).total;
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -223,14 +223,32 @@ const App: React.FC = () => {
     }
 
     try {
+      const currentLoan = contratos.find((loan) => loan.id === loanId);
+      const operationSource = JSON.stringify([loanId, type, valor, motivo, payload]);
+      let operationHash = 2166136261;
+      for (let index = 0; index < operationSource.length; index += 1) {
+        operationHash ^= operationSource.charCodeAt(index);
+        operationHash = Math.imul(operationHash, 16777619);
+      }
       await updateLoanAndAddMovement(loanId, payload, {
         type,
         amount: valor,
         description: motivo,
         actor: movementActor,
+        operationId: `loan-operation-${(operationHash >>> 0).toString(36)}`,
+        expectedVersion: Math.max(0, Math.trunc(Number(currentLoan?.version || 0))),
       });
     } catch (error: unknown) {
       showToast('Erro ao processar operacao', 'error');
+      throw error;
+    }
+  };
+
+  const handleApplyLoanPayment = async (loanId: string, request: LoanPaymentRequest) => {
+    try {
+      return await applyLoanPayment(loanId, request, movementActor);
+    } catch (error: unknown) {
+      showToast('Erro ao processar pagamento', 'error');
       throw error;
     }
   };
@@ -363,6 +381,7 @@ const App: React.FC = () => {
             currentActor={movementActor}
             dailyLateFeeRate={dailyLateFeeRate}
             onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
+            onApplyLoanPayment={handleApplyLoanPayment}
           />
         );
       case 'SIMULATION':

@@ -21,6 +21,8 @@ export interface BuildPaymentBreakdownParams {
   lateFeePaid?: number;
   serviceFeePaid?: number;
   discountApplied?: number;
+  previousPrincipalPaid?: number;
+  previousInterestPaid?: number;
 }
 
 export interface BuildPaymentBreakdownResult extends PaymentBreakdown {
@@ -97,28 +99,16 @@ export const buildPriceBreakdown = (params: BuildPaymentBreakdownParams): BuildP
   const expectedTotal = round2(expectedPrincipal + expectedInterest);
 
   if (expectedTotal > 0) {
-    const isExactPayment = Math.abs(base.basePaidForPrincipalAndInterest - expectedTotal) <= 0.01;
-
-    if (isExactPayment) {
-      return {
-        principalPaid: expectedPrincipal,
-        interestPaid: expectedInterest,
-        lateFeePaid: base.lateFeePaid,
-        serviceFeePaid: base.serviceFeePaid,
-        discountApplied: base.discountApplied,
-        totalPaid: base.paidAmount,
-      };
-    }
-
-    const proportionalFactor = Math.max(base.basePaidForPrincipalAndInterest / expectedTotal, 0);
-    let principalPaid = round2(expectedPrincipal * proportionalFactor);
-    principalPaid = round2(Math.min(principalPaid, base.basePaidForPrincipalAndInterest));
-    let interestPaid = round2(Math.max(base.basePaidForPrincipalAndInterest - principalPaid, 0));
-
-    if (interestPaid < 0) {
-      interestPaid = 0;
-      principalPaid = round2(base.basePaidForPrincipalAndInterest);
-    }
+    const previousInterestPaid = Math.max(round2(params.previousInterestPaid ?? 0), 0);
+    const previousPrincipalPaid = Math.max(round2(params.previousPrincipalPaid ?? 0), 0);
+    const discountAgainstInterest = Math.min(base.discountApplied, Math.max(expectedInterest - previousInterestPaid, 0));
+    const remainingInterest = round2(Math.max(expectedInterest - previousInterestPaid - discountAgainstInterest, 0));
+    const remainingPrincipal = round2(Math.max(expectedPrincipal - previousPrincipalPaid, 0));
+    const interestPaid = round2(Math.min(base.basePaidForPrincipalAndInterest, remainingInterest));
+    const principalPaid = round2(Math.min(
+      Math.max(base.basePaidForPrincipalAndInterest - interestPaid, 0),
+      remainingPrincipal,
+    ));
 
     return {
       principalPaid,
@@ -143,4 +133,3 @@ export const buildPaymentBreakdown = (params: BuildPaymentBreakdownParams): Buil
   }
   return buildSimpleBreakdown(params);
 };
-

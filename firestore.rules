@@ -6,24 +6,101 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    match /clientes/{document=**} {
-      allow read, write: if isSignedIn();
+    function accessControlEnabled() {
+      return exists(/databases/$(database)/documents/settings/accessControl) &&
+        get(/databases/$(database)/documents/settings/accessControl).data.enforced == true;
     }
 
-    match /loans/{document=**} {
-      allow read, write: if isSignedIn();
+    function hasAdminClaim() {
+      return isSignedIn() && request.auth.token.admin == true;
     }
 
-    match /cashMovement/{document=**} {
-      allow read, write: if isSignedIn();
+    function hasAuthorizedUserDocument() {
+      return isSignedIn() && exists(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid));
     }
 
-    match /settings/{document=**} {
-      allow read, write: if isSignedIn();
+    function isAuthorized() {
+      return isSignedIn() && (!accessControlEnabled() || hasAdminClaim() || hasAuthorizedUserDocument());
     }
 
-    match /monthlySnapshots/{document=**} {
-      allow read, write: if isSignedIn();
+    function validPositiveMoney(value) {
+      return value is number && value > 0 && value < 1000000000;
+    }
+
+    function validCustomer(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 200;
+    }
+
+    function validLoan(data) {
+      return data.customerId is string && data.customerId.size() > 0 &&
+        data.customerName is string && data.customerName.size() > 0 &&
+        validPositiveMoney(data.amount) &&
+        data.installments is list && data.installments.size() <= 1000 &&
+        data.status in ['ATIVO', 'QUITADO', 'ATRASADO', 'CANCELADO', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
+    }
+
+    function validMovement(data) {
+      return data.type in ['APORTE', 'RETIRADA', 'PAGAMENTO', 'ESTORNO', 'ENTRADA', 'SAIDA'] &&
+        validPositiveMoney(data.amount) &&
+        data.description is string && data.description.size() > 0 && data.description.size() <= 500 &&
+        data.date is string &&
+        data.createdByUid is string && data.createdByUid == request.auth.uid;
+    }
+
+    match /authorizedUsers/{uid} {
+      allow read: if isAuthorized() || (isSignedIn() && request.auth.uid == uid);
+      allow create: if isSignedIn() && (
+        isAuthorized() ||
+        (!accessControlEnabled() && request.auth.uid == uid)
+      );
+      allow update, delete: if hasAdminClaim() || hasAuthorizedUserDocument();
+    }
+
+    match /clientes/{customerId} {
+      allow read, delete: if isAuthorized();
+      allow create, update: if isAuthorized() && validCustomer(request.resource.data);
+    }
+
+    match /loans/{loanId} {
+      allow read, delete: if isAuthorized();
+      allow create, update: if isAuthorized() && validLoan(request.resource.data);
+    }
+
+    match /cashMovement/{movementId} {
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && validMovement(request.resource.data);
+      allow update: if false;
+      allow delete: if isAuthorized();
+    }
+
+    match /settings/accessControl {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && !accessControlEnabled() &&
+        request.resource.data.enforced == true;
+      allow update, delete: if hasAdminClaim() || hasAuthorizedUserDocument();
+    }
+
+    match /settings/{documentId} {
+      allow read: if isAuthorized();
+      allow write: if documentId != 'accessControl' && isAuthorized();
+    }
+
+    match /monthlySnapshots/{month} {
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() &&
+        request.resource.data.month == month &&
+        request.resource.data.status == 'CLOSED' &&
+        request.resource.data.closedByUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /migrationRuns/{runId} {
+      allow read, create: if isAuthorized();
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

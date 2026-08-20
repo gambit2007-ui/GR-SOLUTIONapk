@@ -18,6 +18,8 @@ export interface BackupPayload {
   loans: BackupItem[];
   cashMovement: BackupItem[];
   settings: BackupItem[];
+  monthlySnapshots: BackupItem[];
+  migrationRuns: BackupItem[];
   assetSummary: BackupAssetSummary;
 }
 
@@ -170,11 +172,13 @@ const embedCustomerAssets = async (rawCustomers: BackupItem[]) => {
 };
 
 export const buildBackupPayload = async (): Promise<BackupPayload> => {
-  const [customersSnap, loansSnap, movementsSnap, settingsSnap] = await Promise.all([
+  const [customersSnap, loansSnap, movementsSnap, settingsSnap, monthlySnapshotsSnap, migrationRunsSnap] = await Promise.all([
     getDocs(collection(db, 'clientes')),
     getDocs(collection(db, 'loans')),
     getDocs(collection(db, 'cashMovement')),
     getDocs(query(collection(db, 'settings'))),
+    getDocs(query(collection(db, 'monthlySnapshots'))),
+    getDocs(query(collection(db, 'migrationRuns'))),
   ]);
 
   const { customers, summary } = await embedCustomerAssets(mapSnapshotItems(customersSnap.docs));
@@ -185,13 +189,8 @@ export const buildBackupPayload = async (): Promise<BackupPayload> => {
     loans: mapSnapshotItems(loansSnap.docs),
     cashMovement: mapSnapshotItems(movementsSnap.docs),
     settings: mapSnapshotItems(settingsSnap.docs),
+    monthlySnapshots: mapSnapshotItems(monthlySnapshotsSnap.docs),
+    migrationRuns: mapSnapshotItems(migrationRunsSnap.docs),
     assetSummary: summary,
   };
-};
-
-export const createBackupDownload = async () => {
-  const payload = await buildBackupPayload();
-  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
-  const filename = `backup-grjuros-${new Date().toISOString().replace(/[:.]/g, '-')}.json`;
-  return { blob, filename };
 };

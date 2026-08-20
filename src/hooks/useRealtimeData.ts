@@ -32,6 +32,9 @@ const initialState: RealtimeDataState = {
 
 interface UseRealtimeDataOptions {
   loadCustomers?: boolean;
+  loadLoans?: boolean;
+  loadCashMovements?: boolean;
+  loadMonthlySnapshots?: boolean;
   onError?: (message: string) => void;
 }
 
@@ -46,7 +49,13 @@ const reportRealtimeError = (
 
 export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptions = {}) => {
   const [state, setState] = useState<RealtimeDataState>(initialState);
-  const { loadCustomers = true, onError } = options;
+  const {
+    loadCustomers = true,
+    loadLoans = true,
+    loadCashMovements = true,
+    loadMonthlySnapshots = true,
+    onError,
+  } = options;
 
   useEffect(() => {
     if (!user) {
@@ -81,17 +90,22 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
       ));
     }
 
-    const contratosListener = onSnapshot(
-      query(collection(db, 'loans'), orderBy('startDate', 'desc')),
-      (snapshot) => {
-        const contratos = snapshot.docs.map((docSnap) => parseLoan(docSnap.id, docSnap.data()));
-        setState((previous) => ({ ...previous, contratos }));
-      },
-      (error) => {
-        reportRealtimeError('contratos', error, onError);
-        setState((previous) => ({ ...previous, contratos: [] }));
-      },
-    );
+    const contratosListener = loadLoans
+      ? onSnapshot(
+          query(collection(db, 'loans'), orderBy('startDate', 'desc')),
+          (snapshot) => {
+            const contratos = snapshot.docs.map((docSnap) => parseLoan(docSnap.id, docSnap.data()));
+            setState((previous) => ({ ...previous, contratos }));
+          },
+          (error) => {
+            reportRealtimeError('contratos', error, onError);
+            setState((previous) => ({ ...previous, contratos: [] }));
+          },
+        )
+      : (() => {
+          setState((previous) => previous.contratos.length > 0 ? { ...previous, contratos: [] } : previous);
+          return () => {};
+        })();
 
     const caixaListener = onSnapshot(
       doc(db, 'settings', 'caixa'),
@@ -120,29 +134,39 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
       },
     );
 
-    const movimentacoesListener = onSnapshot(
-      query(collection(db, 'cashMovement'), orderBy('date', 'desc')),
-      (snapshot) => {
-        const movimentacoes = snapshot.docs.map((docSnap) => parseCashMovement(docSnap.id, docSnap.data()));
-        setState((previous) => ({ ...previous, movimentacoes }));
-      },
-      (error) => {
-        reportRealtimeError('movimentacoes do caixa', error, onError);
-        setState((previous) => ({ ...previous, movimentacoes: [] }));
-      },
-    );
+    const movimentacoesListener = loadCashMovements
+      ? onSnapshot(
+          query(collection(db, 'cashMovement'), orderBy('date', 'desc')),
+          (snapshot) => {
+            const movimentacoes = snapshot.docs.map((docSnap) => parseCashMovement(docSnap.id, docSnap.data()));
+            setState((previous) => ({ ...previous, movimentacoes }));
+          },
+          (error) => {
+            reportRealtimeError('movimentacoes do caixa', error, onError);
+            setState((previous) => ({ ...previous, movimentacoes: [] }));
+          },
+        )
+      : (() => {
+          setState((previous) => previous.movimentacoes.length > 0 ? { ...previous, movimentacoes: [] } : previous);
+          return () => {};
+        })();
 
-    const monthlySnapshotsListener = onSnapshot(
-      query(collection(db, 'monthlySnapshots'), orderBy('month', 'desc')),
-      (snapshot) => {
-        const monthlySnapshots = snapshot.docs.map((docSnap) => parseMonthlySnapshot(docSnap.id, docSnap.data()));
-        setState((previous) => ({ ...previous, monthlySnapshots }));
-      },
-      (error) => {
-        reportRealtimeError('fechamentos mensais', error, onError);
-        setState((previous) => ({ ...previous, monthlySnapshots: [] }));
-      },
-    );
+    const monthlySnapshotsListener = loadMonthlySnapshots
+      ? onSnapshot(
+          query(collection(db, 'monthlySnapshots'), orderBy('month', 'desc')),
+          (snapshot) => {
+            const monthlySnapshots = snapshot.docs.map((docSnap) => parseMonthlySnapshot(docSnap.id, docSnap.data()));
+            setState((previous) => ({ ...previous, monthlySnapshots }));
+          },
+          (error) => {
+            reportRealtimeError('fechamentos mensais', error, onError);
+            setState((previous) => ({ ...previous, monthlySnapshots: [] }));
+          },
+        )
+      : (() => {
+          setState((previous) => previous.monthlySnapshots.length > 0 ? { ...previous, monthlySnapshots: [] } : previous);
+          return () => {};
+        })();
 
     return () => {
       clientesListener();
@@ -152,7 +176,7 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
       movimentacoesListener();
       monthlySnapshotsListener();
     };
-  }, [loadCustomers, onError, user]);
+  }, [loadCashMovements, loadCustomers, loadLoans, loadMonthlySnapshots, onError, user]);
 
   return state;
 };

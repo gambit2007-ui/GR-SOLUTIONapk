@@ -358,14 +358,11 @@ const allocateByComposition = (
     };
   }
 
-  const factor = safePaidAmount / expectedTotal;
-  let principalPaid = round2(Math.min(safeExpectedPrincipal * factor, safePaidAmount));
-  let interestPaid = round2(Math.max(safePaidAmount - principalPaid, 0));
-
-  if (interestPaid < 0) {
-    principalPaid = safePaidAmount;
-    interestPaid = 0;
-  }
+  const interestPaid = round2(Math.min(safePaidAmount, safeExpectedInterest));
+  const principalPaid = round2(Math.min(
+    Math.max(safePaidAmount - interestPaid, 0),
+    safeExpectedPrincipal,
+  ));
 
   return { principalPaid, interestPaid };
 };

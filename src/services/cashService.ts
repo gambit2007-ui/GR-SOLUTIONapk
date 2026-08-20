@@ -26,6 +26,7 @@ export interface CashMovementPayload {
   category?: CashOutflowCategory;
   loanId?: string;
   actor?: MovementActor;
+  operationId?: string;
 }
 
 const caixaRef = doc(db, 'settings', 'caixa');
@@ -62,12 +63,14 @@ const buildMovementActorPayload = (actor?: MovementActor) => {
 export const appendCashMovementInTransaction = async (
   tx: Transaction,
   payload: CashMovementPayload,
-  options?: { currentCashBalance?: number },
+  options?: { currentCashBalance?: number; movementId?: string },
 ) => {
   const type = parseMovementType(payload.type);
   const amount = normalizeAmount(payload.amount);
   const description = normalizeDescription(payload.description);
-  const movementRef = doc(collection(db, 'cashMovement'));
+  const movementRef = options?.movementId
+    ? doc(db, 'cashMovement', options.movementId)
+    : doc(collection(db, 'cashMovement'));
   const providedCashBalance = Number(options?.currentCashBalance);
   const saldoAtual = Number.isFinite(providedCashBalance)
     ? providedCashBalance
@@ -84,13 +87,17 @@ export const appendCashMovementInTransaction = async (
       ? parseCashOutflowCategory(payload.category) || 'DESPESA_OPERACIONAL'
       : undefined,
     loanId: payload.loanId,
+    operationId: payload.operationId,
     ...buildMovementActorPayload(payload.actor),
   };
   const sanitizedMovement = sanitizeFirestorePayload(movement);
 
   const novoSaldo = Number((saldoAtual + resolveCashDelta(movement)).toFixed(2));
 
-  tx.set(movementRef, sanitizedMovement);
+  tx.set(movementRef, {
+    ...sanitizedMovement,
+    recordedAt: serverTimestamp(),
+  });
   tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
 
   return { movement, novoSaldo, movementRef };

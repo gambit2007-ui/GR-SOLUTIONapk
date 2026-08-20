@@ -1,5 +1,16 @@
 ﻿import React, { useState } from 'react';
-import { Customer, Loan, LoanDraft, Installment, InstallmentPaymentEntry, LoanType, PaymentBreakdown } from '../../types';
+import {
+  Customer,
+  Loan,
+  LoanDraft,
+  Installment,
+  InstallmentPaymentEntry,
+  LoanPaymentRequest,
+  LoanPaymentResult,
+  LoanType,
+  PaymentApplyMode,
+  PaymentBreakdown,
+} from '../../types';
 import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban, FileDown } from 'lucide-react';
 import {
   effectiveLoanStatus,
@@ -9,9 +20,15 @@ import {
   normalizeInstallmentStatus,
   normalizeLoanStatus,
 } from '../../utils/loanCompat';
-import { getLocalISODate } from '../../utils/dateTime';
+import { buildInstallmentDueDate, getLocalISODate } from '../../utils/dateTime';
 import { buildPaymentBreakdown } from '../../utils/paymentBreakdown';
 import { calculateInstallmentLateFee } from '../../utils/lateFee';
+import {
+  buildEarlySettlementQuote,
+  EarlySettlementQuote,
+  getInstallmentBaseRemaining as calculateInstallmentBaseRemaining,
+  getInstallmentOutstanding,
+} from '../../utils/financialEngine';
 import {
   calculateInterestOnlyRenewalAmount,
   getCurrentContractDueDate,
@@ -41,22 +58,8 @@ interface LoanSectionProps {
     amount: number,
     description: string
   ) => Promise<void>;
+  onApplyLoanPayment: (loanId: string, request: LoanPaymentRequest) => Promise<LoanPaymentResult>;
 }
-
-interface EarlySettlementEntry {
-  installmentIndex: number;
-  remaining: number;
-}
-
-interface EarlySettlementQuote {
-  loanId: string;
-  totalOutstanding: number;
-  discount: number;
-  payoffAmount: number;
-  entries: EarlySettlementEntry[];
-}
-
-type PaymentApplyMode = 'INSTALLMENTS' | 'TOTAL_BALANCE' | 'REDISTRIBUTE_BALANCE';
 
 interface PaymentModalState {
   isOpen: boolean;
@@ -91,7 +94,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   initialExpandedLoanId,
   currentActor,
   dailyLateFeeRate,
-  onUpdateLoanAndAddTransaction
+  onUpdateLoanAndAddTransaction,
+  onApplyLoanPayment,
 }) => {
   const buildDefaultFormData = () => ({
     customerId: '',
@@ -110,6 +114,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [expandedLoanId, setExpandedLoanId] = useState<string | null>(initialExpandedLoanId || null);
   const [processingPayment, setProcessingPayment] = useState<string | null>(null);
   const processingPaymentGuardRef = React.useRef<string | null>(null);
+  const pendingPaymentOperationIdsRef = React.useRef<Record<string, string>>({});
   const [paymentModal, setPaymentModal] = useState<PaymentModalState | null>(null);
   const [settlementModal, setSettlementModal] = useState<EarlySettlementQuote | null>(null);
   const [renewalModal, setRenewalModal] = useState<InterestOnlyRenewalModalState | null>(null);
@@ -162,36 +167,30 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
+  const getPaymentOperationId = (fingerprint: string): string => {
+    const existing = pendingPaymentOperationIdsRef.current[fingerprint];
+    if (existing) return existing;
+    const generated = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `payment-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    pendingPaymentOperationIdsRef.current[fingerprint] = generated;
+    return generated;
+  };
+
+  const clearPaymentOperationId = (fingerprint: string) => {
+    delete pendingPaymentOperationIdsRef.current[fingerprint];
+  };
+
   const buildDueDateFromOffset = (
     baseDate: Date,
     offset: number,
     frequency: 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY',
   ): string => {
-    const dueDate = new Date(baseDate);
-    if (frequency === 'DAILY') {
-      dueDate.setDate(baseDate.getDate() + offset);
-    } else if (frequency === 'WEEKLY') {
-      dueDate.setDate(baseDate.getDate() + (offset * 7));
-    } else if (frequency === 'BIWEEKLY') {
-      dueDate.setDate(baseDate.getDate() + (offset * 15));
-    } else {
-      dueDate.setMonth(baseDate.getMonth() + offset);
-    }
-    return dueDate.toISOString().split('T')[0];
+    return buildInstallmentDueDate(baseDate, offset, frequency) || getLocalISODate(baseDate);
   };
 
   const getInstallmentBaseRemaining = (inst: Installment | null | undefined): number => {
-    if (!inst || normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
-    const baseAmount = roundMoney(installmentAmount(inst));
-    const paidAmount = roundMoney(installmentPaidAmount(inst));
-    const paidOutsideBase = roundMoney(
-      Number(inst.paymentBreakdown?.lateFeePaid || 0) +
-      Number(inst.paymentBreakdown?.serviceFeePaid || 0),
-    );
-    const paidTowardBase = roundMoney(Math.max(paidAmount - paidOutsideBase, 0));
-    const paidCappedToBase = roundMoney(Math.min(paidTowardBase, baseAmount));
-    const remaining = roundMoney(baseAmount - paidCappedToBase);
-    return remaining > 0 ? remaining : 0;
+    return calculateInstallmentBaseRemaining(inst);
   };
 
   const getOutstandingFromInstallmentIndex = (
@@ -272,11 +271,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   };
 
   const getRemainingInstallmentValue = (inst: Installment | null | undefined) => {
-    if (!inst || normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
-    const lateFee = calculateLateFee(inst);
-    const totalWithFee = roundMoney(installmentAmount(inst) + lateFee);
-    const remaining = roundMoney(totalWithFee - installmentPaidAmount(inst));
-    return remaining > 0 ? remaining : 0;
+    return getInstallmentOutstanding(inst, new Date(), dailyLateFeeRate).total;
   };
 
   const resolveLoanTypeForFiscal = (loan: Loan): LoanType =>
@@ -391,52 +386,6 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     };
   };
 
-  const buildEarlySettlementQuote = (loan: Loan): EarlySettlementQuote | null => {
-    const normalizedInterestType = fromLegacyInterestType(loan.interestType);
-    if (normalizedInterestType !== 'PRICE') {
-      return null;
-    }
-
-    const installments = Array.isArray(loan.installments) ? loan.installments : [];
-    const entries = installments.reduce<EarlySettlementEntry[]>((acc, inst, idx) => {
-      const remaining = getRemainingInstallmentValue(inst);
-      if (remaining > 0) {
-        acc.push({ installmentIndex: idx, remaining });
-      }
-      return acc;
-    }, []);
-
-    if (entries.length === 0) {
-      return null;
-    }
-
-    const totalOutstanding = roundMoney(entries.reduce((sum, entry) => sum + entry.remaining, 0));
-    const periodicRate = Number(loan.interestRate || 0) / 100;
-
-    let payoffAmount = totalOutstanding;
-    if (periodicRate > 0) {
-      payoffAmount = roundMoney(
-        entries.reduce((sum, entry, index) => {
-          const periodsAhead = index + 1;
-          return sum + (entry.remaining / Math.pow(1 + periodicRate, periodsAhead));
-        }, 0)
-      );
-    }
-
-    if (!Number.isFinite(payoffAmount) || payoffAmount <= 0) {
-      payoffAmount = totalOutstanding;
-    }
-
-    const discount = roundMoney(Math.max(totalOutstanding - payoffAmount, 0));
-    return {
-      loanId: loan.id,
-      totalOutstanding,
-      discount,
-      payoffAmount: roundMoney(totalOutstanding - discount),
-      entries,
-    };
-  };
-
   const filteredLoans = loans.filter(loan => {
     const matchesSearch = loan.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || loan.id.toLowerCase().includes(searchTerm.toLowerCase());
     const installments = Array.isArray(loan.installments) ? loan.installments : [];
@@ -516,17 +465,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const effectiveFrequency = formData.interestType === 'SPLIT' ? 'MONTHLY' : formData.frequency;
 
     const buildDueDate = (index: number) => {
-      const dueDate = new Date(baseDate);
-      if (effectiveFrequency === 'DAILY') {
-        dueDate.setDate(baseDate.getDate() + index);
-      } else if (effectiveFrequency === 'WEEKLY') {
-        dueDate.setDate(baseDate.getDate() + (index * 7));
-      } else if (effectiveFrequency === 'BIWEEKLY') {
-        dueDate.setDate(baseDate.getDate() + (index * 15));
-      } else {
-        dueDate.setMonth(baseDate.getMonth() + index);
-      }
-      return dueDate.toISOString().split('T')[0];
+      return buildInstallmentDueDate(baseDate, index, effectiveFrequency) || getLocalISODate(baseDate);
     };
 
     if (formData.interestType === 'SPLIT') {
@@ -667,7 +606,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   };
 
   const openEarlySettlementModal = (loan: Loan) => {
-    const quote = buildEarlySettlementQuote(loan);
+    const quote = buildEarlySettlementQuote(loan, new Date(), dailyLateFeeRate);
     if (!quote) {
       showToast('Quitacao antecipada disponivel somente para contratos PRICE com saldo pendente', 'error');
       return;
@@ -713,8 +652,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
     const lateFeeAmount = roundMoney(
       Math.max(
-        calculateLateFee(currentInstallment) -
-          Number(currentInstallment?.paymentBreakdown?.lateFeePaid || 0),
+        calculateLateFee(currentInstallment),
         0,
       ),
     );
@@ -746,72 +684,25 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       return;
     }
 
-    const installments = Array.isArray(loan.installments) ? [...loan.installments] : [];
-    if (installments.length === 0 || settlementModal.entries.length === 0) {
+    if (!Array.isArray(loan.installments) || loan.installments.length === 0 || settlementModal.entries.length === 0) {
       showToast('Nao ha parcelas pendentes para quitacao', 'error');
       return;
     }
 
+    const fingerprint = `settlement:${loan.id}:${settlementModal.payoffAmount}`;
     setProcessingPayment(`${loan.id}-early`);
     try {
-      const nowIso = new Date().toISOString();
-      const totalOutstanding = settlementModal.totalOutstanding;
-      let allocated = 0;
-      const lastEntryIndex = settlementModal.entries.length - 1;
-
-      settlementModal.entries.forEach((entry, idx) => {
-        const originalInstallment = installments[entry.installmentIndex];
-        if (!originalInstallment) return;
-
-        const inst = { ...originalInstallment };
-        const proportionalShare =
-          idx === lastEntryIndex
-            ? roundMoney(settlementModal.payoffAmount - allocated)
-            : roundMoney(settlementModal.payoffAmount * (entry.remaining / totalOutstanding));
-        const share = roundMoney(Math.max(proportionalShare, 0));
-        const discountShare = roundMoney(Math.max(entry.remaining - share, 0));
-        allocated = roundMoney(allocated + share);
-
-        const { installment: installmentWithFiscalBase, breakdownResult } = applyInstallmentFiscalBreakdown(
-          loan,
-          inst,
-          share,
-          0,
-          0,
-          discountShare,
-        );
-        const installmentWithFiscal = breakdownResult
-          ? appendInstallmentPaymentEntry(
-              installmentWithFiscalBase,
-              buildInstallmentPaymentEntry('PAYMENT', nowIso, breakdownResult),
-            )
-          : installmentWithFiscalBase;
-
-        installmentWithFiscal.paidAmount = installmentAmount(installmentWithFiscal);
-        installmentWithFiscal.partialPaid = 0;
-        installmentWithFiscal.status = 'PAGO';
-        installmentWithFiscal.paymentDate = nowIso;
-        installmentWithFiscal.lastPaymentDate = nowIso;
-        installmentWithFiscal.lastPaidValue = share;
-        installments[entry.installmentIndex] = installmentWithFiscal;
+      const result = await onApplyLoanPayment(loan.id, {
+        operationId: getPaymentOperationId(fingerprint),
+        installmentIndex: settlementModal.entries[0].installmentIndex,
+        applyMode: 'EARLY_SETTLEMENT',
+        processedAt: new Date().toISOString(),
       });
-
-      const allPaid = installments.filter(Boolean).every((inst) => normalizeInstallmentStatus(inst.status) === 'PAID');
-      const discountLabel = settlementModal.discount.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-
-      await onUpdateLoanAndAddTransaction(
-        loan.id,
-        {
-          installments,
-          status: allPaid ? 'QUITADO' : 'ATIVO',
-        },
-        'PAGAMENTO',
-        settlementModal.payoffAmount,
-        `QUITACAO ANTECIPADA: ${loan.customerName} (DESCONTO R$ ${discountLabel})`
-      );
+      clearPaymentOperationId(fingerprint);
+      const discountLabel = result.discountApplied.toLocaleString('pt-BR', { minimumFractionDigits: 2 });
 
       showToast(
-        `Quitacao registrada! Desconto: R$ ${discountLabel} | Total pago: R$ ${settlementModal.payoffAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
+        `${result.duplicate ? 'Quitacao ja registrada.' : 'Quitacao registrada!'} Desconto: R$ ${discountLabel} | Total pago: R$ ${result.appliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
         'success'
       );
       setSettlementModal(null);
@@ -871,8 +762,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const currentInstallment = loan.installments[pendingInstallmentIndex];
     const calculatedLateFee = roundMoney(
       Math.max(
-        calculateLateFee(currentInstallment) -
-          Number(currentInstallment.paymentBreakdown?.lateFeePaid || 0),
+        calculateLateFee(currentInstallment),
         0,
       ),
     );
@@ -1090,252 +980,80 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!activeModal && !overrideAmount) return;
 
     const loanId = directLoanId || activeModal?.loanId;
-    const instIdx = directInstIdx !== undefined ? directInstIdx : activeModal?.installmentIndex;
+    const installmentIndex = directInstIdx !== undefined ? directInstIdx : activeModal?.installmentIndex;
+    if (!loanId || installmentIndex === undefined) return;
 
-    if (!loanId || instIdx === undefined) return;
-
-    const loan = loans.find(l => l.id === loanId);
-    if (!loan) return;
-
-    const loanInstallments = Array.isArray(loan.installments) ? [...loan.installments] : [];
-    if (!loanInstallments[instIdx]) {
+    const loan = loans.find((item) => item.id === loanId);
+    if (!loan || !loan.installments[installmentIndex]) {
       showToast('Parcela invalida para pagamento', 'error');
       return;
     }
 
     const parsedAmount = parseMoneyInput(overrideAmount ?? activeModal?.amount);
-    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       showToast('Valor invalido', 'error');
       return;
     }
 
     const applyMode: PaymentApplyMode = directApplyMode || activeModal?.applyMode || 'INSTALLMENTS';
-    const processingKey = `${loanId}-${instIdx}`;
-    if (processingPaymentGuardRef.current) {
+    const redistributionInstallmentsCount = applyMode === 'REDISTRIBUTE_BALANCE'
+      ? Number.parseInt(String(activeModal?.redistributionInstallmentsCount || ''), 10)
+      : undefined;
+    const redistributionStartDate = applyMode === 'REDISTRIBUTE_BALANCE'
+      ? String(activeModal?.redistributionStartDate || '').trim()
+      : undefined;
+
+    if (
+      applyMode === 'REDISTRIBUTE_BALANCE' &&
+      (!Number.isInteger(redistributionInstallmentsCount) || Number(redistributionInstallmentsCount) <= 0)
+    ) {
+      showToast('Informe um numero valido de parcelas para redividir', 'error');
       return;
     }
+    if (applyMode === 'REDISTRIBUTE_BALANCE' && (!redistributionStartDate || redistributionStartDate < getLocalISODate())) {
+      showToast('Data de inicio da cobranca deve ser hoje ou futura', 'error');
+      return;
+    }
+
+    const processingKey = `${loanId}-${installmentIndex}`;
+    if (processingPaymentGuardRef.current) return;
     processingPaymentGuardRef.current = processingKey;
+    const fingerprint = [
+      loanId,
+      installmentIndex,
+      applyMode,
+      roundMoney(parsedAmount),
+      redistributionStartDate || '',
+      redistributionInstallmentsCount || '',
+    ].join(':');
 
     setProcessingPayment(processingKey);
     try {
-      let newInstallments = [...loanInstallments];
-      let remainingToApply = Number(parsedAmount.toFixed(2));
-      const requestedAmount = remainingToApply;
-      const processedAt = new Date().toISOString();
-      let changedInstallment = false;
-      const shouldRedistribute = applyMode === 'REDISTRIBUTE_BALANCE';
+      const result = await onApplyLoanPayment(loanId, {
+        operationId: getPaymentOperationId(fingerprint),
+        amount: roundMoney(parsedAmount),
+        installmentIndex,
+        applyMode,
+        processedAt: new Date().toISOString(),
+        redistributionStartDate,
+        redistributionInstallmentsCount,
+      });
+      clearPaymentOperationId(fingerprint);
 
-      if (shouldRedistribute) {
-        const redistributionStartIndex = instIdx;
-        const pendingIndexes = getPendingInstallmentIndexes(newInstallments, redistributionStartIndex);
-
-        if (pendingIndexes.length === 0) {
-          showToast('Nenhuma parcela pendente para redividir', 'error');
-          return;
-        }
-
-        const desiredInstallmentsCount = Number.parseInt(
-          String(activeModal?.redistributionInstallmentsCount ?? ''),
-          10,
-        );
-        if (!Number.isInteger(desiredInstallmentsCount) || desiredInstallmentsCount <= 0) {
-          showToast('Informe um numero valido de parcelas para redividir', 'error');
-          return;
-        }
-
-        const hasSettledInstallmentAfterStart = newInstallments
-          .slice(redistributionStartIndex)
-          .some((installment) => getRemainingInstallmentValue(installment) <= 0);
-        if (hasSettledInstallmentAfterStart) {
-          showToast('Nao e possivel redividir: existe parcela quitada no intervalo selecionado', 'error');
-          return;
-        }
-
-        const hasPartialPaymentAfterStart = newInstallments
-          .slice(redistributionStartIndex)
-          .some((installment) => installmentPaidAmount(installment) > 0);
-        if (hasPartialPaymentAfterStart) {
-          showToast('Nao e possivel redividir: existe parcela com pagamento parcial no intervalo selecionado', 'error');
-          return;
-        }
-
-        const outstandingTotal = roundMoney(
-          pendingIndexes.reduce((sum, index) => {
-            const installment = newInstallments[index];
-            const remainingValue = getRemainingInstallmentValue(installment);
-            return sum + remainingValue;
-          }, 0),
-        );
-        if (outstandingTotal <= 0) {
-          showToast('Nenhum saldo pendente para redividir', 'error');
-          return;
-        }
-
-        const appliedInRedistribution = roundMoney(Math.min(remainingToApply, outstandingTotal));
-        const remainingOutstanding = roundMoney(Math.max(outstandingTotal - appliedInRedistribution, 0));
-        const redistributedValues = splitAmountEvenly(remainingOutstanding, desiredInstallmentsCount);
-
-        const redistributionFrequency = fromLegacyFrequency(loan.frequency);
-        const requestedStartDateIso = String(activeModal?.redistributionStartDate || '').trim() || getLocalISODate();
-        const todayIso = getLocalISODate();
-        if (requestedStartDateIso < todayIso) {
-          showToast('Data de inicio da cobranca deve ser hoje ou futura', 'error');
-          return;
-        }
-        const redistributionBaseDate = new Date(`${requestedStartDateIso}T12:00:00`);
-        if (Number.isNaN(redistributionBaseDate.getTime())) {
-          showToast('Data inicial de redivisao invalida', 'error');
-          return;
-        }
-
-        const preservedInstallments = newInstallments.slice(0, redistributionStartIndex);
-        const baseNumber = Number(newInstallments[redistributionStartIndex]?.number || redistributionStartIndex + 1);
-        const redistributedInstallments: Installment[] = redistributedValues.map((newInstallmentValue, position) => {
-          const existingInstallment = newInstallments[redistributionStartIndex + position];
-          const rebuilt: Installment = existingInstallment
-            ? { ...existingInstallment }
-            : {
-                number: baseNumber + position,
-                dueDate: buildDueDateFromOffset(redistributionBaseDate, position, redistributionFrequency),
-                amount: newInstallmentValue,
-                paidAmount: 0,
-                status: 'PENDENTE',
-              };
-
-          rebuilt.number = baseNumber + position;
-          rebuilt.dueDate = buildDueDateFromOffset(redistributionBaseDate, position, redistributionFrequency);
-          rebuilt.amount = newInstallmentValue;
-          rebuilt.value = newInstallmentValue;
-          rebuilt.paidAmount = 0;
-          rebuilt.partialPaid = 0;
-          rebuilt.lastPaidValue = undefined;
-          rebuilt.paymentDate = undefined;
-          rebuilt.paidAt = undefined;
-          rebuilt.lastPaymentDate = undefined;
-          rebuilt.paymentAmount = undefined;
-          rebuilt.paymentBreakdown = undefined;
-          rebuilt.paymentEntries = undefined;
-          rebuilt.needsFiscalReview = undefined;
-          rebuilt.status = 'PENDENTE';
-
-          return rebuilt;
-        });
-
-        newInstallments = [...preservedInstallments, ...redistributedInstallments];
-
-        remainingToApply = roundMoney(remainingToApply - appliedInRedistribution);
-        changedInstallment = appliedInRedistribution > 0;
-      } else {
-        const installmentIndexes =
-          applyMode === 'TOTAL_BALANCE'
-            ? newInstallments.map((_, index) => index).reverse()
-            : Array.from({ length: Math.max(newInstallments.length - instIdx, 0) }, (_, offset) => instIdx + offset);
-
-        for (const currentIdx of installmentIndexes) {
-          if (remainingToApply <= 0) break;
-          const originalInstallment = newInstallments[currentIdx];
-          if (!originalInstallment) continue;
-
-          let inst = { ...originalInstallment };
-          const lateFee = calculateLateFee(inst);
-          const totalWithFee = Number((installmentAmount(inst) + lateFee).toFixed(2));
-          const alreadyPaid = Number(installmentPaidAmount(inst));
-          const remaining = Number((totalWithFee - alreadyPaid).toFixed(2));
-
-          if (!Number.isFinite(remaining) || remaining <= 0) {
-            continue;
-          }
-
-          const appliedNow = roundMoney(Math.min(remainingToApply, remaining));
-          if (!Number.isFinite(appliedNow) || appliedNow <= 0) {
-            continue;
-          }
-
-          const alreadyAllocatedLateFee = Number(inst.paymentBreakdown?.lateFeePaid || 0);
-          const remainingLateFee = roundMoney(Math.max(lateFee - alreadyAllocatedLateFee, 0));
-          const lateFeePaidNow = roundMoney(Math.min(appliedNow, remainingLateFee));
-
-          const { installment: installmentWithFiscalBase, breakdownResult } = applyInstallmentFiscalBreakdown(
-            loan,
-            inst,
-            appliedNow,
-            lateFeePaidNow,
-          );
-          inst = breakdownResult
-            ? appendInstallmentPaymentEntry(
-                installmentWithFiscalBase,
-                buildInstallmentPaymentEntry('PAYMENT', processedAt, breakdownResult),
-              )
-            : installmentWithFiscalBase;
-
-          changedInstallment = true;
-          if (remainingToApply + 0.000001 >= remaining) {
-            remainingToApply = Number((remainingToApply - remaining).toFixed(2));
-            inst.paidAmount = totalWithFee;
-            inst.status = 'PAGO';
-            inst.paymentDate = processedAt;
-            inst.lastPaymentDate = processedAt;
-            inst.partialPaid = 0;
-            inst.lastPaidValue = totalWithFee;
-          } else {
-            const partialValue = Number((alreadyPaid + remainingToApply).toFixed(2));
-            inst.paidAmount = partialValue;
-            inst.partialPaid = partialValue;
-            inst.lastPaymentDate = processedAt;
-            remainingToApply = 0;
-            if (normalizeInstallmentStatus(inst.status) !== 'PAID') {
-              inst.status = 'PENDENTE';
-            }
-          }
-
-          newInstallments[currentIdx] = inst;
-        }
-      }
-
-      if (!changedInstallment) {
-        showToast('Nenhuma parcela pendente para quitar', 'error');
-        return;
-      }
-
-      const appliedAmount = Number((requestedAmount - remainingToApply).toFixed(2));
-      if (!Number.isFinite(appliedAmount) || appliedAmount <= 0) {
-        showToast('Nenhum valor foi aplicado nas parcelas', 'error');
-        return;
-      }
-
-      const allPaid = newInstallments.filter(Boolean).every(i => normalizeInstallmentStatus(i.status) === 'PAID');
-      const paymentLabel =
-        applyMode === 'TOTAL_BALANCE'
-          ? `PAGAMENTO (ABATIMENTO SALDO): ${loan.customerName}`
-          : applyMode === 'REDISTRIBUTE_BALANCE'
-            ? `PAGAMENTO (ABATE + REDIVISAO): ${loan.customerName}`
-            : `PAGAMENTO (ABATIMENTO PARCELAS): ${loan.customerName}`;
-
-      await onUpdateLoanAndAddTransaction(
-        loan.id,
-        {
-          installments: newInstallments,
-          status: allPaid ? 'QUITADO' : 'ATIVO'
-        },
-        'PAGAMENTO',
-        appliedAmount,
-        paymentLabel
-      );
-
-      if (remainingToApply > 0.000001) {
+      if (result.unappliedAmount > 0.000001) {
         showToast(
-          `Pagamento aplicado: R$ ${appliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. Excedente nao aplicado: R$ ${remainingToApply.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`,
-          'success'
+          `Pagamento aplicado: R$ ${result.appliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. Excedente nao aplicado: R$ ${result.unappliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`,
+          'success',
         );
       } else {
-        showToast('Pagamento processado!', 'success');
+        showToast(result.duplicate ? 'Pagamento ja estava processado.' : 'Pagamento processado!', 'success');
       }
       setPaymentModal(null);
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : '';
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : '';
       const safeDetail = message && message !== 'Error' ? ` (${message})` : '';
       showToast(`Erro ao processar pagamento${safeDetail}`, 'error');
-      console.error('Falha ao processar pagamento:', e);
+      console.error('Falha ao processar pagamento:', error);
     } finally {
       if (processingPaymentGuardRef.current === processingKey) {
         processingPaymentGuardRef.current = null;
@@ -2361,10 +2079,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>
                   <input
                     type="number" placeholder="0.00" required
-                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
+                    disabled={Boolean(editingLoanId)}
+                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                     value={formData.amount}
                     onChange={e => setFormData({ ...formData, amount: e.target.value })}
                   />
+                  {editingLoanId && (
+                    <p className="text-[8px] text-zinc-600 uppercase mt-1">O principal e imutavel para preservar o caixa.</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">

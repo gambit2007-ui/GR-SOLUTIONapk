@@ -67,8 +67,16 @@ export const parseCashMovement = (id: string, raw: unknown): CashMovement => {
   const payload = isRecord(raw) ? raw : {};
   const amount = Math.abs(toNumber(payload.amount ?? payload.value, 0));
   const type = parseMovementType(payload.type);
+  const serverRecordedAt = payload.recordedAt;
+  const serverDate = isRecord(serverRecordedAt) && typeof serverRecordedAt.toDate === 'function'
+    ? (serverRecordedAt as { toDate: () => Date }).toDate()
+    : serverRecordedAt instanceof Date
+      ? serverRecordedAt
+      : null;
   const fallbackDate = new Date().toISOString();
-  const date = toString(payload.date, fallbackDate);
+  const date = serverDate && !Number.isNaN(serverDate.getTime())
+    ? serverDate.toISOString()
+    : toString(payload.date, fallbackDate);
   const description = toString(payload.description, 'MOVIMENTACAO');
 
   return {
@@ -83,6 +91,8 @@ export const parseCashMovement = (id: string, raw: unknown): CashMovement => {
     createdByUid: toOptionalString(payload.createdByUid),
     createdByEmail: toOptionalString(payload.createdByEmail),
     createdByName: toOptionalString(payload.createdByName),
+    operationId: toOptionalString(payload.operationId),
+    recordedAt: payload.recordedAt as CashMovement['recordedAt'],
   };
 };
 
@@ -305,6 +315,13 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     allowInterestOnlyRenewal:
       typeof payload.allowInterestOnlyRenewal === 'boolean' ? payload.allowInterestOnlyRenewal : undefined,
     renewalHistory: renewalHistory.length > 0 ? renewalHistory : undefined,
+    fiscalPaymentEntries: Array.isArray(payload.fiscalPaymentEntries)
+      ? payload.fiscalPaymentEntries
+          .map((entry) => parseInstallmentPaymentEntry(entry))
+          .filter((entry): entry is InstallmentPaymentEntry => Boolean(entry))
+      : undefined,
+    version: Math.max(0, Math.trunc(toNumber(payload.version, 0))),
+    updatedAt: payload.updatedAt as Loan['updatedAt'],
   };
 };
 

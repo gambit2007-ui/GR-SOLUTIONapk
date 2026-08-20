@@ -58,6 +58,8 @@ export interface CashMovement {
   createdByUid?: string;
   createdByEmail?: string;
   createdByName?: string;
+  operationId?: string;
+  recordedAt?: FirestoreTimestampLike | Date | number | string;
   value?: number;
 }
 
@@ -81,6 +83,17 @@ export interface MonthlySnapshot {
   roi: number;
   movementCount: number;
   createdLoansCount: number;
+  totalReceived?: number;
+  projectedReceipts?: number;
+  projectedProfit?: number;
+  manualWithdrawals?: number;
+  loanOutflows?: number;
+  reversals?: number;
+  overdueAmount?: number;
+  outflowCategoryTotals?: Partial<Record<CashOutflowCategory, number>>;
+  schemaVersion?: number;
+  status?: 'CLOSED';
+  closedAt?: FirestoreTimestampLike | Date | number | string;
   createdAt?: FirestoreTimestampLike | Date | number | string;
   updatedAt?: FirestoreTimestampLike | Date | number | string;
   closedByUid?: string;
@@ -155,6 +168,8 @@ export interface InstallmentPaymentEntry {
   serviceFeePaid: number;
   discountApplied: number;
   totalPaid: number;
+  operationId?: string;
+  installmentNumber?: number;
 }
 
 export type BreakdownSource =
@@ -207,6 +222,33 @@ export interface Loan {
   lastRenewAt?: string;
   allowInterestOnlyRenewal?: boolean;
   renewalHistory?: InterestOnlyRenewalRecord[];
+  fiscalPaymentEntries?: InstallmentPaymentEntry[];
+  version?: number;
+  updatedAt?: FirestoreTimestampLike | Date | number | string;
+}
+
+export type PaymentApplyMode =
+  | 'INSTALLMENTS'
+  | 'TOTAL_BALANCE'
+  | 'REDISTRIBUTE_BALANCE'
+  | 'EARLY_SETTLEMENT';
+
+export interface LoanPaymentRequest {
+  operationId: string;
+  amount?: number;
+  installmentIndex: number;
+  applyMode: PaymentApplyMode;
+  processedAt: string;
+  redistributionStartDate?: string;
+  redistributionInstallmentsCount?: number;
+}
+
+export interface LoanPaymentResult {
+  operationId: string;
+  appliedAmount: number;
+  unappliedAmount: number;
+  discountApplied: number;
+  duplicate: boolean;
 }
 
 export type LoanDraft = Omit<Loan, 'id' | 'createdAt'>;

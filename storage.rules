@@ -2,15 +2,39 @@ rules_version = '2';
 
 service firebase.storage {
   match /b/{bucket}/o {
-    // Uploads de fotos e documentos do cadastro de clientes.
-    match /clientes/{customerId}/{allPaths=**} {
-      allow read, write: if request.auth != null;
+    function isSignedIn() {
+      return request.auth != null;
     }
 
-    // Bloqueia escrita fora da pasta de clientes por padrao.
+    function accessControlEnabled() {
+      return firestore.exists(/databases/(default)/documents/settings/accessControl) &&
+        firestore.get(/databases/(default)/documents/settings/accessControl).data.enforced == true;
+    }
+
+    function isAuthorized() {
+      return isSignedIn() && (
+        !accessControlEnabled() ||
+        request.auth.token.admin == true ||
+        firestore.exists(/databases/(default)/documents/authorizedUsers/$(request.auth.uid))
+      );
+    }
+
+    function validCustomerAsset() {
+      return request.resource.size < 15 * 1024 * 1024 &&
+        request.resource.contentType != null && (
+          request.resource.contentType.matches('image/.*') ||
+          request.resource.contentType == 'application/pdf' ||
+          request.resource.contentType == 'application/octet-stream'
+        );
+    }
+
+    match /clientes/{customerId}/{allPaths=**} {
+      allow read, delete: if isAuthorized();
+      allow create, update: if isAuthorized() && validCustomerAsset();
+    }
+
     match /{allPaths=**} {
-      allow read: if request.auth != null;
-      allow write: if false;
+      allow read, write: if false;
     }
   }
 }

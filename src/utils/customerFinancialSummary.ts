@@ -5,7 +5,7 @@ import {
   installmentPaidAmount,
   normalizeInstallmentStatus,
 } from './loanCompat';
-import { calculateInstallmentLateFee } from './lateFee';
+import { getInstallmentOutstanding } from './financialEngine';
 
 export interface CustomerFinancialSummary {
   totalBorrowed: number;
@@ -108,12 +108,7 @@ const getRemainingInstallmentValue = (
   today: Date,
   dailyLateFeeRate?: number,
 ): number => {
-  if (normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-
-  const lateFee = calculateInstallmentLateFee(installment, today, dailyLateFeeRate);
-  const totalDue = roundMoney(installmentAmount(installment) + lateFee);
-  const totalPaid = Math.max(roundMoney(getInstallmentPaymentBreakdown(installment).totalPaid), 0);
-  return Math.max(roundMoney(totalDue - totalPaid), 0);
+  return getInstallmentOutstanding(installment, today, dailyLateFeeRate).total;
 };
 
 export const calculateCustomerFinancialSummary = (
@@ -164,6 +159,13 @@ export const calculateCustomerFinancialSummary = (
           loanHasOverdue = true;
           loanOverdueAmount = roundMoney(loanOverdueAmount + remaining);
         }
+      });
+
+      (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
+        summary.totalReceived = roundMoney(summary.totalReceived + Number(entry.totalPaid || 0));
+        summary.realProfit = roundMoney(
+          summary.realProfit + Number(entry.interestPaid || 0) + Number(entry.lateFeePaid || 0) + Number(entry.serviceFeePaid || 0),
+        );
       });
 
       (Array.isArray(loan.renewalHistory) ? loan.renewalHistory : []).forEach((renewal) => {

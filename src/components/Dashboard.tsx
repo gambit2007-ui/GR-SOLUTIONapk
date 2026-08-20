@@ -3,13 +3,12 @@ import { Loan, CashMovement, Installment } from '../types';
 import { TrendingUp, Users, FileText, Activity, Calendar as CalendarIcon, Clock, X } from 'lucide-react';
 import {
   effectiveLoanStatus,
-  installmentAmount,
-  installmentPaidAmount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { formatDateTimeBR, getLocalISODate } from '../utils/dateTime';
 import { resolveCashDelta } from '../utils/domainParsers';
 import { calculateInstallmentLateFee } from '../utils/lateFee';
+import { getInstallmentOutstanding } from '../utils/financialEngine';
 
 interface DashboardProps {
   loans: Loan[];
@@ -85,11 +84,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, cashMovements, dailyLateFe
   };
 
   const getRemainingInstallmentValue = (inst: Installment) => {
-    if (normalizeInstallmentStatus(inst.status) === 'PAID') return 0;
-    const lateFee = calculateInstallmentLateFee(inst, new Date(), dailyLateFeeRate);
-    const totalWithFee = roundMoney(installmentAmount(inst) + lateFee);
-    const remaining = roundMoney(totalWithFee - installmentPaidAmount(inst));
-    return remaining > 0 ? remaining : 0;
+    return getInstallmentOutstanding(inst, new Date(), dailyLateFeeRate).total;
   };
 
   const getOverdueDays = (dueDateValue: string) => {

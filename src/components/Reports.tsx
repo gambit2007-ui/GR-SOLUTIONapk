@@ -9,7 +9,7 @@ import {
   MonthlySnapshot,
 } from '../types';
 import { useMemo } from 'react';
-import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download } from 'lucide-react';
+import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download, ShieldCheck, ScanSearch } from 'lucide-react';
 import {
   BarChart, 
   Bar, 
@@ -33,7 +33,8 @@ import {
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
-import { calculateInstallmentLateFee } from '../utils/lateFee';
+import { getInstallmentOutstanding } from '../utils/financialEngine';
+import { getLocalISODate } from '../utils/dateTime';
 import { calculatePortfolioRoi } from '../utils/portfolioRoi';
 import { resolveCashDelta } from '../utils/domainParsers';
 import { generateMonthlySnapshot, saveMonthlySnapshot } from '../services/monthlySnapshotService';
@@ -45,6 +46,13 @@ import {
   isLoanCashOutflowMovement,
   resolveCashOutflowCategory,
 } from '../utils/cashCategories';
+import { enableAccessControlForCurrentUser } from '../services/accessControlService';
+import { getCustomerCount } from '../services/customerService';
+import {
+  applySafeLegacyPaymentMigration,
+  buildLegacyPaymentMigrationPreview,
+  type LegacyMigrationPreview,
+} from '../services/legacyPaymentMigrationService';
 
 interface ReportsProps {
   loans: Loan[];
@@ -93,6 +101,11 @@ interface MonthlyData {
   closingCash: number;
   movementCount: number;
   createdLoansCount: number;
+  manualWithdrawals: number;
+  loanOutflows: number;
+  reversals: number;
+  overdueAmount: number;
+  projectedProfit: number;
 }
 
 const Reports: React.FC<ReportsProps> = ({
@@ -113,6 +126,10 @@ const Reports: React.FC<ReportsProps> = ({
   const [isGeneratingAnnualReport, setIsGeneratingAnnualReport] = useState(false);
   const [reportYear, setReportYear] = useState(() => new Date().getFullYear());
   const [closingMonth, setClosingMonth] = useState<string | null>(null);
+  const [isEnablingAccessControl, setIsEnablingAccessControl] = useState(false);
+  const [migrationPreview, setMigrationPreview] = useState<LegacyMigrationPreview | null>(null);
+  const [isAuditingLegacyPayments, setIsAuditingLegacyPayments] = useState(false);
+  const [isApplyingLegacyMigration, setIsApplyingLegacyMigration] = useState(false);
   const [formData, setFormData] = useState({
     type: 'ENTRADA' as MovementType,
     amount: '',
@@ -136,11 +153,7 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const getRemainingInstallmentValue = (installment: Loan['installments'][number]) => {
-    if (!installment || normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-    const lateFee = calculateInstallmentLateFee(installment, new Date(), dailyLateFeeRate);
-    const totalWithFee = roundMoney(installmentAmount(installment) + lateFee);
-    const remaining = roundMoney(totalWithFee - installmentPaidAmount(installment));
-    return remaining > 0 ? remaining : 0;
+    return getInstallmentOutstanding(installment, new Date(), dailyLateFeeRate).total;
   };
 
   const getInstallmentPrincipalRecovered = (loan: Loan, installment: Loan['installments'][number]) => {
@@ -361,6 +374,12 @@ const Reports: React.FC<ReportsProps> = ({
         registerMetrics(monthKey, breakdown);
       });
 
+      (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
+        const monthKey = makeMonthKey(entry.recordedAt);
+        if (!monthKey) return;
+        registerMetrics(monthKey, entry);
+      });
+
       const renewalHistory = Array.isArray(loan.renewalHistory) ? loan.renewalHistory : [];
       renewalHistory.forEach((renewal) => {
         const monthKey = makeMonthKey(renewal.paymentDate);
@@ -431,17 +450,17 @@ const Reports: React.FC<ReportsProps> = ({
     return roundMoney(
       (Object.entries(fiscalData.monthly) as Array<[string, FiscalMonthMetrics]>).reduce((sum, [monthKey, metrics]) => {
         const [yearRaw] = monthKey.split('-');
-        if (Number(yearRaw) !== currentYear) return sum;
+        if (Number(yearRaw) !== reportYear) return sum;
         return sum + Number(metrics.taxableRevenue || 0);
       }, 0),
     );
-  }, [currentYear, fiscalData.monthly]);
+  }, [fiscalData.monthly, reportYear]);
 
   const yearlyOutflowCategoryTotals = cashMovements.reduce((totals, movement) => {
     const date = new Date(movement.date);
     if (
       Number.isNaN(date.getTime()) ||
-      date.getFullYear() !== currentYear ||
+      date.getFullYear() !== reportYear ||
       !isCategorizedOutflowMovement(movement)
     ) {
       return totals;
@@ -473,9 +492,11 @@ const Reports: React.FC<ReportsProps> = ({
   // Valor em Rua (Principal Pendente)
   const valorEmRua = loans.reduce((acc, loan) => {
     if (effectiveLoanStatus(loan) !== 'ACTIVE') return acc;
-    const principalRecovered = roundMoney(
-      loan.installments.reduce((sum, installment) => sum + getInstallmentPrincipalRecovered(loan, installment), 0),
-    );
+    const installmentPrincipal = loan.installments
+      .reduce((sum, installment) => sum + getInstallmentPrincipalRecovered(loan, installment), 0);
+    const redistributedPrincipal = (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : [])
+      .reduce((sum, entry) => sum + Number(entry.principalPaid || 0), 0);
+    const principalRecovered = roundMoney(installmentPrincipal + redistributedPrincipal);
     return acc + Math.max(roundMoney(Number(loan.amount || 0) - principalRecovered), 0);
   }, 0);
 
@@ -488,12 +509,18 @@ const Reports: React.FC<ReportsProps> = ({
   // Agrupamento mensal para o grafico e gavetas
   const getMonthlyData = (): MonthlyData[] => {
     const months: Record<string, MonthlyData> = {};
+    const todayIso = getLocalISODate();
+    const lastMonthIndex = reportYear < currentYear
+      ? 11
+      : reportYear === currentYear
+        ? currentMonthIndex
+        : -1;
 
-    for (let monthIndex = 0; monthIndex <= currentMonthIndex; monthIndex += 1) {
-      const key = `${currentYear}-${String(monthIndex + 1).padStart(2, '0')}`;
+    for (let monthIndex = 0; monthIndex <= lastMonthIndex; monthIndex += 1) {
+      const key = `${reportYear}-${String(monthIndex + 1).padStart(2, '0')}`;
       months[key] = {
         key,
-        month: getMonthShortLabel(monthIndex, currentYear),
+        month: getMonthShortLabel(monthIndex, reportYear),
         lucro: roundMoney(Number(fiscalData.monthly[key]?.taxableRevenue || 0)),
         recebido: 0,
         recebimentosPrevistos: 0,
@@ -506,12 +533,17 @@ const Reports: React.FC<ReportsProps> = ({
         closingCash: 0,
         movementCount: 0,
         createdLoansCount: 0,
+        manualWithdrawals: 0,
+        loanOutflows: 0,
+        reversals: 0,
+        overdueAmount: 0,
+        projectedProfit: 0,
       };
     }
 
     cashMovements.forEach((movement) => {
       const date = new Date(movement.date);
-      if (Number.isNaN(date.getTime()) || date.getFullYear() !== currentYear) return;
+      if (Number.isNaN(date.getTime()) || date.getFullYear() !== reportYear) return;
 
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       if (!months[key]) return;
@@ -533,6 +565,11 @@ const Reports: React.FC<ReportsProps> = ({
 
       if (isLoanCashOutflowMovement(movement)) {
         months[key].emprestado = roundMoney(months[key].emprestado + amount);
+        months[key].loanOutflows = roundMoney(months[key].loanOutflows + amount);
+      } else if (movementType === 'ESTORNO') {
+        months[key].reversals = roundMoney(months[key].reversals + amount);
+      } else if (!isEntrada) {
+        months[key].manualWithdrawals = roundMoney(months[key].manualWithdrawals + amount);
       }
 
       if (isCategorizedOutflowMovement(movement)) {
@@ -552,6 +589,11 @@ const Reports: React.FC<ReportsProps> = ({
         months[key].recebimentosPrevistos = roundMoney(
           months[key].recebimentosPrevistos + getProjectedInstallmentReceivable(installment),
         );
+        if (installment.dueDate < todayIso && normalizeInstallmentStatus(installment.status) !== 'PAID') {
+          months[key].overdueAmount = roundMoney(
+            months[key].overdueAmount + getRemainingInstallmentValue(installment),
+          );
+        }
       });
     });
 
@@ -569,23 +611,62 @@ const Reports: React.FC<ReportsProps> = ({
           getMovementTime(movement) < range.end ? total + resolveCashDelta(movement) : total
         ), 0),
       );
-      months[key].createdLoansCount = loans.filter((loan) => {
+      const createdLoans = loans.filter((loan) => {
         const createdDate = getLoanCreatedDate(loan);
         if (!createdDate) return false;
         const timestamp = createdDate.getTime();
         return timestamp >= range.start && timestamp < range.end;
-      }).length;
+      });
+      months[key].createdLoansCount = createdLoans.length;
+      months[key].projectedProfit = roundMoney(
+        createdLoans.reduce((sum, loan) => (
+          effectiveLoanStatus(loan) === 'CANCELLED'
+            ? sum
+            : sum + Math.max(getLoanExpectedTotal(loan) - Number(loan.amount || 0), 0)
+        ), 0),
+      );
+
+      const snapshot = monthlySnapshots.find((item) => item.month === key);
+      if (snapshot) {
+        months[key] = {
+          ...months[key],
+          lucro: snapshot.realProfit,
+          recebido: snapshot.totalReceived ?? months[key].recebido,
+          recebimentosPrevistos: snapshot.projectedReceipts ?? months[key].recebimentosPrevistos,
+          emprestado: snapshot.lentAmount,
+          entradas: snapshot.totalIncome,
+          saidas: snapshot.totalExpense,
+          saidasPorCategoria: snapshot.outflowCategoryTotals
+            ? { ...months[key].saidasPorCategoria, ...snapshot.outflowCategoryTotals }
+            : months[key].saidasPorCategoria,
+          roi: snapshot.roi,
+          openingCash: snapshot.openingCash,
+          closingCash: snapshot.closingCash,
+          movementCount: snapshot.movementCount,
+          createdLoansCount: snapshot.createdLoansCount,
+          manualWithdrawals: snapshot.manualWithdrawals ?? months[key].manualWithdrawals,
+          loanOutflows: snapshot.loanOutflows ?? months[key].loanOutflows,
+          reversals: snapshot.reversals ?? months[key].reversals,
+          overdueAmount: snapshot.overdueAmount ?? months[key].overdueAmount,
+          projectedProfit: snapshot.projectedProfit ?? months[key].projectedProfit,
+        };
+      }
     });
 
     return Object.keys(months)
       .sort()
       .map((key) => ({
         ...months[key],
-        roi: calculatePortfolioRoi(months[key].lucro, months[key].emprestado),
+        roi: isMonthClosed(key)
+          ? months[key].roi
+          : calculatePortfolioRoi(months[key].lucro, months[key].emprestado),
       }));
   };
 
-  const monthlyData = getMonthlyData();
+  const monthlyData = useMemo(
+    () => getMonthlyData(),
+    [cashMovements, currentMonthIndex, currentYear, dailyLateFeeRate, fiscalData.monthly, loans, monthlySnapshots, reportYear],
+  );
   const chartData = monthlyData;
   const [expandedMonth, setExpandedMonth] = useState<string | null>(currentMonthLabel);
 
@@ -633,16 +714,65 @@ const Reports: React.FC<ReportsProps> = ({
     }
   };
 
+  const handleEnableAccessControl = async () => {
+    if (!currentUserUid || isEnablingAccessControl) return;
+    if (!window.confirm('Ativar acesso restrito somente para usuarios autorizados? Sua conta atual sera registrada como administradora.')) return;
+    setIsEnablingAccessControl(true);
+    try {
+      const result = await enableAccessControlForCurrentUser(currentUserUid);
+      showToast(result === 'ENABLED' ? 'Protecao de acesso ativada' : 'Protecao de acesso ja estava ativa', 'success');
+    } catch (error) {
+      console.error('Falha ao ativar protecao de acesso:', error);
+      showToast('Nao foi possivel ativar a protecao de acesso', 'error');
+    } finally {
+      setIsEnablingAccessControl(false);
+    }
+  };
+
+  const handleAuditLegacyPayments = async () => {
+    if (isAuditingLegacyPayments) return;
+    setIsAuditingLegacyPayments(true);
+    try {
+      const preview = await buildLegacyPaymentMigrationPreview();
+      setMigrationPreview(preview);
+      showToast(`Auditoria concluida: ${preview.safeToMigrate} pagamento(s) seguro(s) para migrar`, 'success');
+    } catch (error) {
+      console.error('Falha ao auditar pagamentos antigos:', error);
+      showToast('Nao foi possivel auditar pagamentos antigos', 'error');
+    } finally {
+      setIsAuditingLegacyPayments(false);
+    }
+  };
+
+  const handleApplyLegacyMigration = async () => {
+    if (!migrationPreview || !currentUserUid || migrationPreview.safeToMigrate <= 0) return;
+    if (!window.confirm(`Migrar ${migrationPreview.safeToMigrate} pagamento(s) classificados como seguros? Um backup sera baixado antes.`)) return;
+    setIsApplyingLegacyMigration(true);
+    try {
+      await onDownloadBackup();
+      const result = await applySafeLegacyPaymentMigration(migrationPreview, currentUserUid);
+      showToast(`${result.migratedInstallments} pagamento(s) antigo(s) migrado(s) com seguranca`, 'success');
+      setMigrationPreview(await buildLegacyPaymentMigrationPreview());
+    } catch (error) {
+      console.error('Falha ao migrar pagamentos antigos:', error);
+      showToast('Migracao interrompida; execute a auditoria novamente', 'error');
+    } finally {
+      setIsApplyingLegacyMigration(false);
+    }
+  };
+
   const handleAnnualReportDownload = async () => {
     setIsGeneratingAnnualReport(true);
     try {
       const { generateAnnualCashReportPdf } = await import('../utils/annualCashReportPdf');
+      const customersCount = await getCustomerCount();
       await generateAnnualCashReportPdf({
         year: reportYear,
         caixa,
         loans,
         cashMovements,
-        customers,
+        customersCount,
+        monthlySnapshots,
         dailyLateFeeRate,
       });
       showToast('Relatorio anual gerado com sucesso', 'success');
@@ -681,6 +811,14 @@ const Reports: React.FC<ReportsProps> = ({
         roi: data.roi,
         movementCount: data.movementCount,
         createdLoansCount: data.createdLoansCount,
+        totalReceived: data.recebido,
+        projectedReceipts: data.recebimentosPrevistos,
+        projectedProfit: data.projectedProfit,
+        manualWithdrawals: data.manualWithdrawals,
+        loanOutflows: data.loanOutflows,
+        reversals: data.reversals,
+        overdueAmount: data.overdueAmount,
+        outflowCategoryTotals: data.saidasPorCategoria,
         closedByUid: currentUserUid,
       });
 
@@ -807,8 +945,44 @@ const Reports: React.FC<ReportsProps> = ({
           >
             <Download size={14} /> {isGeneratingAnnualReport ? 'Gerando...' : 'Relatorio Anual'}
           </button>
+          <button
+            onClick={() => { void handleEnableAccessControl(); }}
+            disabled={isEnablingAccessControl || !currentUserUid}
+            title="Restringir banco e arquivos aos usuarios autorizados"
+            className="min-h-[42px] px-3 bg-zinc-950/80 border border-zinc-800 text-zinc-500 rounded-xl font-black uppercase text-[8px] tracking-[0.12em] hover:border-emerald-500/30 hover:text-emerald-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ShieldCheck size={13} /> {isEnablingAccessControl ? 'Ativando...' : 'Proteger Acesso'}
+          </button>
+          <button
+            onClick={() => { void handleAuditLegacyPayments(); }}
+            disabled={isAuditingLegacyPayments}
+            title="Gerar previa sem alterar pagamentos antigos"
+            className="min-h-[42px] px-3 bg-zinc-950/80 border border-zinc-800 text-zinc-500 rounded-xl font-black uppercase text-[8px] tracking-[0.12em] hover:border-blue-500/30 hover:text-blue-400 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <ScanSearch size={13} /> {isAuditingLegacyPayments ? 'Auditando...' : 'Auditar Legado'}
+          </button>
         </div>
       </div>
+
+      {migrationPreview && (
+        <div className="bg-[#050505] border border-zinc-900 rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <p className="text-[9px] font-black text-zinc-400 uppercase tracking-widest">Previa da migracao fiscal</p>
+            <p className="mt-2 text-[10px] text-zinc-600 uppercase tracking-wider">
+              Seguros: <span className="text-emerald-500 font-black">{migrationPreview.safeToMigrate}</span>
+              {' | '}Revisao manual: <span className="text-[#BF953F] font-black">{migrationPreview.reviewRequired}</span>
+              {' | '}Ignorados: <span className="text-zinc-400 font-black">{migrationPreview.skipped}</span>
+            </p>
+          </div>
+          <button
+            onClick={() => { void handleApplyLegacyMigration(); }}
+            disabled={isApplyingLegacyMigration || migrationPreview.safeToMigrate <= 0 || !currentUserUid}
+            className="px-4 py-3 bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 rounded-xl font-black uppercase text-[8px] tracking-widest disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {isApplyingLegacyMigration ? 'Migrando...' : 'Baixar backup e migrar seguros'}
+          </button>
+        </div>
+      )}
 
       {/* Grade de indicadores financeiros */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">

@@ -4,6 +4,7 @@ import {
   deleteDoc,
   doc,
   getDocs,
+  getCountFromServer,
   query,
   updateDoc,
   where,
@@ -27,6 +28,11 @@ export const createCustomer = async (cliente: Customer) => {
 export const updateCustomer = async (cliente: Customer) => {
   const { id, ...payload } = cliente;
   await updateDoc(doc(db, 'clientes', id), sanitizeFirestorePayload(payload));
+};
+
+export const getCustomerCount = async (): Promise<number> => {
+  const snapshot = await getCountFromServer(collection(db, 'clientes'));
+  return snapshot.data().count;
 };
 
 export const deleteCustomerAndLoans = async (customerId: string): Promise<number> => {

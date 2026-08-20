@@ -1,4 +1,4 @@
-import type { CashMovement, Customer, Installment, Loan, PaymentBreakdown } from '../types';
+import type { CashMovement, Installment, Loan, MonthlySnapshot, PaymentBreakdown } from '../types';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -6,7 +6,7 @@ import {
   loanInstallmentsCount,
   normalizeInstallmentStatus,
 } from './loanCompat';
-import { calculateInstallmentLateFee } from './lateFee';
+import { getInstallmentOutstanding } from './financialEngine';
 import { calculatePortfolioRoi } from './portfolioRoi';
 import { resolveCashDelta } from './domainParsers';
 import { CASH_OUTFLOW_CATEGORY_LABELS, parseCashOutflowCategory } from './cashCategories';
@@ -16,7 +16,8 @@ interface AnnualCashReportParams {
   caixa: number;
   loans: Loan[];
   cashMovements: CashMovement[];
-  customers: Customer[];
+  customersCount: number;
+  monthlySnapshots: MonthlySnapshot[];
   dailyLateFeeRate?: number;
   generatedAt?: Date;
 }
@@ -223,11 +224,7 @@ const getRemainingInstallmentValue = (
   referenceDate: Date,
   dailyLateFeeRate?: number,
 ) => {
-  if (normalizeInstallmentStatus(installment.status) === 'PAID') return 0;
-  const lateFee = calculateInstallmentLateFee(installment, referenceDate, dailyLateFeeRate);
-  const totalWithFee = roundMoney(installmentAmount(installment) + lateFee);
-  const totalPaid = Math.max(roundMoney(getInstallmentPaymentBreakdown(installment).totalPaid), 0);
-  return Math.max(roundMoney(totalWithFee - totalPaid), 0);
+  return getInstallmentOutstanding(installment, referenceDate, dailyLateFeeRate).total;
 };
 
 const isInstallmentOverdue = (installment: Installment, todayIso: string) =>
@@ -287,6 +284,7 @@ const buildMonthlySummaries = (
   year: number,
   loans: Loan[],
   cashMovements: CashMovement[],
+  monthlySnapshots: MonthlySnapshot[],
   dailyLateFeeRate?: number,
   referenceDate = new Date(),
 ): MonthSummary[] => {
@@ -409,9 +407,23 @@ const buildMonthlySummaries = (
       month.totalReceived = roundMoney(month.totalReceived + totalPaid);
       month.realRevenue = roundMoney(month.realRevenue + interestPaid + lateFeePaid);
     });
+
+    (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
+      const monthKey = makeMonthKeyFromValue(entry.recordedAt);
+      if (!monthKey) return;
+      const [entryYear, entryMonth] = monthKey.split('-').map(Number);
+      if (entryYear !== year) return;
+      const month = months[entryMonth - 1];
+      month.principalRecovered = roundMoney(month.principalRecovered + Number(entry.principalPaid || 0));
+      month.totalReceived = roundMoney(month.totalReceived + Number(entry.totalPaid || 0));
+      month.realRevenue = roundMoney(
+        month.realRevenue + Number(entry.interestPaid || 0) + Number(entry.lateFeePaid || 0) + Number(entry.serviceFeePaid || 0),
+      );
+    });
   });
 
   months.forEach((month) => {
+    month.capitalBorrowed = month.loanOutflows;
     const range = getMonthRange(year, month.monthIndex);
     month.closingCash = roundMoney(
       cashMovements.reduce(
@@ -419,7 +431,26 @@ const buildMonthlySummaries = (
         0,
       ),
     );
-    month.result = roundMoney(month.realRevenue - month.outflows);
+    month.result = roundMoney(month.realRevenue - month.manualWithdrawals);
+
+    const snapshot = monthlySnapshots.find(
+      (item) => item.month === `${year}-${String(month.monthIndex + 1).padStart(2, '0')}`,
+    );
+    if (snapshot) {
+      month.capitalBorrowed = snapshot.lentAmount;
+      month.principalRecovered = snapshot.principalReceived;
+      month.totalReceived = snapshot.totalReceived ?? month.totalReceived;
+      month.realRevenue = snapshot.realProfit;
+      month.projectedProfit = snapshot.projectedProfit ?? month.projectedProfit;
+      month.manualWithdrawals = snapshot.manualWithdrawals ?? month.manualWithdrawals;
+      month.loanOutflows = snapshot.loanOutflows ?? month.loanOutflows;
+      month.reversals = snapshot.reversals ?? month.reversals;
+      month.outflows = snapshot.totalExpense;
+      month.overdueAmount = snapshot.overdueAmount ?? month.overdueAmount;
+      month.closingCash = snapshot.closingCash;
+      month.contractsCount = snapshot.createdLoansCount;
+      month.result = roundMoney(month.realRevenue - month.manualWithdrawals);
+    }
   });
 
   return months;
@@ -430,7 +461,7 @@ const buildAnnualMetrics = (
   caixa: number,
   loans: Loan[],
   cashMovements: CashMovement[],
-  customers: Customer[],
+  customersCount: number,
   months: MonthSummary[],
   dailyLateFeeRate?: number,
   referenceDate = new Date(),
@@ -451,12 +482,17 @@ const buildAnnualMetrics = (
 
   const valorEmRua = loans.reduce((sum, loan) => {
     if (effectiveLoanStatus(loan) !== 'ACTIVE') return sum;
-    const principalRecovered = roundMoney(
+    const installmentPrincipal = roundMoney(
       (Array.isArray(loan.installments) ? loan.installments : []).reduce(
         (loanSum, installment) => loanSum + getInstallmentPrincipalRecovered(loan, installment),
         0,
       ),
     );
+    const redistributedPrincipal = roundMoney(
+      (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : [])
+        .reduce((entrySum, entry) => entrySum + Number(entry.principalPaid || 0), 0),
+    );
+    const principalRecovered = roundMoney(installmentPrincipal + redistributedPrincipal);
     return roundMoney(sum + Math.max(roundMoney(Number(loan.amount || 0) - principalRecovered), 0));
   }, 0);
 
@@ -488,7 +524,7 @@ const buildAnnualMetrics = (
   const totalEmprestimos = roundMoney(months.reduce((sum, month) => sum + month.loanOutflows, 0));
   const totalEstornos = roundMoney(months.reduce((sum, month) => sum + month.reversals, 0));
   const totalOutflows = roundMoney(totalRetiradas + totalEmprestimos + totalEstornos);
-  const resultAfterExpenses = roundMoney(realRevenue - totalOutflows);
+  const resultAfterExpenses = roundMoney(realRevenue - totalRetiradas);
 
   return {
     caixa,
@@ -510,7 +546,7 @@ const buildAnnualMetrics = (
     contractsCreated: months.reduce((sum, month) => sum + month.contractsCount, 0),
     contractsCompleted: loans.filter((loan) => effectiveLoanStatus(loan) === 'COMPLETED').length,
     contractsActive: loans.filter((loan) => effectiveLoanStatus(loan) === 'ACTIVE').length,
-    customersCount: customers.length,
+    customersCount,
   };
 };
 
@@ -633,7 +669,8 @@ export const generateAnnualCashReportPdf = async ({
   caixa,
   loans,
   cashMovements,
-  customers,
+  customersCount,
+  monthlySnapshots,
   dailyLateFeeRate,
   generatedAt = new Date(),
 }: AnnualCashReportParams) => {
@@ -652,8 +689,8 @@ export const generateAnnualCashReportPdf = async ({
 
   const pageWidth = doc.internal.pageSize.getWidth();
   const margin = 14;
-  const months = buildMonthlySummaries(year, loans, cashMovements, dailyLateFeeRate, generatedAt);
-  const annual = buildAnnualMetrics(year, caixa, loans, cashMovements, customers, months, dailyLateFeeRate, generatedAt);
+  const months = buildMonthlySummaries(year, loans, cashMovements, monthlySnapshots, dailyLateFeeRate, generatedAt);
+  const annual = buildAnnualMetrics(year, caixa, loans, cashMovements, customersCount, months, dailyLateFeeRate, generatedAt);
 
   drawMainHeader(doc, pageWidth, margin, year, generatedAt);
   drawSectionTitle(doc, 'Panorama anual', margin, 58);
@@ -670,7 +707,7 @@ export const generateAnnualCashReportPdf = async ({
       ['Total recebido dos clientes', formatCurrency(annual.totalReceived)],
       ['Faturamento real do ano', formatCurrency(annual.realRevenue)],
       ['Lucro projetado do ano', formatCurrency(annual.projectedProfit)],
-      ['Resultado apos despesas', formatCurrency(annual.resultAfterExpenses)],
+      ['Resultado operacional apos retiradas', formatCurrency(annual.resultAfterExpenses)],
       ['Total a receber', formatCurrency(annual.totalAReceber)],
       ['Valor em rua', formatCurrency(annual.valorEmRua)],
       ['Valor em atraso', formatCurrency(annual.valorEmAtraso)],
