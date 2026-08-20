@@ -27,6 +27,7 @@ import { useRealtimeData } from './hooks/useRealtimeData';
 import { useToasts } from './hooks/useToasts';
 import { useViewport } from './hooks/useViewport';
 import { useAccessControlState } from './hooks/useAccessControlState';
+import { usePaginatedCustomers, usePaginatedLoans } from './hooks/usePaginatedData';
 import { addCashMovement, recalculateCashBalance } from './services/cashService';
 import { archiveCustomer, createCustomer, updateCustomer } from './services/customerService';
 import {
@@ -62,11 +63,9 @@ const App: React.FC = () => {
   const [password, setPassword] = useState('');
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
-  const [customersLoadLimit, setCustomersLoadLimit] = useState(36);
-  const [loansLoadLimit, setLoansLoadLimit] = useState(30);
   const [isEnablingAccessControl, setIsEnablingAccessControl] = useState(false);
-  const shouldLoadCustomers = currentView === 'CUSTOMERS' || currentView === 'LOANS';
-  const shouldLoadLoans = currentView !== 'SIMULATION';
+  const shouldLoadCustomers = currentView === 'LOANS';
+  const shouldLoadLoans = currentView !== 'SIMULATION' && currentView !== 'LOANS';
   const shouldLoadCashMovements = currentView === 'DASHBOARD' || currentView === 'REPORTS';
   const shouldLoadMonthlySnapshots = currentView === 'REPORTS';
 
@@ -76,27 +75,38 @@ const App: React.FC = () => {
   const handleRealtimeError = useCallback((message: string) => {
     showToast(message, 'error');
   }, [showToast]);
+  const activeDataUser = accessControl.authorized ? user : null;
   const {
-    clientes,
-    contratos,
+    clientes: realtimeCustomers,
+    contratos: realtimeLoans,
     movimentacoes,
     monthlySnapshots,
     feeSettings,
     caixa,
-    isCustomersLoading,
-    totalCustomers,
-    totalLoans,
-    hasMoreCustomers,
-    hasMoreLoans,
-  } = useRealtimeData(accessControl.authorized ? user : null, {
+    isCustomersLoading: isRealtimeCustomersLoading,
+  } = useRealtimeData(activeDataUser, {
     loadCustomers: shouldLoadCustomers,
     loadLoans: shouldLoadLoans,
     loadCashMovements: shouldLoadCashMovements,
     loadMonthlySnapshots: shouldLoadMonthlySnapshots,
-    customersLimit: currentView === 'CUSTOMERS' ? customersLoadLimit : undefined,
-    loansLimit: currentView === 'LOANS' ? loansLoadLimit : undefined,
     onError: handleRealtimeError,
   });
+  const paginatedCustomers = usePaginatedCustomers(
+    activeDataUser,
+    currentView === 'CUSTOMERS',
+    handleRealtimeError,
+  );
+  const paginatedLoans = usePaginatedLoans(
+    activeDataUser,
+    currentView === 'LOANS',
+    selectedLoanId,
+    handleRealtimeError,
+  );
+  const clientes = currentView === 'CUSTOMERS' ? paginatedCustomers.items : realtimeCustomers;
+  const contratos = currentView === 'LOANS' ? paginatedLoans.items : realtimeLoans;
+  const isCustomersLoading = currentView === 'CUSTOMERS'
+    ? paginatedCustomers.loading
+    : isRealtimeCustomersLoading;
   const dailyLateFeeRate = feeSettings.dailyLateFeeRate;
   const {
     isSidebarOpen,
@@ -437,9 +447,9 @@ const App: React.FC = () => {
             customers={clientes}
             loans={contratos}
             isLoadingCustomers={isCustomersLoading}
-            totalCustomers={totalCustomers}
-            hasMoreCustomers={hasMoreCustomers}
-            onLoadMoreCustomers={() => setCustomersLoadLimit((current) => current + 36)}
+            totalCustomers={paginatedCustomers.total}
+            hasMoreCustomers={paginatedCustomers.hasMore}
+            onLoadMoreCustomers={() => { void paginatedCustomers.loadMore(); }}
             dailyLateFeeRate={dailyLateFeeRate}
             onAddCustomer={handleAddCustomer}
             onUpdateCustomer={handleUpdateCustomer}
@@ -452,9 +462,9 @@ const App: React.FC = () => {
             customers={clientes}
             loans={contratos}
             isLoadingCustomers={isCustomersLoading}
-            totalLoans={totalLoans}
-            hasMoreLoans={hasMoreLoans}
-            onLoadMoreLoans={() => setLoansLoadLimit((current) => current + 30)}
+            totalLoans={paginatedLoans.total}
+            hasMoreLoans={paginatedLoans.hasMore}
+            onLoadMoreLoans={() => { void paginatedLoans.loadMore(); }}
             onAddLoan={handleAddLoan}
             onUpdateLoan={handleUpdateLoan}
             onCancelLoan={handleCancelLoan}
@@ -567,7 +577,12 @@ const App: React.FC = () => {
   const navItems = [
     { id: 'DASHBOARD', label: 'Painel', icon: LayoutDashboard },
     { id: 'CUSTOMERS', label: 'Clientes', icon: Users },
-    { id: 'LOANS', label: 'Contratos', icon: FileText, badge: overdueLoansCount > 0 ? overdueLoansCount : null },
+    {
+      id: 'LOANS',
+      label: 'Contratos',
+      icon: FileText,
+      badge: currentView !== 'LOANS' && overdueLoansCount > 0 ? overdueLoansCount : null,
+    },
     { id: 'SIMULATION', label: 'Simular', icon: Calculator },
     { id: 'REPORTS', label: 'Financeiro', icon: PieChart },
   ];

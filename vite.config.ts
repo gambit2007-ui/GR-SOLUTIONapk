@@ -17,6 +17,7 @@ export default defineConfig({
           '**/assets/annualCashReportPdf-*.js',
           '**/assets/charts-vendor-*.js',
           '**/assets/contractGenerator-*.js',
+          '**/assets/firebase-storage-*.js',
           '**/assets/html2canvas*.js',
           '**/assets/jspdf*.js',
         ],
@@ -48,6 +49,7 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined
+          if (id.includes('@firebase/storage') || id.includes('/firebase/storage')) return 'firebase-storage'
           if (id.includes('@firebase') || id.includes('/firebase/')) return 'firebase-vendor'
           if (id.includes('react-dom') || id.includes('/react/')) return 'react-vendor'
           if (id.includes('recharts') || id.includes('/d3-')) return 'charts-vendor'

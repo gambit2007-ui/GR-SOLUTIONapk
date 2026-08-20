@@ -1,7 +1,6 @@
 import { initializeApp, getApps } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 import { getAuth } from "firebase/auth";
-import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "AIzaSyBH1MWR7uSgcOF4WsrQnnkgPNpzdBkonxA",
@@ -17,11 +16,9 @@ if (import.meta.env.DEV && !import.meta.env.VITE_FIREBASE_PROJECT_ID) {
 }
 
 // Evita reinicializacao do Firebase em hot reload
-const app = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+export const firebaseApp = getApps().length ? getApps()[0] : initializeApp(firebaseConfig);
+export const firebaseProjectId = firebaseConfig.projectId;
 
 // Servicos
-export const db = getFirestore(app);
-export const auth = getAuth(app);
-export const storage = getStorage(app);
-export const storageAppspotFallback = getStorage(app, `gs://${firebaseConfig.projectId}.appspot.com`);
-export const storageFirebasestorageFallback = getStorage(app, `gs://${firebaseConfig.projectId}.firebasestorage.app`);
+export const db = getFirestore(firebaseApp);
+export const auth = getAuth(firebaseApp);

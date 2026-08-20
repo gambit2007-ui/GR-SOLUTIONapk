@@ -1,4 +1,4 @@
-import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, getDocs, limit, orderBy, query, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebase';
 import type { MovementActor } from './cashService';
 
@@ -30,4 +30,34 @@ export const reportOperationalError = async (
   } catch (loggingError) {
     console.warn('[diagnosticEvents] Falha ao registrar diagnostico:', loggingError);
   }
+};
+
+export interface OperationalDiagnosticEvent {
+  id: string;
+  source: string;
+  errorCode: string;
+  createdByUid: string;
+  recordedAt?: string;
+}
+
+export const listRecentOperationalErrors = async (maxItems = 25): Promise<OperationalDiagnosticEvent[]> => {
+  const snapshot = await getDocs(query(
+    collection(db, 'diagnosticEvents'),
+    orderBy('recordedAt', 'desc'),
+    limit(Math.min(Math.max(Math.trunc(maxItems), 1), 100)),
+  ));
+
+  return snapshot.docs.map((item) => {
+    const data = item.data();
+    const recordedAt = data.recordedAt && typeof data.recordedAt.toDate === 'function'
+      ? data.recordedAt.toDate().toISOString()
+      : undefined;
+    return {
+      id: item.id,
+      source: String(data.source || 'unknown'),
+      errorCode: String(data.errorCode || 'UNKNOWN_ERROR'),
+      createdByUid: String(data.createdByUid || ''),
+      recordedAt,
+    };
+  });
 };

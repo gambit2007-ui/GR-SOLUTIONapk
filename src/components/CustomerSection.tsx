@@ -9,7 +9,8 @@ import {
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { calculateCustomerFinancialSummary } from '../utils/customerFinancialSummary';
-import { auth, storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebase';
+import { auth } from '../firebase';
+import { storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebaseStorage';
 
 interface CustomerSectionProps {
   customers: Customer[];

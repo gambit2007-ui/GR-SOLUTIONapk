@@ -36,7 +36,7 @@ export interface BackupPayload {
   };
 }
 
-type BackupPayloadWithoutIntegrity = Omit<BackupPayload, 'integrity'>;
+export type BackupPayloadWithoutIntegrity = Omit<BackupPayload, 'integrity'>;
 
 const mapSnapshotItems = (docs: Array<{ id: string; data: () => Record<string, unknown> }>): BackupItem[] =>
   docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -207,6 +207,24 @@ export const validateBackupPayload = async (payload: BackupPayload): Promise<boo
   return (await calculateSha256(content)) === integrity.checksum;
 };
 
+export const createBackupPayloadWithIntegrity = async (
+  content: BackupPayloadWithoutIntegrity,
+): Promise<BackupPayload> => ({
+  ...content,
+  integrity: {
+    algorithm: 'SHA-256',
+    checksum: await calculateSha256(content),
+    counts: {
+      customers: content.customers.length,
+      loans: content.loans.length,
+      cashMovement: content.cashMovement.length,
+      settings: content.settings.length,
+      monthlySnapshots: content.monthlySnapshots.length,
+      migrationRuns: content.migrationRuns.length,
+    },
+  },
+});
+
 export const buildBackupPayload = async (): Promise<BackupPayload> => {
   const [customersSnap, loansSnap, movementsSnap, settingsSnap, monthlySnapshotsSnap, migrationRunsSnap] = await Promise.all([
     getDocs(collection(db, 'clientes')),
@@ -230,21 +248,5 @@ export const buildBackupPayload = async (): Promise<BackupPayload> => {
     migrationRuns: mapSnapshotItems(migrationRunsSnap.docs),
     assetSummary: summary,
   };
-  const counts = {
-    customers: content.customers.length,
-    loans: content.loans.length,
-    cashMovement: content.cashMovement.length,
-    settings: content.settings.length,
-    monthlySnapshots: content.monthlySnapshots.length,
-    migrationRuns: content.migrationRuns.length,
-  };
-
-  return {
-    ...content,
-    integrity: {
-      algorithm: 'SHA-256',
-      checksum: await calculateSha256(content),
-      counts,
-    },
-  };
+  return createBackupPayloadWithIntegrity(content);
 };

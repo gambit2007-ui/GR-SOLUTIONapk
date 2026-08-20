@@ -7,7 +7,7 @@ import {
   PaymentBreakdown,
   MonthlySnapshot,
 } from '../types';
-import { useMemo } from 'react';
+import { useMemo, useRef } from 'react';
 import { Wallet, ArrowUpCircle, ArrowDownCircle, RefreshCcw, Plus, TrendingUp, BarChart3, ChevronDown, Info, Download, ShieldCheck, ScanSearch } from 'lucide-react';
 import {
   BarChart, 
@@ -53,6 +53,11 @@ import {
   type LegacyMigrationPreview,
 } from '../services/legacyPaymentMigrationService';
 import { buildFinancialAudit } from '../utils/financialAudit';
+import type { BackupPayload } from '../services/backupService';
+import {
+  listRecentOperationalErrors,
+  type OperationalDiagnosticEvent,
+} from '../services/operationalLoggingService';
 
 interface ReportsProps {
   loans: Loan[];
@@ -126,6 +131,9 @@ const Reports: React.FC<ReportsProps> = ({
   const [migrationPreview, setMigrationPreview] = useState<LegacyMigrationPreview | null>(null);
   const [isAuditingLegacyPayments, setIsAuditingLegacyPayments] = useState(false);
   const [isApplyingLegacyMigration, setIsApplyingLegacyMigration] = useState(false);
+  const [diagnosticEvents, setDiagnosticEvents] = useState<OperationalDiagnosticEvent[] | null>(null);
+  const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(false);
+  const backupValidationInputRef = useRef<HTMLInputElement | null>(null);
   const [formData, setFormData] = useState({
     type: 'ENTRADA' as MovementType,
     amount: '',
@@ -727,6 +735,43 @@ const Reports: React.FC<ReportsProps> = ({
     }
   };
 
+  const handleBackupValidation = async (file?: File) => {
+    if (!file) return;
+    try {
+      const { validateBackupPayload } = await import('../services/backupService');
+      const payload = JSON.parse(await file.text()) as BackupPayload;
+      if (!(await validateBackupPayload(payload))) {
+        showToast('Backup invalido ou alterado', 'error');
+        return;
+      }
+      showToast(
+        `Backup valido: ${payload.integrity.counts.customers} clientes e ${payload.integrity.counts.loans} contratos`,
+        'success',
+      );
+    } catch {
+      showToast('Nao foi possivel validar o arquivo de backup', 'error');
+    } finally {
+      if (backupValidationInputRef.current) backupValidationInputRef.current.value = '';
+    }
+  };
+
+  const handleLoadDiagnostics = async () => {
+    if (isLoadingDiagnostics) return;
+    if (diagnosticEvents !== null) {
+      setDiagnosticEvents(null);
+      return;
+    }
+    setIsLoadingDiagnostics(true);
+    try {
+      setDiagnosticEvents(await listRecentOperationalErrors());
+    } catch (error) {
+      console.error('Falha ao consultar diagnosticos:', error);
+      showToast('Somente administradores podem consultar diagnosticos', 'error');
+    } finally {
+      setIsLoadingDiagnostics(false);
+    }
+  };
+
   const handleEnableAccessControl = async () => {
     if (!currentUserUid || isEnablingAccessControl) return;
     if (!window.confirm('Ativar acesso restrito somente para usuarios autorizados? Sua conta atual sera registrada como administradora.')) return;
@@ -963,6 +1008,20 @@ const Reports: React.FC<ReportsProps> = ({
           >
             <Download size={14} /> {isDownloadingBackup ? 'Gerando...' : 'Backup'}
           </button>
+          <input
+            ref={backupValidationInputRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={(event) => { void handleBackupValidation(event.target.files?.[0]); }}
+          />
+          <button
+            onClick={() => backupValidationInputRef.current?.click()}
+            title="Verificar checksum e contagens de um backup"
+            className="min-h-[42px] px-3 bg-zinc-950/80 border border-zinc-800 text-zinc-500 rounded-xl font-black uppercase text-[8px] tracking-[0.12em] hover:border-blue-500/30 hover:text-blue-400 transition-colors flex items-center justify-center gap-2"
+          >
+            <ShieldCheck size={13} /> Validar Backup
+          </button>
           <button
             onClick={() => { void handleAnnualReportDownload(); }}
             disabled={isGeneratingAnnualReport}
@@ -1025,6 +1084,16 @@ const Reports: React.FC<ReportsProps> = ({
                 ? 'Caixa reconciliado e sem divergencias criticas detectadas'
                 : `${financialAudit.errors} erro(s) e ${financialAudit.warnings} alerta(s) encontrados`}
             </p>
+            <button
+              type="button"
+              onClick={() => { void handleLoadDiagnostics(); }}
+              disabled={isLoadingDiagnostics}
+              className="mt-3 text-[8px] font-black uppercase tracking-widest text-zinc-500 hover:text-blue-400 disabled:opacity-50"
+            >
+              {isLoadingDiagnostics
+                ? 'Carregando diagnosticos...'
+                : diagnosticEvents === null ? 'Ver diagnosticos recentes' : 'Ocultar diagnosticos'}
+            </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0 lg:min-w-[520px]">
@@ -1056,6 +1125,29 @@ const Reports: React.FC<ReportsProps> = ({
                 </div>
               </div>
             ))}
+          </div>
+        )}
+
+        {diagnosticEvents !== null && (
+          <div className="mt-4 border-t border-zinc-900 pt-4">
+            <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Falhas operacionais recentes</p>
+            {diagnosticEvents.length === 0 ? (
+              <p className="mt-3 text-[9px] text-emerald-500 uppercase tracking-wider">Nenhuma falha registrada</p>
+            ) : (
+              <div className="mt-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
+                {diagnosticEvents.map((event) => (
+                  <div key={event.id} className="rounded-xl border border-zinc-900 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[8px] font-black text-zinc-300 uppercase tracking-wider">{event.source}</p>
+                      <span className="text-[7px] text-zinc-600">
+                        {event.recordedAt ? new Date(event.recordedAt).toLocaleString('pt-BR') : 'Sem horario'}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[8px] text-red-500 font-black">{event.errorCode}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
