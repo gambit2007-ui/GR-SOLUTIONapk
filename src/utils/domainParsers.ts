@@ -92,6 +92,7 @@ export const parseCashMovement = (id: string, raw: unknown): CashMovement => {
     createdByEmail: toOptionalString(payload.createdByEmail),
     createdByName: toOptionalString(payload.createdByName),
     operationId: toOptionalString(payload.operationId),
+    discountApplied: toOptionalPositiveNumber(payload.discountApplied),
     recordedAt: payload.recordedAt as CashMovement['recordedAt'],
   };
 };
@@ -170,6 +171,8 @@ const parseInstallmentPaymentEntry = (raw: unknown): InstallmentPaymentEntry | n
     serviceFeePaid,
     discountApplied,
     totalPaid,
+    operationId: toOptionalString(raw.operationId),
+    installmentNumber: toOptionalPositiveNumber(raw.installmentNumber),
   };
 };
 
@@ -322,6 +325,11 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
       : undefined,
     version: Math.max(0, Math.trunc(toNumber(payload.version, 0))),
     updatedAt: payload.updatedAt as Loan['updatedAt'],
+    canceledAt: payload.canceledAt as Loan['canceledAt'],
+    canceledByUid: toOptionalString(payload.canceledByUid),
+    canceledByEmail: toOptionalString(payload.canceledByEmail),
+    canceledByName: toOptionalString(payload.canceledByName),
+    cancellationReason: toOptionalString(payload.cancellationReason),
   };
 };
 

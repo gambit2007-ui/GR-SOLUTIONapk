@@ -50,8 +50,11 @@ const clamp = (value: number, min: number, max: number): number => {
   return value;
 };
 
-const normalizeLoanType = (value: unknown): LoanType => {
+type BreakdownLoanType = LoanType | 'SPLIT';
+
+const normalizeLoanType = (value: unknown): BreakdownLoanType => {
   const normalized = String(value ?? '').trim().toUpperCase();
+  if (normalized === 'SPLIT') return 'SPLIT';
   return normalized === 'PRICE' ? 'PRICE' : 'SIMPLE';
 };
 
@@ -128,7 +131,7 @@ export const buildPriceBreakdown = (params: BuildPaymentBreakdownParams): BuildP
 
 export const buildPaymentBreakdown = (params: BuildPaymentBreakdownParams): BuildPaymentBreakdownResult => {
   const loanType = normalizeLoanType(params.loan.type);
-  if (loanType === 'PRICE') {
+  if (loanType === 'PRICE' || loanType === 'SPLIT') {
     return buildPriceBreakdown(params);
   }
   return buildSimpleBreakdown(params);

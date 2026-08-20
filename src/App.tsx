@@ -5,7 +5,17 @@ import {
 } from 'lucide-react';
 import { FirebaseError } from 'firebase/app';
 
-import { CashOutflowCategory, Customer, Loan, LoanDraft, LoanPaymentRequest, MovementType, View } from './types';
+import {
+  CashOutflowCategory,
+  CreatedLoanResult,
+  Customer,
+  Loan,
+  LoanDraft,
+  LoanPaymentRequest,
+  LoanPaymentReversalRequest,
+  MovementType,
+  View,
+} from './types';
 import { getLocalISODate } from './utils/dateTime';
 import { getInstallmentOutstanding } from './utils/financialEngine';
 import {
@@ -18,7 +28,14 @@ import { useToasts } from './hooks/useToasts';
 import { useViewport } from './hooks/useViewport';
 import { addCashMovement, recalculateCashBalance } from './services/cashService';
 import { createCustomer, deleteCustomerAndLoans, updateCustomer } from './services/customerService';
-import { applyLoanPayment, createLoan, deleteLoan, updateLoan, updateLoanAndAddMovement } from './services/loanService';
+import {
+  applyLoanPayment,
+  cancelLoan,
+  createLoan,
+  reverseLoanPayment,
+  updateLoan,
+  updateLoanAndAddMovement,
+} from './services/loanService';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const CustomerSection = lazy(() => import('./components/CustomerSection'));
@@ -288,14 +305,17 @@ const App: React.FC = () => {
   const handleDeleteCustomer = async (customerId: string) => {
     try {
       const removedLoansCount = await deleteCustomerAndLoans(customerId);
-      showToast(`Cliente removido com ${removedLoansCount} contrato(s)`, 'info');
+      showToast(removedLoansCount > 0 ? 'Cliente removido' : 'Cliente sem contratos removido', 'info');
     } catch (error: unknown) {
-      showToast('Erro ao remover cliente', 'error');
+      const message = error instanceof Error && error.message === 'CLIENTE_POSSUI_CONTRATOS'
+        ? 'Cliente possui contratos e nao pode ser excluido. Cancele os contratos se necessario.'
+        : 'Erro ao remover cliente';
+      showToast(message, 'error');
       throw error;
     }
   };
 
-  const handleAddLoan = async (loanDraft: LoanDraft): Promise<string | void> => {
+  const handleAddLoan = async (loanDraft: LoanDraft): Promise<CreatedLoanResult> => {
     try {
       const createdLoanId = await createLoan(loanDraft, movementActor);
       setCurrentView('DASHBOARD');
@@ -307,12 +327,21 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteLoan = async (loanId: string) => {
+  const handleCancelLoan = async (loanId: string, reason: string) => {
     try {
-      await deleteLoan(loanId);
-      showToast('Contrato excluido com sucesso!', 'success');
+      await cancelLoan(loanId, movementActor, reason);
+      showToast('Contrato cancelado com historico preservado!', 'success');
     } catch (error: unknown) {
-      showToast('Erro ao excluir contrato', 'error');
+      showToast('Erro ao cancelar contrato', 'error');
+      throw error;
+    }
+  };
+
+  const handleReverseLoanPayment = async (loanId: string, request: LoanPaymentReversalRequest) => {
+    try {
+      return await reverseLoanPayment(loanId, request, movementActor);
+    } catch (error: unknown) {
+      showToast('Erro ao estornar pagamento', 'error');
       throw error;
     }
   };
@@ -375,13 +404,14 @@ const App: React.FC = () => {
             isLoadingCustomers={isCustomersLoading}
             onAddLoan={handleAddLoan}
             onUpdateLoan={handleUpdateLoan}
-            onDeleteLoan={handleDeleteLoan}
+            onCancelLoan={handleCancelLoan}
             showToast={showToast}
             initialExpandedLoanId={selectedLoanId}
             currentActor={movementActor}
             dailyLateFeeRate={dailyLateFeeRate}
             onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
             onApplyLoanPayment={handleApplyLoanPayment}
+            onReverseLoanPayment={handleReverseLoanPayment}
           />
         );
       case 'SIMULATION':
@@ -390,15 +420,12 @@ const App: React.FC = () => {
         return (
           <Reports
             loans={contratos}
-            customers={clientes}
             cashMovements={movimentacoes}
             monthlySnapshots={monthlySnapshots}
             caixa={caixa}
             currentUserUid={user?.uid}
             dailyLateFeeRate={dailyLateFeeRate}
             onAddTransaction={handleAddTransaction}
-            onUpdateLoan={handleUpdateLoan}
-            onUpdateLoanAndAddTransaction={handleUpdateLoanAndAddTransaction}
             onRecalculateCash={handleRecalculateCash}
             onDownloadBackup={handleDownloadBackup}
             showToast={showToast}

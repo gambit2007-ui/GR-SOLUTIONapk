@@ -19,6 +19,15 @@ service cloud.firestore {
       return isSignedIn() && exists(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid));
     }
 
+    function hasAdminRoleDocument() {
+      return hasAuthorizedUserDocument() &&
+        get(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid)).data.role == 'ADMIN';
+    }
+
+    function isAdmin() {
+      return hasAdminClaim() || hasAdminRoleDocument() || (isSignedIn() && !accessControlEnabled());
+    }
+
     function isAuthorized() {
       return isSignedIn() && (!accessControlEnabled() || hasAdminClaim() || hasAuthorizedUserDocument());
     }
@@ -39,6 +48,13 @@ service cloud.firestore {
         data.status in ['ATIVO', 'QUITADO', 'ATRASADO', 'CANCELADO', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
     }
 
+    function validLoanUpdate(previousData, nextData) {
+      return validLoan(nextData) &&
+        nextData.amount == previousData.amount &&
+        nextData.version is int &&
+        nextData.version == previousData.get('version', 0) + 1;
+    }
+
     function validMovement(data) {
       return data.type in ['APORTE', 'RETIRADA', 'PAGAMENTO', 'ESTORNO', 'ENTRADA', 'SAIDA'] &&
         validPositiveMoney(data.amount) &&
@@ -50,10 +66,10 @@ service cloud.firestore {
     match /authorizedUsers/{uid} {
       allow read: if isAuthorized() || (isSignedIn() && request.auth.uid == uid);
       allow create: if isSignedIn() && (
-        isAuthorized() ||
+        isAdmin() ||
         (!accessControlEnabled() && request.auth.uid == uid)
       );
-      allow update, delete: if hasAdminClaim() || hasAuthorizedUserDocument();
+      allow update, delete: if isAdmin();
     }
 
     match /clientes/{customerId} {
@@ -62,27 +78,30 @@ service cloud.firestore {
     }
 
     match /loans/{loanId} {
-      allow read, delete: if isAuthorized();
-      allow create, update: if isAuthorized() && validLoan(request.resource.data);
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && validLoan(request.resource.data) && request.resource.data.version == 0;
+      allow update: if isAuthorized() && validLoanUpdate(resource.data, request.resource.data);
+      allow delete: if false;
     }
 
     match /cashMovement/{movementId} {
       allow read: if isAuthorized();
       allow create: if isAuthorized() && validMovement(request.resource.data);
       allow update: if false;
-      allow delete: if isAuthorized();
+      allow delete: if false;
     }
 
     match /settings/accessControl {
       allow read: if isSignedIn();
       allow create: if isSignedIn() && !accessControlEnabled() &&
         request.resource.data.enforced == true;
-      allow update, delete: if hasAdminClaim() || hasAuthorizedUserDocument();
+      allow update, delete: if isAdmin();
     }
 
     match /settings/{documentId} {
       allow read: if isAuthorized();
-      allow write: if documentId != 'accessControl' && isAuthorized();
+      allow write: if documentId in ['caixa', 'contractCounter'] && isAuthorized();
+      allow write: if documentId == 'fees' && isAdmin();
     }
 
     match /monthlySnapshots/{month} {

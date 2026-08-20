@@ -1,7 +1,6 @@
 ﻿import React, { useState } from 'react';
 import {
   Loan,
-  Customer,
   CashMovement,
   CashOutflowCategory,
   MovementType,
@@ -34,7 +33,7 @@ import {
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { getInstallmentOutstanding } from '../utils/financialEngine';
-import { getLocalISODate } from '../utils/dateTime';
+import { canCloseMonth, getLocalISODate } from '../utils/dateTime';
 import { calculatePortfolioRoi } from '../utils/portfolioRoi';
 import { resolveCashDelta } from '../utils/domainParsers';
 import { generateMonthlySnapshot, saveMonthlySnapshot } from '../services/monthlySnapshotService';
@@ -56,7 +55,6 @@ import {
 
 interface ReportsProps {
   loans: Loan[];
-  customers: Customer[];
   cashMovements: CashMovement[];
   monthlySnapshots: MonthlySnapshot[];
   caixa: number;
@@ -68,8 +66,6 @@ interface ReportsProps {
     description: string,
     category?: CashOutflowCategory,
   ) => Promise<void>;
-  onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
-  onUpdateLoanAndAddTransaction: (loanId: string, newData: Partial<Loan>, type: MovementType, amount: number, description: string) => Promise<void>;
   onRecalculateCash: () => Promise<void>;
   onDownloadBackup: () => Promise<void>;
   showToast: (msg: string, type?: 'success' | 'error') => void;
@@ -110,7 +106,6 @@ interface MonthlyData {
 
 const Reports: React.FC<ReportsProps> = ({
   loans,
-  customers,
   cashMovements,
   monthlySnapshots,
   caixa,
@@ -146,6 +141,10 @@ const Reports: React.FC<ReportsProps> = ({
     }, {} as OutflowCategoryTotals);
   const formatPercentage = (value: number) =>
     Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+  const formatChartCurrency = (value: unknown) => {
+    const parsed = Number(value || 0);
+    return parsed > 0 ? `R$ ${parsed.toLocaleString('pt-BR')}` : '';
+  };
   const getRoiColorClass = (roi: number) => {
     if (roi >= 15) return 'text-emerald-500';
     if (roi >= 8) return 'text-[#BF953F]';
@@ -298,6 +297,14 @@ const Reports: React.FC<ReportsProps> = ({
 
   const fiscalData = useMemo(() => {
     const monthly: Record<string, FiscalMonthMetrics> = {};
+    const movementDatesByOperationId = new Map<string, string>();
+    cashMovements.forEach((movement) => {
+      const operationId = String(movement.operationId || movement.id || '').trim();
+      if (operationId && movement.date) movementDatesByOperationId.set(operationId, movement.date);
+    });
+    const resolveFiscalEntryDate = (operationId: string | undefined, fallback: string): string => (
+      operationId ? movementDatesByOperationId.get(operationId) || fallback : fallback
+    );
 
     const totals = {
       principalRecovered: 0,
@@ -348,7 +355,7 @@ const Reports: React.FC<ReportsProps> = ({
         const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
         if (paymentEntries.length > 0) {
           paymentEntries.forEach((entry) => {
-            const monthKey = makeMonthKey(entry.recordedAt);
+            const monthKey = makeMonthKey(resolveFiscalEntryDate(entry.operationId, entry.recordedAt));
             if (!monthKey) return;
             registerMetrics(monthKey, {
               principalPaid: Number(entry.principalPaid || 0),
@@ -375,7 +382,7 @@ const Reports: React.FC<ReportsProps> = ({
       });
 
       (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
-        const monthKey = makeMonthKey(entry.recordedAt);
+        const monthKey = makeMonthKey(resolveFiscalEntryDate(entry.operationId, entry.recordedAt));
         if (!monthKey) return;
         registerMetrics(monthKey, entry);
       });
@@ -401,7 +408,7 @@ const Reports: React.FC<ReportsProps> = ({
     });
 
     return { monthly, totals };
-  }, [loans]);
+  }, [cashMovements, loans]);
 
   // Calculos Financeiros
   const totalAportes = cashMovements
@@ -785,6 +792,18 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const handleCloseMonth = async (data: MonthlyData) => {
+    if (isMonthClosed(data.key)) {
+      showToast('Este mes ja esta fechado', 'error');
+      return;
+    }
+    if (!canCloseMonth(data.key)) {
+      showToast('O mes atual so pode ser fechado depois que terminar', 'error');
+      return;
+    }
+    if (!window.confirm(
+      `Fechar definitivamente a competencia ${data.key}? Os valores ficarao congelados para auditoria.`,
+    )) return;
+
     setClosingMonth(data.key);
     try {
       const fiscalMetrics = fiscalData.monthly[data.key] || {
@@ -1109,10 +1128,17 @@ const Reports: React.FC<ReportsProps> = ({
                       <button
                         type="button"
                         onClick={() => { void handleCloseMonth(data); }}
-                        disabled={closingMonth === data.key}
+                        disabled={closingMonth === data.key || isMonthClosed(data.key) || !canCloseMonth(data.key)}
+                        title={!canCloseMonth(data.key) ? 'O mes atual so pode ser fechado apos o termino' : undefined}
                         className="px-5 py-3 bg-zinc-900 border border-zinc-800 text-[#BF953F] rounded-2xl font-black uppercase text-[9px] tracking-widest hover:border-[#BF953F]/50 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                       >
-                        {closingMonth === data.key ? 'Fechando...' : 'Fechar Mês'}
+                        {closingMonth === data.key
+                          ? 'Fechando...'
+                          : isMonthClosed(data.key)
+                            ? 'Mes fechado'
+                            : canCloseMonth(data.key)
+                              ? 'Fechar Mes'
+                              : 'Mes em andamento'}
                       </button>
                     </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -1215,7 +1241,7 @@ const Reports: React.FC<ReportsProps> = ({
                               boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)'
                             }}
                             itemStyle={{ fontSize: '10px', fontWeight: 900, textTransform: 'uppercase', padding: '2px 0' }}
-                            formatter={(value: number) => [`R$ ${value.toLocaleString('pt-BR')}`, '']}
+                            formatter={(value) => [formatChartCurrency(value), '']}
                           />
                           <Legend 
                             verticalAlign="top" 
@@ -1228,7 +1254,7 @@ const Reports: React.FC<ReportsProps> = ({
                             <LabelList 
                               dataKey="entradas" 
                               position="top" 
-                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
+                              formatter={formatChartCurrency}
                               style={{ fill: '#10b981', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
@@ -1236,7 +1262,7 @@ const Reports: React.FC<ReportsProps> = ({
                             <LabelList
                               dataKey="recebimentosPrevistos"
                               position="top"
-                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
+                              formatter={formatChartCurrency}
                               style={{ fill: '#38bdf8', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
@@ -1244,7 +1270,7 @@ const Reports: React.FC<ReportsProps> = ({
                             <LabelList 
                               dataKey="saidas" 
                               position="top" 
-                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
+                              formatter={formatChartCurrency}
                               style={{ fill: '#ef4444', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
@@ -1252,7 +1278,7 @@ const Reports: React.FC<ReportsProps> = ({
                             <LabelList 
                               dataKey="lucro" 
                               position="top" 
-                              formatter={(v: number) => v > 0 ? `R$ ${v.toLocaleString('pt-BR')}` : ''}
+                              formatter={formatChartCurrency}
                               style={{ fill: '#BF953F', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>

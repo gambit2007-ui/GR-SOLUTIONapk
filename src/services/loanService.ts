@@ -6,13 +6,19 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Installment, Loan, LoanDraft, LoanType, MovementType } from '../types';
-import type { LoanPaymentRequest, LoanPaymentResult } from '../types';
+import type {
+  CreatedLoanResult,
+  LoanPaymentRequest,
+  LoanPaymentResult,
+  LoanPaymentReversalRequest,
+  LoanPaymentReversalResult,
+} from '../types';
 import { appendCashMovementInTransaction, MovementActor, readCashBalanceInTransaction } from './cashService';
-import { deleteLoansAndLinkedMovements } from './loanCleanup';
 import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
 import { parseLoan, parseMovementType } from '../utils/domainParsers';
-import { applyLoanPaymentToCurrentLoan } from '../utils/financialEngine';
+import { applyLoanPaymentToCurrentLoan, reverseLatestInstallmentPayment } from '../utils/financialEngine';
 import { parseFeeSettings } from './settingsService';
+import { normalizeLoanStatus } from '../utils/loanCompat';
 
 export interface LoanMovementPayload {
   type: MovementType;
@@ -112,12 +118,12 @@ const enrichPriceInstallments = (loanDraft: LoanDraft): LoanDraft => {
   };
 };
 
-export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): Promise<string> => {
+export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): Promise<CreatedLoanResult> => {
   const normalizedLoanDraft = enrichPriceInstallments(loanDraft);
   const safeLoanData = sanitizeFirestorePayload(normalizedLoanDraft);
   const amount = Number(normalizedLoanDraft.amount || 0);
 
-  const createdLoanId = await runTransaction(db, async (tx) => {
+  const createdLoan = await runTransaction(db, async (tx) => {
     const loanRef = doc(collection(db, 'loans'));
     const contractCounterRef = doc(db, 'settings', 'contractCounter');
     const counterSnapshot = await tx.get(contractCounterRef);
@@ -147,10 +153,10 @@ export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): P
       updatedAt: serverTimestamp(),
     }, { merge: true });
 
-    return loanRef.id;
+    return { id: loanRef.id, contractNumber: String(contractNumber) };
   });
 
-  return createdLoanId;
+  return createdLoan;
 };
 
 export const updateLoan = async (loanId: string, payload: Partial<Loan>) => {
@@ -158,6 +164,23 @@ export const updateLoan = async (loanId: string, payload: Partial<Loan>) => {
     const loanRef = doc(db, 'loans', loanId);
     const currentSnapshot = await tx.get(loanRef);
     if (!currentSnapshot.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
+    const currentLoan = parseLoan(currentSnapshot.id, currentSnapshot.data());
+    const currentStatus = normalizeLoanStatus(currentLoan.status);
+    const requestedStatus = payload.status === undefined ? currentStatus : normalizeLoanStatus(payload.status);
+    if (currentStatus === 'CANCELLED' && requestedStatus !== 'CANCELLED') {
+      throw new Error('CONTRATO_CANCELADO_NAO_PODE_SER_REATIVADO');
+    }
+    if (currentStatus !== 'CANCELLED' && requestedStatus === 'CANCELLED') {
+      throw new Error('USE_CANCELAMENTO_AUDITAVEL');
+    }
+    const hasFinancialHistory = currentLoan.installments.some((installment) => (
+      Number(installment.paidAmount || installment.partialPaid || 0) > 0 ||
+      Boolean(installment.paymentBreakdown) ||
+      (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
+    ));
+    if (hasFinancialHistory && payload.installments !== undefined) {
+      throw new Error('CRONOGRAMA_COM_PAGAMENTOS_IMUTAVEL');
+    }
     const currentAmount = round2(Number(currentSnapshot.data().amount || 0));
     if (payload.amount !== undefined && round2(Number(payload.amount || 0)) !== currentAmount) {
       throw new Error('VALOR_PRINCIPAL_IMUTAVEL');
@@ -167,6 +190,36 @@ export const updateLoan = async (loanId: string, payload: Partial<Loan>) => {
       ...payload,
       amount: currentAmount,
       version: currentVersion + 1,
+      updatedAt: serverTimestamp(),
+    }));
+  });
+};
+
+export const cancelLoan = async (
+  loanId: string,
+  actor?: MovementActor,
+  reason = 'Cancelado pelo usuario',
+): Promise<void> => {
+  const cancellationReason = String(reason || '').trim();
+  if (!cancellationReason) throw new Error('MOTIVO_CANCELAMENTO_OBRIGATORIO');
+
+  await runTransaction(db, async (tx) => {
+    const loanRef = doc(db, 'loans', loanId);
+    const loanSnapshot = await tx.get(loanRef);
+    if (!loanSnapshot.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
+    const currentLoan = parseLoan(loanSnapshot.id, loanSnapshot.data());
+    const currentStatus = normalizeLoanStatus(currentLoan.status);
+    if (currentStatus === 'CANCELLED') return;
+    if (currentStatus === 'COMPLETED') throw new Error('CONTRATO_QUITADO_NAO_PODE_SER_CANCELADO');
+
+    tx.update(loanRef, sanitizeFirestorePayload({
+      status: 'CANCELADO',
+      cancellationReason,
+      canceledAt: serverTimestamp(),
+      canceledByUid: actor?.uid || undefined,
+      canceledByEmail: actor?.email?.toLowerCase() || undefined,
+      canceledByName: actor?.displayName || undefined,
+      version: Math.max(0, Math.trunc(Number(currentLoan.version || 0))) + 1,
       updatedAt: serverTimestamp(),
     }));
   });
@@ -279,6 +332,7 @@ export const applyLoanPayment = async (
       description: paymentLabel,
       loanId,
       operationId,
+      discountApplied: output.discountApplied,
       actor,
     }, { currentCashBalance: saldoAtual, movementId: operationId });
 
@@ -303,6 +357,67 @@ export const applyLoanPayment = async (
   });
 };
 
-export const deleteLoan = async (loanId: string) => {
-  await deleteLoansAndLinkedMovements([loanId]);
+export const reverseLoanPayment = async (
+  loanId: string,
+  request: LoanPaymentReversalRequest,
+  actor?: MovementActor,
+): Promise<LoanPaymentReversalResult> => {
+  const operationId = normalizeOperationId(request.operationId);
+
+  return runTransaction(db, async (tx) => {
+    const loanRef = doc(db, 'loans', loanId);
+    const movementRef = doc(db, 'cashMovement', operationId);
+    const feeSettingsRef = doc(db, 'settings', 'fees');
+    const existingMovement = await tx.get(movementRef);
+    if (existingMovement.exists()) {
+      const existing = existingMovement.data();
+      if (String(existing.loanId || '') !== loanId || String(existing.operationId || '') !== operationId) {
+        throw new Error('OPERACAO_ID_CONFLITANTE');
+      }
+      return {
+        operationId,
+        reversedAmount: round2(Number(existing.amount || existing.value || 0)),
+        duplicate: true,
+      };
+    }
+
+    const loanSnapshot = await tx.get(loanRef);
+    if (!loanSnapshot.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
+    const feeSettingsSnapshot = await tx.get(feeSettingsRef);
+    const currentCashBalance = await readCashBalanceInTransaction(tx);
+    const currentLoan = parseLoan(loanSnapshot.id, loanSnapshot.data());
+    const feeSettings = feeSettingsSnapshot.exists()
+      ? parseFeeSettings(feeSettingsSnapshot.data())
+      : parseFeeSettings({});
+    const processedAt = new Date().toISOString();
+    const output = reverseLatestInstallmentPayment(
+      currentLoan,
+      request.installmentIndex,
+      operationId,
+      processedAt,
+      feeSettings.dailyLateFeeRate,
+    );
+
+    await appendCashMovementInTransaction(tx, {
+      type: 'ESTORNO',
+      amount: output.reversedAmount,
+      description: `ESTORNO PARCELA ${currentLoan.installments[request.installmentIndex]?.number || request.installmentIndex + 1}: ${currentLoan.customerName}`,
+      loanId,
+      operationId,
+      actor,
+    }, { currentCashBalance, movementId: operationId });
+
+    tx.update(loanRef, sanitizeFirestorePayload({
+      installments: output.loan.installments,
+      status: output.loan.status,
+      version: output.loan.version,
+      updatedAt: serverTimestamp(),
+    }));
+
+    return {
+      operationId,
+      reversedAmount: output.reversedAmount,
+      duplicate: false,
+    };
+  });
 };

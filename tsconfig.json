@@ -11,12 +11,14 @@
     ],
     "skipLibCheck": true,
     "types": [
-      "node"
+      "node",
+      "react",
+      "react-dom"
     ],
     "moduleResolution": "bundler",
     "isolatedModules": true,
     "moduleDetection": "force",
-    "allowJs": true,
+    "allowJs": false,
     "jsx": "react-jsx",
     "paths": {
       "@/*": [
@@ -24,6 +26,7 @@
       ]
     },
     "allowImportingTsExtensions": true,
+    "strict": true,
     "noEmit": true
   },
   "include": [

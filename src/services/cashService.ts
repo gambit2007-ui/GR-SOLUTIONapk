@@ -27,6 +27,7 @@ export interface CashMovementPayload {
   loanId?: string;
   actor?: MovementActor;
   operationId?: string;
+  discountApplied?: number;
 }
 
 const caixaRef = doc(db, 'settings', 'caixa');
@@ -88,6 +89,7 @@ export const appendCashMovementInTransaction = async (
       : undefined,
     loanId: payload.loanId,
     operationId: payload.operationId,
+    discountApplied: payload.discountApplied,
     ...buildMovementActorPayload(payload.actor),
   };
   const sanitizedMovement = sanitizeFirestorePayload(movement);

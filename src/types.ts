@@ -59,6 +59,7 @@ export interface CashMovement {
   createdByEmail?: string;
   createdByName?: string;
   operationId?: string;
+  discountApplied?: number;
   recordedAt?: FirestoreTimestampLike | Date | number | string;
   value?: number;
 }
@@ -225,6 +226,11 @@ export interface Loan {
   fiscalPaymentEntries?: InstallmentPaymentEntry[];
   version?: number;
   updatedAt?: FirestoreTimestampLike | Date | number | string;
+  canceledAt?: FirestoreTimestampLike | Date | number | string;
+  canceledByUid?: string;
+  canceledByEmail?: string;
+  canceledByName?: string;
+  cancellationReason?: string;
 }
 
 export type PaymentApplyMode =
@@ -249,6 +255,22 @@ export interface LoanPaymentResult {
   unappliedAmount: number;
   discountApplied: number;
   duplicate: boolean;
+}
+
+export interface LoanPaymentReversalRequest {
+  operationId: string;
+  installmentIndex: number;
+}
+
+export interface LoanPaymentReversalResult {
+  operationId: string;
+  reversedAmount: number;
+  duplicate: boolean;
+}
+
+export interface CreatedLoanResult {
+  id: string;
+  contractNumber: string;
 }
 
 export type LoanDraft = Omit<Loan, 'id' | 'createdAt'>;

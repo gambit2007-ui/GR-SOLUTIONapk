@@ -1,17 +1,17 @@
 ﻿import React, { useState } from 'react';
 import {
+  CreatedLoanResult,
   Customer,
   Loan,
   LoanDraft,
   Installment,
-  InstallmentPaymentEntry,
   LoanPaymentRequest,
   LoanPaymentResult,
-  LoanType,
+  LoanPaymentReversalRequest,
+  LoanPaymentReversalResult,
   PaymentApplyMode,
-  PaymentBreakdown,
 } from '../../types';
-import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Trash2, Ban, FileDown } from 'lucide-react';
+import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown } from 'lucide-react';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -21,7 +21,6 @@ import {
   normalizeLoanStatus,
 } from '../../utils/loanCompat';
 import { buildInstallmentDueDate, getLocalISODate } from '../../utils/dateTime';
-import { buildPaymentBreakdown } from '../../utils/paymentBreakdown';
 import { calculateInstallmentLateFee } from '../../utils/lateFee';
 import {
   buildEarlySettlementQuote,
@@ -40,9 +39,9 @@ interface LoanSectionProps {
   customers: Customer[];
   loans: Loan[];
   isLoadingCustomers?: boolean;
-  onAddLoan: (draft: LoanDraft) => Promise<string | void> | void;
+  onAddLoan: (draft: LoanDraft) => Promise<CreatedLoanResult>;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
-  onDeleteLoan: (loanId: string) => Promise<void>;
+  onCancelLoan: (loanId: string, reason: string) => Promise<void>;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   initialExpandedLoanId?: string | null;
   currentActor?: {
@@ -59,6 +58,10 @@ interface LoanSectionProps {
     description: string
   ) => Promise<void>;
   onApplyLoanPayment: (loanId: string, request: LoanPaymentRequest) => Promise<LoanPaymentResult>;
+  onReverseLoanPayment: (
+    loanId: string,
+    request: LoanPaymentReversalRequest,
+  ) => Promise<LoanPaymentReversalResult>;
 }
 
 interface PaymentModalState {
@@ -89,13 +92,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   isLoadingCustomers = false,
   onAddLoan, 
   onUpdateLoan,
-  onDeleteLoan,
+  onCancelLoan,
   showToast, 
   initialExpandedLoanId,
   currentActor,
   dailyLateFeeRate,
   onUpdateLoanAndAddTransaction,
   onApplyLoanPayment,
+  onReverseLoanPayment,
 }) => {
   const buildDefaultFormData = () => ({
     customerId: '',
@@ -274,116 +278,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     return getInstallmentOutstanding(inst, new Date(), dailyLateFeeRate).total;
   };
 
-  const resolveLoanTypeForFiscal = (loan: Loan): LoanType =>
-    fromLegacyInterestType(loan.interestType) === 'PRICE' ? 'PRICE' : 'SIMPLE';
-
   const resolveLoanTotalReceivable = (loan: Loan): number => {
-    const installmentsTotal = (Array.isArray(loan.installments) ? loan.installments : []).reduce(
-      (sum, installment) => sum + installmentAmount(installment),
-      0,
+    const installmentsTotal = (Array.isArray(loan.installments) ? loan.installments : [])
+      .reduce((sum, installment) => sum + installmentAmount(installment), 0);
+    return roundMoney(
+      installmentsTotal || Number(loan.totalToReturn || 0) || Number(loan.amount || 0),
     );
-
-    if (installmentsTotal > 0) {
-      return roundMoney(installmentsTotal);
-    }
-
-    const fallbackTotal = Number(loan.totalToReturn || 0);
-    if (Number.isFinite(fallbackTotal) && fallbackTotal > 0) {
-      return roundMoney(fallbackTotal);
-    }
-
-    return roundMoney(Number(loan.amount || 0));
-  };
-
-  const mergeInstallmentBreakdown = (
-    previous: PaymentBreakdown | undefined,
-    current: PaymentBreakdown,
-  ): PaymentBreakdown => ({
-    principalPaid: roundMoney(Number(previous?.principalPaid || 0) + Number(current.principalPaid || 0)),
-    interestPaid: roundMoney(Number(previous?.interestPaid || 0) + Number(current.interestPaid || 0)),
-    lateFeePaid: roundMoney(Number(previous?.lateFeePaid || 0) + Number(current.lateFeePaid || 0)),
-    serviceFeePaid: roundMoney(Number(previous?.serviceFeePaid || 0) + Number(current.serviceFeePaid || 0)),
-    discountApplied: roundMoney(Number(previous?.discountApplied || 0) + Number(current.discountApplied || 0)),
-    totalPaid: roundMoney(Number(previous?.totalPaid || 0) + Number(current.totalPaid || 0)),
-  });
-
-  const buildInstallmentPaymentEntry = (
-    kind: 'PAYMENT' | 'REVERSAL',
-    recordedAt: string,
-    breakdown: PaymentBreakdown,
-  ): InstallmentPaymentEntry => ({
-    id: `ipe-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`,
-    recordedAt,
-    kind,
-    principalPaid: roundMoney(Number(breakdown.principalPaid || 0)),
-    interestPaid: roundMoney(Number(breakdown.interestPaid || 0)),
-    lateFeePaid: roundMoney(Number(breakdown.lateFeePaid || 0)),
-    serviceFeePaid: roundMoney(Number(breakdown.serviceFeePaid || 0)),
-    discountApplied: roundMoney(Number(breakdown.discountApplied || 0)),
-    totalPaid: roundMoney(Number(breakdown.totalPaid || 0)),
-  });
-
-  const appendInstallmentPaymentEntry = (
-    installment: Installment,
-    entry: InstallmentPaymentEntry,
-  ): Installment => ({
-    ...installment,
-    paymentEntries: [...(Array.isArray(installment.paymentEntries) ? installment.paymentEntries : []), entry],
-  });
-
-  const negatePaymentBreakdown = (breakdown: PaymentBreakdown): PaymentBreakdown => ({
-    principalPaid: roundMoney(-Number(breakdown.principalPaid || 0)),
-    interestPaid: roundMoney(-Number(breakdown.interestPaid || 0)),
-    lateFeePaid: roundMoney(-Number(breakdown.lateFeePaid || 0)),
-    serviceFeePaid: roundMoney(-Number(breakdown.serviceFeePaid || 0)),
-    discountApplied: roundMoney(-Number(breakdown.discountApplied || 0)),
-    totalPaid: roundMoney(-Number(breakdown.totalPaid || 0)),
-  });
-
-  const applyInstallmentFiscalBreakdown = (
-    loan: Loan,
-    installment: Installment,
-    paymentAmount: number,
-    lateFeePaid = 0,
-    serviceFeePaid = 0,
-    discountApplied = 0,
-  ) => {
-    const paymentValue = roundMoney(paymentAmount);
-    if (!Number.isFinite(paymentValue) || paymentValue <= 0) {
-      return {
-        installment,
-        breakdownResult: null,
-      };
-    }
-
-    const breakdownResult = buildPaymentBreakdown({
-      loan: {
-        id: loan.id,
-        type: resolveLoanTypeForFiscal(loan),
-        totalAmount: Number(loan.amount || 0),
-        totalReceivable: resolveLoanTotalReceivable(loan),
-      },
-      installment: {
-        id: installment.id,
-        amount: installmentAmount(installment),
-        expectedPrincipal: installment.expectedPrincipal,
-        expectedInterest: installment.expectedInterest,
-      },
-      paidAmount: paymentValue,
-      lateFeePaid,
-      serviceFeePaid,
-      discountApplied,
-    });
-
-    const mergedBreakdown = mergeInstallmentBreakdown(installment.paymentBreakdown, breakdownResult);
-    return {
-      installment: {
-        ...installment,
-        paymentBreakdown: mergedBreakdown,
-        needsFiscalReview: installment.needsFiscalReview || breakdownResult.needsFiscalReview || undefined,
-      },
-      breakdownResult,
-    };
   };
 
   const filteredLoans = loans.filter(loan => {
@@ -430,7 +330,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const paymentModalOutstandingTotal = paymentModalLoan
     ? getOutstandingFromInstallmentIndex(
         Array.isArray(paymentModalLoan.installments) ? paymentModalLoan.installments : [],
-        paymentModal.installmentIndex,
+        paymentModal?.installmentIndex ?? 0,
         true,
       )
     : 0;
@@ -486,6 +386,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           number: i,
           dueDate: buildDueDate(i),
           amount: Number(installmentAmount.toFixed(2)),
+          expectedPrincipal: i === count ? Number(amount.toFixed(2)) : 0,
+          expectedInterest: Number((installmentAmount - (i === count ? amount : 0)).toFixed(2)),
           paidAmount: 0,
           status: 'PENDENTE'
         });
@@ -582,26 +484,25 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       showToast('Contrato ja esta cancelado', 'error');
       return;
     }
-    if (!window.confirm(`Deseja cancelar o contrato ${loan.id}?`)) return;
-
-    try {
-      await onUpdateLoan(loan.id, { status: 'CANCELADO' });
-      showToast('Contrato cancelado com sucesso!', 'success');
-    } catch (e) {
-      showToast('Erro ao cancelar contrato', 'error');
+    if (effectiveLoanStatus(loan) === 'COMPLETED') {
+      showToast('Contrato quitado nao pode ser cancelado', 'error');
+      return;
     }
-  };
-
-  const handleDeleteLoan = async (loan: Loan) => {
-    if (!window.confirm(`Deseja excluir o contrato ${loan.id}? Esta acao nao pode ser desfeita.`)) return;
+    const reason = window.prompt(
+      `Informe o motivo do cancelamento do contrato ${loan.contractNumber || loan.id}:`,
+      'Cancelamento solicitado pelo usuario',
+    );
+    if (reason === null) return;
+    if (!reason.trim()) {
+      showToast('Informe o motivo do cancelamento', 'error');
+      return;
+    }
+    if (!window.confirm('Confirmar cancelamento? O historico financeiro sera preservado.')) return;
 
     try {
-      await onDeleteLoan(loan.id);
-      if (expandedLoanId === loan.id) {
-        setExpandedLoanId(null);
-      }
-    } catch (e) {
-      showToast('Erro ao excluir contrato', 'error');
+      await onCancelLoan(loan.id, reason.trim());
+    } catch (error) {
+      showToast('Erro ao cancelar contrato', 'error');
     }
   };
 
@@ -900,6 +801,18 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           showToast('Contrato nao encontrado para atualizacao', 'error');
           return;
         }
+        const hasFinancialHistory = currentLoan.installments.some((installment) => (
+          installmentPaidAmount(installment) > 0 ||
+          Boolean(installment.paymentBreakdown) ||
+          (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
+        ));
+        if (hasFinancialHistory) {
+          showToast(
+            'Contrato com pagamentos nao pode ter as condicoes financeiras alteradas. Gere o PDF atualizado sem editar o cronograma.',
+            'error',
+          );
+          return;
+        }
 
         const updatedPayload: Partial<Loan> = {
           ...payload,
@@ -944,11 +857,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           notes: '',
           installments: payload.installments || [],
         };
-        const createdLoanId = await Promise.resolve(onAddLoan(newLoan));
+        const createdLoan = await onAddLoan(newLoan);
         try {
           const loanForPdf: Loan = {
             ...newLoan,
-            id: createdLoanId || String(newLoan.contractNumber || Date.now()),
+            id: createdLoan?.id || String(newLoan.contractNumber || Date.now()),
+            contractNumber: createdLoan?.contractNumber || newLoan.contractNumber,
             createdAt: Date.now(),
           };
           const { generateContractPDF } = await import('../../utils/contractGenerator');
@@ -1063,55 +977,29 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   };
 
   const handleReverseInstallment = async (loan: Loan, index: number) => {
-    const newInstallments = [...loan.installments];
-    const inst = { ...newInstallments[index] };
-    const amountToReverse = Number(inst.lastPaidValue ?? installmentPaidAmount(inst));
-
+    const installment = loan.installments[index];
+    const amountToReverse = Number(installment?.lastPaidValue ?? installmentPaidAmount(installment));
     if (amountToReverse <= 0) return;
+    if (!window.confirm(
+      `Estornar somente o ultimo pagamento de R$ ${amountToReverse.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} desta parcela?`,
+    )) return;
 
-    const reversalTimestamp = new Date().toISOString();
-    const legacyPaymentTimestamp = inst.paidAt || inst.paymentDate || inst.lastPaymentDate;
-    const seededLegacyEntries =
-      !Array.isArray(inst.paymentEntries) || inst.paymentEntries.length === 0
-        ? (
-            inst.paymentBreakdown && legacyPaymentTimestamp
-              ? [buildInstallmentPaymentEntry('PAYMENT', legacyPaymentTimestamp, inst.paymentBreakdown)]
-              : []
-          )
-        : inst.paymentEntries;
-    const reversalEntry = inst.paymentBreakdown
-      ? buildInstallmentPaymentEntry('REVERSAL', reversalTimestamp, negatePaymentBreakdown(inst.paymentBreakdown))
-      : null;
-
-    inst.paidAmount = 0;
-    inst.partialPaid = 0;
-    inst.status = 'PENDENTE';
-    inst.paymentDate = undefined;
-    inst.lastPaymentDate = undefined;
-    inst.lastPaidValue = undefined;
-    inst.paymentBreakdown = undefined;
-    inst.paymentEntries = reversalEntry
-      ? [...seededLegacyEntries, reversalEntry]
-      : seededLegacyEntries.length > 0
-        ? seededLegacyEntries
-        : undefined;
-    inst.needsFiscalReview = undefined;
-    newInstallments[index] = inst;
+    const operationId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? `reversal-${crypto.randomUUID()}`
+      : `reversal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const processingKey = `${loan.id}-${index}`;
+    setProcessingPayment(processingKey);
 
     try {
-      await onUpdateLoanAndAddTransaction(
-        loan.id,
-        { 
-          installments: newInstallments,
-          status: 'ATIVO' // Always active if we are reversing a payment
-        },
-        'ESTORNO',
-        amountToReverse,
-        `ESTORNO PARCELA ${inst.number}: ${loan.customerName}`
+      const result = await onReverseLoanPayment(loan.id, { operationId, installmentIndex: index });
+      showToast(
+        result.duplicate ? 'Estorno ja estava processado.' : 'Ultimo pagamento estornado!',
+        'success',
       );
-      showToast('Pagamento estornado!', 'success');
-    } catch (e) {
+    } catch (error) {
       showToast('Erro ao estornar pagamento', 'error');
+    } finally {
+      setProcessingPayment(null);
     }
   };
 
@@ -1208,6 +1096,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           const loanInstallments = Array.isArray(loan.installments) ? loan.installments : [];
           const resolvedLoanStatus = effectiveLoanStatus(loan);
           const paidInstallmentsCount = loanInstallments.filter((inst) => normalizeInstallmentStatus(inst.status) === 'PAID').length;
+          const hasFinancialHistory = loanInstallments.some((installment) => (
+            installmentPaidAmount(installment) > 0 ||
+            Boolean(installment.paymentBreakdown) ||
+            (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
+          ));
           const totalInstallmentsCount = loanInstallmentsCount(loan);
           const totalReceivableAmount = resolveLoanTotalReceivable(loan);
           const totalRemainingLoanAmount = Number(
@@ -1347,8 +1240,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     e.stopPropagation();
                     openEditLoanModal(loan);
                   }}
-                  className="h-[42px] w-[42px] shrink-0 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-black transition-all flex items-center justify-center"
-                  title="Editar contrato"
+                  disabled={hasFinancialHistory}
+                  className="h-[42px] w-[42px] shrink-0 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-black transition-all flex items-center justify-center disabled:bg-zinc-900 disabled:text-zinc-700 disabled:cursor-not-allowed"
+                  title={hasFinancialHistory ? 'Condicoes financeiras bloqueadas apos o primeiro pagamento' : 'Editar contrato'}
                 >
                   <Pencil size={16} />
                 </button>
@@ -1358,24 +1252,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     handleCancelLoan(loan);
                   }}
                   className={`h-[42px] w-[42px] shrink-0 rounded-xl transition-all flex items-center justify-center ${
-                    normalizeLoanStatus(loan.status) === 'CANCELLED'
+                    resolvedLoanStatus !== 'ACTIVE'
                       ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                       : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-black'
                   }`}
-                  title="Cancelar contrato"
-                  disabled={normalizeLoanStatus(loan.status) === 'CANCELLED'}
+                  title={resolvedLoanStatus === 'COMPLETED' ? 'Contrato quitado nao pode ser cancelado' : 'Cancelar contrato'}
+                  disabled={resolvedLoanStatus !== 'ACTIVE'}
                 >
                   <Ban size={16} />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteLoan(loan);
-                  }}
-                  className="h-[42px] w-[42px] shrink-0 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-black transition-all flex items-center justify-center"
-                  title="Excluir contrato"
-                >
-                  <Trash2 size={16} />
                 </button>
                 <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase ${
                   resolvedLoanStatus === 'ACTIVE' 
@@ -1394,6 +1278,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
             {expandedLoanId === loan.id && Array.isArray(loan.installments) && (
               <div className="px-6 pb-6 border-t border-zinc-900 animate-in slide-in-from-top duration-300">
+                {resolvedLoanStatus === 'CANCELLED' && loan.cancellationReason && (
+                  <div className="mt-6 rounded-2xl border border-amber-500/20 bg-amber-500/5 px-4 py-3">
+                    <p className="text-[8px] font-black uppercase tracking-widest text-amber-500">Cancelamento auditado</p>
+                    <p className="mt-1 text-[9px] text-zinc-400">
+                      {loan.cancellationReason}{loan.canceledByName ? ` - ${loan.canceledByName}` : ''}
+                    </p>
+                  </div>
+                )}
                 <div className="pt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {loan.installments.map((inst, idx) => {
                     if (!inst) return null;
@@ -2173,14 +2065,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     <div className="text-right">
                       <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Total de Juros</p>
                       <p className="text-sm font-black text-[#BF953F]">
-                        R$ {(calculateInstallments().reduce((acc, curr) => acc + curr.amount, 0) - Number(formData.amount)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        R$ {(calculateInstallments().reduce((acc, curr) => acc + installmentAmount(curr), 0) - Number(formData.amount)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </p>
                     </div>
                   </div>
                   <div className="pt-3 border-t border-zinc-800">
                     <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest mb-1">Total a Pagar</p>
                     <p className="text-lg font-black text-emerald-500">
-                      R$ {calculateInstallments().reduce((acc, curr) => acc + curr.amount, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                      R$ {calculateInstallments().reduce((acc, curr) => acc + installmentAmount(curr), 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                     </p>
                   </div>
                 </div>

@@ -11,6 +11,7 @@ import {
 import { db } from '../firebase';
 import type { MonthlySnapshot } from '../types';
 import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
+import { canCloseMonth } from '../utils/dateTime';
 
 export type MonthlySnapshotInput = Omit<MonthlySnapshot, 'id' | 'createdAt' | 'updatedAt'>;
 
@@ -95,6 +96,7 @@ export const parseMonthlySnapshot = (id: string, raw: unknown): MonthlySnapshot 
 };
 
 export const saveMonthlySnapshot = async (snapshot: MonthlySnapshot): Promise<void> => {
+  if (!canCloseMonth(snapshot.month)) throw new Error('MES_ATUAL_OU_FUTURO_NAO_PODE_SER_FECHADO');
   const snapshotRef = doc(db, 'monthlySnapshots', snapshot.month);
   const { id: _id, ...snapshotPayload } = snapshot;
   await runTransaction(db, async (tx) => {

@@ -5,9 +5,10 @@ import {
   applyLoanPaymentToCurrentLoan,
   buildEarlySettlementQuote,
   getInstallmentOutstanding,
+  reverseLatestInstallmentPayment,
 } from '../financialEngine';
 import { calculateInstallmentLateFee } from '../lateFee';
-import { buildPriceBreakdown } from '../paymentBreakdown';
+import { buildPaymentBreakdown, buildPriceBreakdown } from '../paymentBreakdown';
 
 const buildLoan = (installments: Installment[], overrides: Partial<Loan> = {}): Loan => ({
   id: 'loan-1',
@@ -154,5 +155,72 @@ describe('motor financeiro', () => {
       applyMode: 'INSTALLMENTS',
       processedAt: '2026-08-19T12:01:00.000Z',
     }, 0)).toThrow('SEM_SALDO_PENDENTE');
+  });
+
+  it('aloca parcela SPLIT sem amortizar principal antes da parcela final', () => {
+    const breakdown = buildPaymentBreakdown({
+      loan: { id: 'split-1', type: 'SPLIT', totalAmount: 1000, totalReceivable: 1150 },
+      installment: { amount: 50, expectedPrincipal: 0, expectedInterest: 50 },
+      paidAmount: 50,
+    });
+
+    expect(breakdown.interestPaid).toBe(50);
+    expect(breakdown.principalPaid).toBe(0);
+  });
+
+  it('quita contrato quando o abatimento com redistribuicao zera o saldo', () => {
+    const loan = buildLoan([
+      { number: 1, amount: 110, expectedPrincipal: 100, expectedInterest: 10, dueDate: '2026-09-01', status: 'PENDENTE' },
+    ]);
+    const result = applyLoanPaymentToCurrentLoan(loan, {
+      operationId: 'redistribution-payoff',
+      amount: 110,
+      installmentIndex: 0,
+      applyMode: 'REDISTRIBUTE_BALANCE',
+      processedAt: '2026-08-19T12:00:00.000Z',
+      redistributionStartDate: '2026-09-01',
+      redistributionInstallmentsCount: 2,
+    }, 0);
+
+    expect(result.loan.status).toBe('QUITADO');
+    expect(result.loan.installments).toHaveLength(1);
+    expect(result.loan.installments[0].status).toBe('PAGO');
+  });
+
+  it('estorna somente o ultimo de dois pagamentos parciais', () => {
+    const loan = buildLoan([
+      { number: 1, amount: 110, expectedPrincipal: 100, expectedInterest: 10, dueDate: '2026-09-01', status: 'PENDENTE' },
+    ]);
+    const first = applyLoanPaymentToCurrentLoan(loan, {
+      operationId: 'partial-first',
+      amount: 50,
+      installmentIndex: 0,
+      applyMode: 'INSTALLMENTS',
+      processedAt: '2026-08-19T12:00:00.000Z',
+    }, 0);
+    const second = applyLoanPaymentToCurrentLoan(first.loan, {
+      operationId: 'partial-second',
+      amount: 60,
+      installmentIndex: 0,
+      applyMode: 'INSTALLMENTS',
+      processedAt: '2026-08-19T12:01:00.000Z',
+    }, 0);
+    const reversed = reverseLatestInstallmentPayment(
+      second.loan,
+      0,
+      'reversal-second',
+      '2026-08-19T12:02:00.000Z',
+      0,
+    );
+
+    expect(reversed.reversedAmount).toBe(60);
+    expect(reversed.loan.status).toBe('ATIVO');
+    expect(reversed.loan.installments[0].paidAmount).toBe(50);
+    expect(reversed.loan.installments[0].paymentBreakdown).toMatchObject({
+      principalPaid: 40,
+      interestPaid: 10,
+      totalPaid: 50,
+    });
+    expect(reversed.loan.installments[0].paymentEntries).toHaveLength(3);
   });
 });

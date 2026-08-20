@@ -29,13 +29,13 @@ export const normalizeLoanStatus = (status: unknown): NormalizedLoanStatus => {
 export const effectiveLoanStatus = (loan?: Partial<Loan> | null): NormalizedLoanStatus => {
   if (!loan) return 'ACTIVE';
 
-  const normalizedStatus = normalizeLoanStatus((loan as any).status);
+  const normalizedStatus = normalizeLoanStatus(loan.status);
   if (normalizedStatus === 'CANCELLED') return 'CANCELLED';
 
-  const installments = Array.isArray((loan as any).installments) ? (loan as any).installments : [];
+  const installments = Array.isArray(loan.installments) ? loan.installments : [];
   if (installments.length > 0) {
     const allPaid = installments.every(
-      (inst) => normalizeInstallmentStatus((inst as any)?.status) === 'PAID',
+      (inst) => normalizeInstallmentStatus(inst?.status) === 'PAID',
     );
     if (allPaid) return 'COMPLETED';
   }
@@ -55,23 +55,23 @@ export const normalizeInstallmentStatus = (status: unknown): NormalizedInstallme
 
 export const installmentAmount = (inst?: Partial<Installment> | null): number => {
   if (!inst) return 0;
-  const value = Number((inst as any).amount ?? (inst as any).value ?? 0);
+  const value = Number(inst.amount ?? inst.value ?? 0);
   return Number.isFinite(value) ? value : 0;
 };
 
 export const installmentPaidAmount = (inst?: Partial<Installment> | null): number => {
   if (!inst) return 0;
-  const paidAmount = Number((inst as any).paidAmount ?? 0);
-  const partialPaid = Number((inst as any).partialPaid ?? 0);
+  const paidAmount = Number(inst.paidAmount ?? 0);
+  const partialPaid = Number(inst.partialPaid ?? 0);
   const resolved = paidAmount > 0 ? paidAmount : partialPaid;
   return Number.isFinite(resolved) ? resolved : 0;
 };
 
 export const loanInstallmentsCount = (loan?: Partial<Loan> | null): number => {
   if (!loan) return 0;
-  const count = Number((loan as any).installmentsCount ?? (loan as any).installmentCount ?? 0);
+  const count = Number(loan.installmentsCount ?? loan.installmentCount ?? 0);
   if (Number.isFinite(count) && count > 0) return count;
-  const installments = Array.isArray((loan as any).installments) ? (loan as any).installments : [];
+  const installments = Array.isArray(loan.installments) ? loan.installments : [];
   return installments.length;
 };
 

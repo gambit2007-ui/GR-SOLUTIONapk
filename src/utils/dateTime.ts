@@ -6,6 +6,12 @@ export const getLocalISODate = (baseDate: Date = new Date()): string => {
   return `${year}-${month}-${day}`;
 };
 
+export const canCloseMonth = (month: string, referenceDate = new Date()): boolean => {
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) return false;
+  const currentMonth = `${referenceDate.getFullYear()}-${String(referenceDate.getMonth() + 1).padStart(2, '0')}`;
+  return month < currentMonth;
+};
+
 const toLocalDateAtNoon = (value: string | Date): Date | null => {
   const date = value instanceof Date ? new Date(value) : new Date(`${value}T12:00:00`);
   return Number.isNaN(date.getTime()) ? null : date;

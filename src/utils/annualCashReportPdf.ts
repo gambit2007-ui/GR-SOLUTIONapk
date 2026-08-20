@@ -305,6 +305,14 @@ const buildMonthlySummaries = (
     closingCash: 0,
     contractsCount: 0,
   }));
+  const movementDatesByOperationId = new Map<string, string>();
+  cashMovements.forEach((movement) => {
+    const operationId = String(movement.operationId || movement.id || '').trim();
+    if (operationId && movement.date) movementDatesByOperationId.set(operationId, movement.date);
+  });
+  const resolveFiscalEntryDate = (operationId: string | undefined, fallback: string): string => (
+    operationId ? movementDatesByOperationId.get(operationId) || fallback : fallback
+  );
 
   cashMovements.forEach((movement) => {
     const date = toDate(movement.date);
@@ -361,7 +369,7 @@ const buildMonthlySummaries = (
       const entries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
       if (entries.length > 0) {
         entries.forEach((entry) => {
-          const monthKey = makeMonthKeyFromValue(entry.recordedAt);
+          const monthKey = makeMonthKeyFromValue(resolveFiscalEntryDate(entry.operationId, entry.recordedAt));
           if (!monthKey) return;
           const [entryYear, entryMonth] = monthKey.split('-').map(Number);
           if (entryYear !== year) return;
@@ -409,7 +417,7 @@ const buildMonthlySummaries = (
     });
 
     (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
-      const monthKey = makeMonthKeyFromValue(entry.recordedAt);
+      const monthKey = makeMonthKeyFromValue(resolveFiscalEntryDate(entry.operationId, entry.recordedAt));
       if (!monthKey) return;
       const [entryYear, entryMonth] = monthKey.split('-').map(Number);
       if (entryYear !== year) return;

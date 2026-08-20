@@ -80,7 +80,49 @@ const resolveLoanTotalReceivable = (loan: Loan): number => {
   return roundMoney(installmentTotal || Number(loan.totalToReturn || 0) || Number(loan.amount || 0));
 };
 
-const isPriceLoan = (loan: Loan): boolean => String(loan.interestType || '').toUpperCase() === 'PRICE';
+const getNormalizedInterestType = (loan: Loan): 'SIMPLE' | 'PRICE' | 'SPLIT' => {
+  const normalized = String(loan.interestType || '').trim().toUpperCase();
+  if (normalized === 'PRICE') return 'PRICE';
+  if (normalized === 'SPLIT') return 'SPLIT';
+  return 'SIMPLE';
+};
+
+const isPriceLoan = (loan: Loan): boolean => getNormalizedInterestType(loan) === 'PRICE';
+const isScheduledLoan = (loan: Loan): boolean => getNormalizedInterestType(loan) !== 'SIMPLE';
+
+const resolveExpectedComposition = (
+  loan: Loan,
+  installment: Installment,
+): { principal: number | undefined; interest: number | undefined } => {
+  const expectedPrincipal = Number(installment.expectedPrincipal);
+  const expectedInterest = Number(installment.expectedInterest);
+  if (Number.isFinite(expectedPrincipal) && Number.isFinite(expectedInterest)) {
+    return {
+      principal: roundMoney(Math.max(expectedPrincipal, 0)),
+      interest: roundMoney(Math.max(expectedInterest, 0)),
+    };
+  }
+
+  if (getNormalizedInterestType(loan) !== 'SPLIT') {
+    return { principal: installment.expectedPrincipal, interest: installment.expectedInterest };
+  }
+
+  const installments = Array.isArray(loan.installments) ? loan.installments : [];
+  const lastNumber = installments.reduce(
+    (highest, item) => Math.max(highest, Number(item.number || 0)),
+    0,
+  );
+  const amount = roundMoney(installmentAmount(installment));
+  const isFinalInstallment = Number(installment.number || 0) === lastNumber;
+  const principal = isFinalInstallment
+    ? roundMoney(Math.min(Math.max(Number(loan.amount || 0), 0), amount))
+    : 0;
+
+  return {
+    principal,
+    interest: roundMoney(Math.max(amount - principal, 0)),
+  };
+};
 
 const ensureLegacyPaymentEntry = (installment: Installment): InstallmentPaymentEntry[] => {
   const entries = Array.isArray(installment.paymentEntries) ? [...installment.paymentEntries] : [];
@@ -123,19 +165,20 @@ const applyAmountToInstallment = (
   }
 
   const previousBreakdown = getInstallmentRecordedBreakdown(installment);
+  const expectedComposition = resolveExpectedComposition(loan, installment);
   const lateFeePaid = roundMoney(Math.min(appliedAmount, outstanding.lateFee));
   const breakdown = buildPaymentBreakdown({
     loan: {
       id: loan.id,
-      type: isPriceLoan(loan) ? 'PRICE' : 'SIMPLE',
+      type: getNormalizedInterestType(loan),
       totalAmount: Number(loan.amount || 0),
       totalReceivable: resolveLoanTotalReceivable(loan),
     },
     installment: {
       id: installment.id,
       amount: installmentAmount(installment),
-      expectedPrincipal: installment.expectedPrincipal,
-      expectedInterest: installment.expectedInterest,
+      expectedPrincipal: expectedComposition.principal,
+      expectedInterest: expectedComposition.interest,
     },
     paidAmount: appliedAmount,
     lateFeePaid,
@@ -376,8 +419,9 @@ export const applyLoanPaymentToCurrentLoan = (
         (totals, installment) => {
           const outstanding = getInstallmentOutstanding(installment, processedAtDate, dailyLateFeeRate);
           const paid = getInstallmentRecordedBreakdown(installment);
-          const expectedPrincipal = isPriceLoan(currentLoan)
-            ? Math.max(Number(installment.expectedPrincipal || 0) - paid.principalPaid, 0)
+          const expectedComposition = resolveExpectedComposition(currentLoan, installment);
+          const expectedPrincipal = isScheduledLoan(currentLoan)
+            ? Math.max(Number(expectedComposition.principal || 0) - paid.principalPaid, 0)
             : outstanding.base;
           const principal = roundMoney(Math.min(expectedPrincipal, outstanding.base));
           return {
@@ -388,29 +432,34 @@ export const applyLoanPaymentToCurrentLoan = (
         },
         { principal: 0, interest: 0, lateFee: 0 },
       );
-      const principalValues = splitAmountEvenly(remainingBreakdown.principal, count);
-      const interestValues = splitAmountEvenly(remainingBreakdown.interest, count);
-      const baseNumber = Number(installments[request.installmentIndex]?.number || request.installmentIndex + 1);
-      const frequency = normalizeFrequency(currentLoan);
-      const rebuilt = Array.from({ length: count }, (_, index): Installment => {
-        const principal = principalValues[index] || 0;
-        const interest = interestValues[index] || 0;
-        const amount = roundMoney(principal + interest);
-        return {
-          id: `${request.operationId}-redistributed-${index}`,
-          number: baseNumber + index,
-          amount,
-          value: amount,
-          dueDate: buildInstallmentDueDate(startDate, index, frequency) || startDate,
-          status: 'PENDENTE',
-          paidAmount: 0,
-          partialPaid: 0,
-          carriedLateFee: index === 0 && remainingBreakdown.lateFee > 0 ? remainingBreakdown.lateFee : undefined,
-          expectedPrincipal: isPriceLoan(currentLoan) ? principal : undefined,
-          expectedInterest: isPriceLoan(currentLoan) ? interest : undefined,
-        };
-      });
-      installments = [...installments.slice(0, request.installmentIndex), ...rebuilt];
+      const remainingTotal = roundMoney(
+        remainingBreakdown.principal + remainingBreakdown.interest + remainingBreakdown.lateFee,
+      );
+      if (remainingTotal > 0.01) {
+        const principalValues = splitAmountEvenly(remainingBreakdown.principal, count);
+        const interestValues = splitAmountEvenly(remainingBreakdown.interest, count);
+        const baseNumber = Number(installments[request.installmentIndex]?.number || request.installmentIndex + 1);
+        const frequency = normalizeFrequency(currentLoan);
+        const rebuilt = Array.from({ length: count }, (_, index): Installment => {
+          const principal = principalValues[index] || 0;
+          const interest = interestValues[index] || 0;
+          const amount = roundMoney(principal + interest);
+          return {
+            id: `${request.operationId}-redistributed-${index}`,
+            number: baseNumber + index,
+            amount,
+            value: amount,
+            dueDate: buildInstallmentDueDate(startDate, index, frequency) || startDate,
+            status: 'PENDENTE',
+            paidAmount: 0,
+            partialPaid: 0,
+            carriedLateFee: index === 0 && remainingBreakdown.lateFee > 0 ? remainingBreakdown.lateFee : undefined,
+            expectedPrincipal: isScheduledLoan(currentLoan) ? principal : undefined,
+            expectedInterest: isScheduledLoan(currentLoan) ? interest : undefined,
+          };
+        });
+        installments = [...installments.slice(0, request.installmentIndex), ...rebuilt];
+      }
     }
   }
 
@@ -434,5 +483,116 @@ export const applyLoanPaymentToCurrentLoan = (
     appliedAmount,
     unappliedAmount: roundMoney(Math.max(requestedAmount - appliedAmount, 0)),
     discountApplied,
+  };
+};
+
+export interface ReverseLoanPaymentOutput {
+  loan: Loan;
+  reversedAmount: number;
+}
+
+const negateBreakdown = (breakdown: PaymentBreakdown): PaymentBreakdown => ({
+  principalPaid: roundMoney(-Number(breakdown.principalPaid || 0)),
+  interestPaid: roundMoney(-Number(breakdown.interestPaid || 0)),
+  lateFeePaid: roundMoney(-Number(breakdown.lateFeePaid || 0)),
+  serviceFeePaid: roundMoney(-Number(breakdown.serviceFeePaid || 0)),
+  discountApplied: roundMoney(-Number(breakdown.discountApplied || 0)),
+  totalPaid: roundMoney(-Number(breakdown.totalPaid || 0)),
+});
+
+const entryBreakdown = (entry: InstallmentPaymentEntry): PaymentBreakdown => ({
+  principalPaid: Number(entry.principalPaid || 0),
+  interestPaid: Number(entry.interestPaid || 0),
+  lateFeePaid: Number(entry.lateFeePaid || 0),
+  serviceFeePaid: Number(entry.serviceFeePaid || 0),
+  discountApplied: Number(entry.discountApplied || 0),
+  totalPaid: Number(entry.totalPaid || 0),
+});
+
+const clampBreakdown = (breakdown: PaymentBreakdown): PaymentBreakdown => ({
+  principalPaid: roundMoney(Math.max(breakdown.principalPaid, 0)),
+  interestPaid: roundMoney(Math.max(breakdown.interestPaid, 0)),
+  lateFeePaid: roundMoney(Math.max(breakdown.lateFeePaid, 0)),
+  serviceFeePaid: roundMoney(Math.max(breakdown.serviceFeePaid, 0)),
+  discountApplied: roundMoney(Math.max(breakdown.discountApplied, 0)),
+  totalPaid: roundMoney(Math.max(breakdown.totalPaid, 0)),
+});
+
+export const reverseLatestInstallmentPayment = (
+  currentLoan: Loan,
+  installmentIndex: number,
+  operationId: string,
+  processedAt: string,
+  dailyLateFeeRate?: number,
+): ReverseLoanPaymentOutput => {
+  if (normalizeLoanStatus(currentLoan.status) === 'CANCELLED') throw new Error('CONTRATO_CANCELADO');
+  if (!operationId.trim()) throw new Error('OPERACAO_INVALIDA');
+  const processedAtDate = new Date(processedAt);
+  if (Number.isNaN(processedAtDate.getTime())) throw new Error('DATA_ESTORNO_INVALIDA');
+
+  const installments = (Array.isArray(currentLoan.installments) ? currentLoan.installments : [])
+    .map((installment) => ({ ...installment }));
+  const installment = installments[installmentIndex];
+  if (!installment) throw new Error('PARCELA_INVALIDA');
+
+  const entries = ensureLegacyPaymentEntry(installment);
+  const activePayments: InstallmentPaymentEntry[] = [];
+  entries.forEach((entry) => {
+    if (entry.kind === 'REVERSAL' || Number(entry.totalPaid || 0) < 0) {
+      activePayments.pop();
+      return;
+    }
+    if (Number(entry.totalPaid || 0) > 0) activePayments.push(entry);
+  });
+  const target = activePayments.pop();
+  if (!target) throw new Error('PAGAMENTO_NAO_ENCONTRADO');
+
+  const targetBreakdown = entryBreakdown(target);
+  const reversedAmount = roundMoney(targetBreakdown.totalPaid);
+  if (reversedAmount <= 0) throw new Error('VALOR_ESTORNO_INVALIDO');
+  const reversalBreakdown = negateBreakdown(targetBreakdown);
+  const reversalEntry: InstallmentPaymentEntry = {
+    id: `${operationId}-reversal-${installmentIndex}`,
+    operationId,
+    installmentNumber: installment.number,
+    recordedAt: processedAt,
+    kind: 'REVERSAL',
+    ...reversalBreakdown,
+  };
+  const paymentEntries = [...entries, reversalEntry];
+  const netBreakdown = clampBreakdown(
+    paymentEntries.reduce<PaymentBreakdown>((total, entry) => addBreakdowns(total, entryBreakdown(entry)), EMPTY_BREAKDOWN),
+  );
+  const lastActivePayment = activePayments[activePayments.length - 1];
+  const pendingInstallment: Installment = {
+    ...installment,
+    status: 'PENDENTE',
+    paymentEntries,
+    paymentBreakdown: netBreakdown,
+    paidAmount: netBreakdown.totalPaid,
+    partialPaid: netBreakdown.totalPaid,
+    lastPaymentDate: lastActivePayment?.recordedAt,
+    lastPaidValue: lastActivePayment ? roundMoney(Number(lastActivePayment.totalPaid || 0)) : undefined,
+    paymentDate: undefined,
+    paidAt: undefined,
+    needsFiscalReview: undefined,
+  };
+  const outstanding = getInstallmentOutstanding(pendingInstallment, processedAtDate, dailyLateFeeRate);
+  if (outstanding.total <= 0.01) {
+    pendingInstallment.status = 'PAGO';
+    pendingInstallment.partialPaid = 0;
+    pendingInstallment.paymentDate = lastActivePayment?.recordedAt;
+  }
+  installments[installmentIndex] = pendingInstallment;
+  const allPaid = installments.every((item) => normalizeInstallmentStatus(item.status) === 'PAID');
+
+  return {
+    loan: {
+      ...currentLoan,
+      installments,
+      status: allPaid ? 'QUITADO' : 'ATIVO',
+      version: Math.max(Math.trunc(Number(currentLoan.version || 0)), 0) + 1,
+    },
+    reversedAmount,
   };
 };

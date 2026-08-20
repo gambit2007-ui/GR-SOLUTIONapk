@@ -13,6 +13,13 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
+        globIgnores: [
+          '**/assets/annualCashReportPdf-*.js',
+          '**/assets/charts-vendor-*.js',
+          '**/assets/contractGenerator-*.js',
+          '**/assets/html2canvas*.js',
+          '**/assets/jspdf*.js',
+        ],
       },
       manifest: {
         name: 'GR SOLUTION',
