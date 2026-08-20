@@ -1,6 +1,15 @@
 import { useEffect, useState } from 'react';
 import { User } from 'firebase/auth';
-import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore';
+import {
+  collection,
+  doc,
+  getCountFromServer,
+  limit as queryLimit,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+} from 'firebase/firestore';
 import { db } from '../firebase';
 import { CashMovement, Customer, FeeSettings, Loan, MonthlySnapshot } from '../types';
 import { parseMonthlySnapshot } from '../services/monthlySnapshotService';
@@ -16,6 +25,10 @@ interface RealtimeDataState {
   feeSettings: FeeSettings;
   caixa: number;
   isCustomersLoading: boolean;
+  totalCustomers: number;
+  totalLoans: number;
+  hasMoreCustomers: boolean;
+  hasMoreLoans: boolean;
 }
 
 const initialState: RealtimeDataState = {
@@ -28,6 +41,10 @@ const initialState: RealtimeDataState = {
   },
   caixa: 0,
   isCustomersLoading: false,
+  totalCustomers: 0,
+  totalLoans: 0,
+  hasMoreCustomers: false,
+  hasMoreLoans: false,
 };
 
 interface UseRealtimeDataOptions {
@@ -35,6 +52,8 @@ interface UseRealtimeDataOptions {
   loadLoans?: boolean;
   loadCashMovements?: boolean;
   loadMonthlySnapshots?: boolean;
+  customersLimit?: number;
+  loansLimit?: number;
   onError?: (message: string) => void;
 }
 
@@ -54,6 +73,8 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
     loadLoans = true,
     loadCashMovements = true,
     loadMonthlySnapshots = true,
+    customersLimit,
+    loansLimit,
     onError,
   } = options;
 
@@ -63,7 +84,23 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
       return;
     }
 
+    let disposed = false;
     let clientesListener = () => {};
+    const refreshCustomerCount = () => Promise.all([
+      getCountFromServer(collection(db, 'clientes')),
+      getCountFromServer(query(collection(db, 'clientes'), where('archived', '==', true))),
+    ]).then(([totalSnapshot, archivedSnapshot]) => {
+      if (disposed) return;
+      setState((previous) => ({
+        ...previous,
+        totalCustomers: Math.max(0, totalSnapshot.data().count - archivedSnapshot.data().count),
+      }));
+    }).catch((error) => reportRealtimeError('total de clientes', error, onError));
+    const refreshLoanCount = () => getCountFromServer(collection(db, 'loans'))
+      .then((snapshot) => {
+        if (!disposed) setState((previous) => ({ ...previous, totalLoans: snapshot.data().count }));
+      })
+      .catch((error) => reportRealtimeError('total de contratos', error, onError));
 
     if (loadCustomers) {
       setState((previous) => ({
@@ -71,39 +108,55 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
         isCustomersLoading: true,
       }));
 
+      const customersQuery = Number.isInteger(customersLimit) && Number(customersLimit) > 0
+        ? query(collection(db, 'clientes'), orderBy('createdAt', 'desc'), queryLimit(Number(customersLimit) + 1))
+        : query(collection(db, 'clientes'), orderBy('createdAt', 'desc'));
+
       clientesListener = onSnapshot(
-        query(collection(db, 'clientes'), orderBy('createdAt', 'desc')),
+        customersQuery,
         (snapshot) => {
-          const clientes = snapshot.docs.map((docSnap) => parseCustomer(docSnap.id, docSnap.data()));
-          setState((previous) => ({ ...previous, clientes, isCustomersLoading: false }));
+          const hasMoreCustomers = Number.isInteger(customersLimit) && snapshot.docs.length > Number(customersLimit);
+          const visibleDocs = hasMoreCustomers ? snapshot.docs.slice(0, Number(customersLimit)) : snapshot.docs;
+          const clientes = visibleDocs
+            .map((docSnap) => parseCustomer(docSnap.id, docSnap.data()))
+            .filter((customer) => !customer.archived && !customer.archivedAt);
+          setState((previous) => ({ ...previous, clientes, hasMoreCustomers, isCustomersLoading: false }));
+          void refreshCustomerCount();
         },
         (error) => {
           reportRealtimeError('clientes', error, onError);
-          setState((previous) => ({ ...previous, clientes: [], isCustomersLoading: false }));
+          setState((previous) => ({ ...previous, clientes: [], hasMoreCustomers: false, isCustomersLoading: false }));
         },
       );
     } else {
       setState((previous) => (
         previous.clientes.length > 0 || previous.isCustomersLoading
-          ? { ...previous, clientes: [], isCustomersLoading: false }
+          ? { ...previous, clientes: [], hasMoreCustomers: false, isCustomersLoading: false }
           : previous
       ));
     }
 
+    const loansQuery = Number.isInteger(loansLimit) && Number(loansLimit) > 0
+      ? query(collection(db, 'loans'), orderBy('startDate', 'desc'), queryLimit(Number(loansLimit) + 1))
+      : query(collection(db, 'loans'), orderBy('startDate', 'desc'));
+
     const contratosListener = loadLoans
       ? onSnapshot(
-          query(collection(db, 'loans'), orderBy('startDate', 'desc')),
+          loansQuery,
           (snapshot) => {
-            const contratos = snapshot.docs.map((docSnap) => parseLoan(docSnap.id, docSnap.data()));
-            setState((previous) => ({ ...previous, contratos }));
+            const hasMoreLoans = Number.isInteger(loansLimit) && snapshot.docs.length > Number(loansLimit);
+            const visibleDocs = hasMoreLoans ? snapshot.docs.slice(0, Number(loansLimit)) : snapshot.docs;
+            const contratos = visibleDocs.map((docSnap) => parseLoan(docSnap.id, docSnap.data()));
+            setState((previous) => ({ ...previous, contratos, hasMoreLoans }));
+            void refreshLoanCount();
           },
           (error) => {
             reportRealtimeError('contratos', error, onError);
-            setState((previous) => ({ ...previous, contratos: [] }));
+            setState((previous) => ({ ...previous, contratos: [], hasMoreLoans: false }));
           },
         )
       : (() => {
-          setState((previous) => previous.contratos.length > 0 ? { ...previous, contratos: [] } : previous);
+          setState((previous) => previous.contratos.length > 0 ? { ...previous, contratos: [], hasMoreLoans: false } : previous);
           return () => {};
         })();
 
@@ -169,6 +222,7 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
         })();
 
     return () => {
+      disposed = true;
       clientesListener();
       contratosListener();
       caixaListener();
@@ -176,7 +230,7 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
       movimentacoesListener();
       monthlySnapshotsListener();
     };
-  }, [loadCashMovements, loadCustomers, loadLoans, loadMonthlySnapshots, onError, user]);
+  }, [customersLimit, loadCashMovements, loadCustomers, loadLoans, loadMonthlySnapshots, loansLimit, onError, user]);
 
   return state;
 };

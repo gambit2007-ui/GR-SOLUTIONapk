@@ -39,6 +39,9 @@ interface LoanSectionProps {
   customers: Customer[];
   loans: Loan[];
   isLoadingCustomers?: boolean;
+  totalLoans?: number;
+  hasMoreLoans?: boolean;
+  onLoadMoreLoans?: () => void;
   onAddLoan: (draft: LoanDraft) => Promise<CreatedLoanResult>;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onCancelLoan: (loanId: string, reason: string) => Promise<void>;
@@ -90,6 +93,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   customers, 
   loans, 
   isLoadingCustomers = false,
+  totalLoans,
+  hasMoreLoans = false,
+  onLoadMoreLoans,
   onAddLoan, 
   onUpdateLoan,
   onCancelLoan,
@@ -1417,10 +1423,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           );
         })}
 
-        {filteredLoans.length > 0 && totalPages > 1 && (
+        {filteredLoans.length > 0 && (totalPages > 1 || hasMoreLoans) && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#050505] border border-zinc-900 rounded-2xl px-4 py-3">
             <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">
-              Pagina {currentPageSafe} de {totalPages}  •  {filteredLoans.length} contratos
+              Pagina {currentPageSafe} de {totalPages}  •  {filteredLoans.length} de {totalLoans ?? filteredLoans.length} contratos
             </p>
             <div className="flex items-center gap-2">
               <button
@@ -1440,6 +1446,15 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 Proxima
               </button>
             </div>
+            {hasMoreLoans && onLoadMoreLoans && (
+              <button
+                type="button"
+                onClick={onLoadMoreLoans}
+                className="px-4 py-2 border border-[#BF953F]/30 text-[#BF953F] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-[#BF953F]/10"
+              >
+                Carregar mais
+              </button>
+            )}
           </div>
         )}
       </div>

@@ -13,6 +13,7 @@ interface BackupAssetSummary {
 }
 
 export interface BackupPayload {
+  schemaVersion: 2;
   generatedAt: string;
   customers: BackupItem[];
   loans: BackupItem[];
@@ -21,7 +22,21 @@ export interface BackupPayload {
   monthlySnapshots: BackupItem[];
   migrationRuns: BackupItem[];
   assetSummary: BackupAssetSummary;
+  integrity: {
+    algorithm: 'SHA-256';
+    checksum: string;
+    counts: {
+      customers: number;
+      loans: number;
+      cashMovement: number;
+      settings: number;
+      monthlySnapshots: number;
+      migrationRuns: number;
+    };
+  };
 }
+
+type BackupPayloadWithoutIntegrity = Omit<BackupPayload, 'integrity'>;
 
 const mapSnapshotItems = (docs: Array<{ id: string; data: () => Record<string, unknown> }>): BackupItem[] =>
   docs.map((item) => ({ id: item.id, ...item.data() }));
@@ -171,6 +186,27 @@ const embedCustomerAssets = async (rawCustomers: BackupItem[]) => {
   };
 };
 
+const calculateSha256 = async (payload: BackupPayloadWithoutIntegrity): Promise<string> => {
+  const encoded = new TextEncoder().encode(JSON.stringify(payload));
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+};
+
+export const validateBackupPayload = async (payload: BackupPayload): Promise<boolean> => {
+  if (!payload || payload.schemaVersion !== 2 || payload.integrity?.algorithm !== 'SHA-256') return false;
+  const { integrity, ...content } = payload;
+  const countsMatch = integrity.counts.customers === content.customers.length &&
+    integrity.counts.loans === content.loans.length &&
+    integrity.counts.cashMovement === content.cashMovement.length &&
+    integrity.counts.settings === content.settings.length &&
+    integrity.counts.monthlySnapshots === content.monthlySnapshots.length &&
+    integrity.counts.migrationRuns === content.migrationRuns.length;
+  if (!countsMatch) return false;
+  return (await calculateSha256(content)) === integrity.checksum;
+};
+
 export const buildBackupPayload = async (): Promise<BackupPayload> => {
   const [customersSnap, loansSnap, movementsSnap, settingsSnap, monthlySnapshotsSnap, migrationRunsSnap] = await Promise.all([
     getDocs(collection(db, 'clientes')),
@@ -183,7 +219,8 @@ export const buildBackupPayload = async (): Promise<BackupPayload> => {
 
   const { customers, summary } = await embedCustomerAssets(mapSnapshotItems(customersSnap.docs));
 
-  return {
+  const content: BackupPayloadWithoutIntegrity = {
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     customers,
     loans: mapSnapshotItems(loansSnap.docs),
@@ -192,5 +229,22 @@ export const buildBackupPayload = async (): Promise<BackupPayload> => {
     monthlySnapshots: mapSnapshotItems(monthlySnapshotsSnap.docs),
     migrationRuns: mapSnapshotItems(migrationRunsSnap.docs),
     assetSummary: summary,
+  };
+  const counts = {
+    customers: content.customers.length,
+    loans: content.loans.length,
+    cashMovement: content.cashMovement.length,
+    settings: content.settings.length,
+    monthlySnapshots: content.monthlySnapshots.length,
+    migrationRuns: content.migrationRuns.length,
+  };
+
+  return {
+    ...content,
+    integrity: {
+      algorithm: 'SHA-256',
+      checksum: await calculateSha256(content),
+      counts,
+    },
   };
 };

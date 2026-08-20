@@ -330,6 +330,13 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     canceledByEmail: toOptionalString(payload.canceledByEmail),
     canceledByName: toOptionalString(payload.canceledByName),
     cancellationReason: toOptionalString(payload.cancellationReason),
+    lastOperationId: toOptionalString(payload.lastOperationId),
+    lastOperationType: toOptionalString(payload.lastOperationType) as Loan['lastOperationType'],
+    lastOperationAt: payload.lastOperationAt as Loan['lastOperationAt'],
+    lastOperationByUid: toOptionalString(payload.lastOperationByUid),
+    lastOperationByEmail: toOptionalString(payload.lastOperationByEmail),
+    lastOperationByName: toOptionalString(payload.lastOperationByName),
+    hasFinancialHistory: payload.hasFinancialHistory === true,
   };
 };
 
@@ -360,6 +367,11 @@ export const parseCustomer = (id: string, raw: unknown): Customer => {
         }))
       : undefined,
     createdAt: toNumber(payload.createdAt, 0) || undefined,
+    archived: payload.archived === true,
+    archivedAt: payload.archivedAt as Customer['archivedAt'],
+    archivedByUid: toOptionalString(payload.archivedByUid),
+    archivedByEmail: toOptionalString(payload.archivedByEmail),
+    archivedByName: toOptionalString(payload.archivedByName),
   };
 };
 

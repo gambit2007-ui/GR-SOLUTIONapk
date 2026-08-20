@@ -48,11 +48,69 @@ service cloud.firestore {
         data.status in ['ATIVO', 'QUITADO', 'ATRASADO', 'CANCELADO', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
     }
 
-    function validLoanUpdate(previousData, nextData) {
+    function validLoanOperationAudit(data) {
+      return data.lastOperationId is string &&
+        data.lastOperationId.size() >= 8 && data.lastOperationId.size() <= 160 &&
+        data.lastOperationType in [
+          'LOAN_CREATED',
+          'CONTRACT_EDIT',
+          'PAYMENT',
+          'PAYMENT_REVERSAL',
+          'INTEREST_RENEWAL',
+          'CANCELLATION'
+        ] &&
+        data.lastOperationAt == request.time &&
+        data.lastOperationByUid is string &&
+        data.lastOperationByUid == request.auth.uid;
+    }
+
+    function hasLinkedCashMovement(data, loanId) {
+      let operationId = data.lastOperationId;
+      let movementPath = /databases/$(database)/documents/cashMovement/$(operationId);
+      return existsAfter(movementPath) &&
+        getAfter(movementPath).data.loanId == loanId &&
+        getAfter(movementPath).data.operationId == operationId &&
+        getAfter(movementPath).data.createdByUid == request.auth.uid &&
+        (
+          (data.lastOperationType == 'LOAN_CREATED' && getAfter(movementPath).data.type == 'RETIRADA') ||
+          (data.lastOperationType == 'PAYMENT' && getAfter(movementPath).data.type == 'PAGAMENTO') ||
+          (data.lastOperationType == 'PAYMENT_REVERSAL' && getAfter(movementPath).data.type == 'ESTORNO') ||
+          (data.lastOperationType == 'INTEREST_RENEWAL' && getAfter(movementPath).data.type == 'PAGAMENTO')
+        );
+    }
+
+    function hasPaymentHistory(data) {
+      return data.get('hasFinancialHistory', false) == true ||
+        data.get('paidAmount', 0) > 0 ||
+        data.get('fiscalPaymentEntries', []).size() > 0;
+    }
+
+    function validContractEdit(previousData, nextData) {
+      return nextData.lastOperationType == 'CONTRACT_EDIT' &&
+        !hasPaymentHistory(previousData);
+    }
+
+    function validCancellation(previousData, nextData) {
+      return nextData.lastOperationType == 'CANCELLATION' &&
+        previousData.status in ['ATIVO', 'ATRASADO', 'ACTIVE'] &&
+        nextData.status in ['CANCELADO', 'CANCELLED'] &&
+        nextData.cancellationReason is string && nextData.cancellationReason.size() > 0;
+    }
+
+    function validLoanUpdate(previousData, nextData, loanId) {
       return validLoan(nextData) &&
         nextData.amount == previousData.amount &&
+        nextData.customerId == previousData.customerId &&
+        nextData.get('contractNumber', '') == previousData.get('contractNumber', '') &&
+        nextData.get('createdAt', null) == previousData.get('createdAt', null) &&
         nextData.version is int &&
-        nextData.version == previousData.get('version', 0) + 1;
+        nextData.version == previousData.get('version', 0) + 1 &&
+        validLoanOperationAudit(nextData) &&
+        (
+          validContractEdit(previousData, nextData) ||
+          validCancellation(previousData, nextData) ||
+          hasLinkedCashMovement(nextData, loanId)
+        );
     }
 
     function validMovement(data) {
@@ -60,7 +118,53 @@ service cloud.firestore {
         validPositiveMoney(data.amount) &&
         data.description is string && data.description.size() > 0 && data.description.size() <= 500 &&
         data.date is string &&
+        data.recordedAt == request.time &&
         data.createdByUid is string && data.createdByUid == request.auth.uid;
+    }
+
+    function cashMovementDelta(movement) {
+      return movement.type in ['APORTE', 'PAGAMENTO', 'ENTRADA']
+        ? movement.amount
+        : 0 - movement.amount;
+    }
+
+    function previousCashValue() {
+      return resource == null ? 0 : resource.data.get('value', 0);
+    }
+
+    function validLedgerCashUpdate() {
+      let movementId = request.resource.data.lastMovementId;
+      let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
+      return movementId is string &&
+        existsAfter(movementPath) &&
+        getAfter(movementPath).data.createdByUid == request.auth.uid &&
+        request.resource.data.updatedByUid == request.auth.uid &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.value is number &&
+        request.resource.data.value >= previousCashValue() + cashMovementDelta(getAfter(movementPath).data) - 0.001 &&
+        request.resource.data.value <= previousCashValue() + cashMovementDelta(getAfter(movementPath).data) + 0.001;
+    }
+
+    function validAdminCashReconciliation() {
+      return isAdmin() &&
+        request.resource.data.value is number &&
+        request.resource.data.reconciledByUid == request.auth.uid &&
+        request.resource.data.reconciledAt == request.time &&
+        request.resource.data.updatedAt == request.time;
+    }
+
+    function validContractCounterUpdate() {
+      let loanId = request.resource.data.lastLoanId;
+      let loanPath = /databases/$(database)/documents/loans/$(loanId);
+      let previousNumber = resource == null ? 0 : resource.data.get('lastNumber', 0);
+      return loanId is string &&
+        existsAfter(loanPath) &&
+        getAfter(loanPath).data.contractNumber == request.resource.data.lastContractNumber &&
+        request.resource.data.lastContractNumber is string &&
+        request.resource.data.lastNumber is int &&
+        request.resource.data.lastNumber > previousNumber &&
+        request.resource.data.updatedByUid == request.auth.uid &&
+        request.resource.data.updatedAt == request.time;
     }
 
     match /authorizedUsers/{uid} {
@@ -73,20 +177,35 @@ service cloud.firestore {
     }
 
     match /clientes/{customerId} {
-      allow read, delete: if isAuthorized();
+      allow read: if isAuthorized();
       allow create, update: if isAuthorized() && validCustomer(request.resource.data);
+      allow delete: if false;
     }
 
     match /loans/{loanId} {
       allow read: if isAuthorized();
-      allow create: if isAuthorized() && validLoan(request.resource.data) && request.resource.data.version == 0;
-      allow update: if isAuthorized() && validLoanUpdate(resource.data, request.resource.data);
+      allow create: if isAuthorized() &&
+        validLoan(request.resource.data) &&
+        request.resource.data.version == 0 &&
+        request.resource.data.hasFinancialHistory == false &&
+        validLoanOperationAudit(request.resource.data) &&
+        request.resource.data.lastOperationType == 'LOAN_CREATED' &&
+        hasLinkedCashMovement(request.resource.data, loanId);
+      allow update: if isAuthorized() && validLoanUpdate(resource.data, request.resource.data, loanId);
       allow delete: if false;
     }
 
     match /cashMovement/{movementId} {
       allow read: if isAuthorized();
-      allow create: if isAuthorized() && validMovement(request.resource.data);
+      allow create: if isAuthorized() &&
+        validMovement(request.resource.data) &&
+        (
+          !('loanId' in request.resource.data) ||
+          (
+            request.resource.data.operationId is string &&
+            request.resource.data.operationId == movementId
+          )
+        );
       allow update: if false;
       allow delete: if false;
     }
@@ -100,7 +219,9 @@ service cloud.firestore {
 
     match /settings/{documentId} {
       allow read: if isAuthorized();
-      allow write: if documentId in ['caixa', 'contractCounter'] && isAuthorized();
+      allow write: if documentId == 'caixa' && isAuthorized() &&
+        (validLedgerCashUpdate() || validAdminCashReconciliation());
+      allow write: if documentId == 'contractCounter' && isAuthorized() && validContractCounterUpdate();
       allow write: if documentId == 'fees' && isAdmin();
     }
 
@@ -115,6 +236,19 @@ service cloud.firestore {
 
     match /migrationRuns/{runId} {
       allow read, create: if isAuthorized();
+      allow update, delete: if false;
+    }
+
+    match /diagnosticEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if isAuthorized() &&
+        request.resource.data.source is string &&
+        request.resource.data.source.size() > 0 && request.resource.data.source.size() <= 120 &&
+        request.resource.data.errorCode is string &&
+        request.resource.data.errorCode.size() > 0 && request.resource.data.errorCode.size() <= 120 &&
+        request.resource.data.severity == 'ERROR' &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.recordedAt == request.time;
       allow update, delete: if false;
     }
 

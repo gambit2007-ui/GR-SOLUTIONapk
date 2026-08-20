@@ -15,6 +15,9 @@ interface CustomerSectionProps {
   customers: Customer[];
   loans: Loan[];
   isLoadingCustomers?: boolean;
+  totalCustomers?: number;
+  hasMoreCustomers?: boolean;
+  onLoadMoreCustomers?: () => void;
   dailyLateFeeRate?: number;
   onAddCustomer: (c: Customer) => Promise<void> | void;
   onUpdateCustomer: (c: Customer) => Promise<void> | void;
@@ -22,7 +25,16 @@ interface CustomerSectionProps {
 }
 
 const CustomerSection: React.FC<CustomerSectionProps> = ({
-  customers, loans, isLoadingCustomers = false, dailyLateFeeRate, onAddCustomer, onUpdateCustomer, onDeleteCustomer
+  customers,
+  loans,
+  isLoadingCustomers = false,
+  totalCustomers,
+  hasMoreCustomers = false,
+  onLoadMoreCustomers,
+  dailyLateFeeRate,
+  onAddCustomer,
+  onUpdateCustomer,
+  onDeleteCustomer,
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
@@ -481,7 +493,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
           <div>
             <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Total de clientes</p>
             <p className="text-lg font-black text-white leading-none mt-1">
-              {isLoadingCustomers && customers.length === 0 ? '--' : customers.length}
+              {isLoadingCustomers && customers.length === 0 ? '--' : (totalCustomers ?? customers.length)}
             </p>
           </div>
         </div>
@@ -581,10 +593,10 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         })}
           </div>
 
-          {totalPages > 1 && (
+          {(totalPages > 1 || hasMoreCustomers) && (
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-[#050505] border border-zinc-900 rounded-2xl px-4 py-3">
               <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">
-                Pagina {currentPageSafe} de {totalPages}  •  {filteredCustomers.length} clientes
+                 Pagina {currentPageSafe} de {totalPages}  •  {filteredCustomers.length} carregados
               </p>
               <div className="flex items-center gap-2">
                 <button
@@ -862,6 +874,15 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                   <p className="text-[10px] text-white font-bold break-words">{viewingDetails.address || 'Nao informado'}</p>
                 </div>
               </div>
+              {hasMoreCustomers && onLoadMoreCustomers && (
+                <button
+                  type="button"
+                  onClick={onLoadMoreCustomers}
+                  className="px-4 py-2 border border-[#BF953F]/30 text-[#BF953F] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-[#BF953F]/10"
+                >
+                  Carregar mais
+                </button>
+              )}
             </div>
 
             {viewingFinancialSummary && (

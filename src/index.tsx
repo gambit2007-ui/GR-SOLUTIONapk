@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { registerSW } from 'virtual:pwa-register';
 import App from './App';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 import './styles.css';
 
 const updateSW = registerSW({
@@ -19,6 +20,8 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <App />
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   </React.StrictMode>
 );

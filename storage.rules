@@ -29,8 +29,9 @@ service firebase.storage {
     }
 
     match /clientes/{customerId}/{allPaths=**} {
-      allow read, delete: if isAuthorized();
+      allow read: if isAuthorized();
       allow create, update: if isAuthorized() && validCustomerAsset();
+      allow delete: if false;
     }
 
     match /{allPaths=**} {

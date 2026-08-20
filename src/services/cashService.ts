@@ -100,7 +100,12 @@ export const appendCashMovementInTransaction = async (
     ...sanitizedMovement,
     recordedAt: serverTimestamp(),
   });
-  tx.set(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
+  tx.set(caixaRef, {
+    value: novoSaldo,
+    lastMovementId: movementRef.id,
+    updatedByUid: payload.actor?.uid || undefined,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
 
   return { movement, novoSaldo, movementRef };
 };
@@ -111,13 +116,18 @@ export const addCashMovement = async (payload: CashMovementPayload) => {
   });
 };
 
-export const recalculateCashBalance = async (): Promise<number> => {
+export const recalculateCashBalance = async (actor?: MovementActor): Promise<number> => {
   const movementSnap = await getDocs(collection(db, 'cashMovement'));
   const movements = movementSnap.docs.map((movementDoc) => parseCashMovement(movementDoc.id, movementDoc.data()));
 
   const saldoCalculado = movements.reduce((acc, movement) => acc + resolveCashDelta(movement), 0);
   const novoSaldo = Number(saldoCalculado.toFixed(2));
 
-  await setDoc(caixaRef, { value: novoSaldo, updatedAt: serverTimestamp() }, { merge: true });
+  await setDoc(caixaRef, {
+    value: novoSaldo,
+    reconciledByUid: actor?.uid || undefined,
+    reconciledAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
   return novoSaldo;
 };

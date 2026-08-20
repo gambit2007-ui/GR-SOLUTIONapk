@@ -1,7 +1,7 @@
 import React, { Suspense, lazy, useCallback, useState } from 'react';
 import {
   LayoutDashboard, Users, FileText, PieChart, Calculator,
-  Activity, X, Menu, Lock, LogOut, Loader2,
+  Activity, X, Menu, Lock, LogOut, Loader2, ShieldCheck,
 } from 'lucide-react';
 import { FirebaseError } from 'firebase/app';
 
@@ -26,8 +26,9 @@ import { useAuthState } from './hooks/useAuthState';
 import { useRealtimeData } from './hooks/useRealtimeData';
 import { useToasts } from './hooks/useToasts';
 import { useViewport } from './hooks/useViewport';
+import { useAccessControlState } from './hooks/useAccessControlState';
 import { addCashMovement, recalculateCashBalance } from './services/cashService';
-import { createCustomer, deleteCustomerAndLoans, updateCustomer } from './services/customerService';
+import { archiveCustomer, createCustomer, updateCustomer } from './services/customerService';
 import {
   applyLoanPayment,
   cancelLoan,
@@ -36,6 +37,8 @@ import {
   updateLoan,
   updateLoanAndAddMovement,
 } from './services/loanService';
+import { enableAccessControlForCurrentUser } from './services/accessControlService';
+import { reportOperationalError } from './services/operationalLoggingService';
 
 const Dashboard = lazy(() => import('./components/Dashboard'));
 const CustomerSection = lazy(() => import('./components/CustomerSection'));
@@ -59,12 +62,16 @@ const App: React.FC = () => {
   const [password, setPassword] = useState('');
   const [currentView, setCurrentView] = useState<View>('DASHBOARD');
   const [selectedLoanId, setSelectedLoanId] = useState<string | null>(null);
+  const [customersLoadLimit, setCustomersLoadLimit] = useState(36);
+  const [loansLoadLimit, setLoansLoadLimit] = useState(30);
+  const [isEnablingAccessControl, setIsEnablingAccessControl] = useState(false);
   const shouldLoadCustomers = currentView === 'CUSTOMERS' || currentView === 'LOANS';
   const shouldLoadLoans = currentView !== 'SIMULATION';
   const shouldLoadCashMovements = currentView === 'DASHBOARD' || currentView === 'REPORTS';
   const shouldLoadMonthlySnapshots = currentView === 'REPORTS';
 
   const { user, authLoading, loginLoading, login, logout } = useAuthState();
+  const accessControl = useAccessControlState(user);
   const { toasts, showToast, removeToast } = useToasts();
   const handleRealtimeError = useCallback((message: string) => {
     showToast(message, 'error');
@@ -77,11 +84,17 @@ const App: React.FC = () => {
     feeSettings,
     caixa,
     isCustomersLoading,
-  } = useRealtimeData(user, {
+    totalCustomers,
+    totalLoans,
+    hasMoreCustomers,
+    hasMoreLoans,
+  } = useRealtimeData(accessControl.authorized ? user : null, {
     loadCustomers: shouldLoadCustomers,
     loadLoans: shouldLoadLoans,
     loadCashMovements: shouldLoadCashMovements,
     loadMonthlySnapshots: shouldLoadMonthlySnapshots,
+    customersLimit: currentView === 'CUSTOMERS' ? customersLoadLimit : undefined,
+    loansLimit: currentView === 'LOANS' ? loansLoadLimit : undefined,
     onError: handleRealtimeError,
   });
   const dailyLateFeeRate = feeSettings.dailyLateFeeRate;
@@ -118,6 +131,9 @@ const App: React.FC = () => {
   const getRemainingInstallmentValue = (installment: Loan['installments'][number] | null | undefined) => {
     return getInstallmentOutstanding(installment, new Date(), dailyLateFeeRate).total;
   };
+  const reportAppError = (source: string, error: unknown) => {
+    void reportOperationalError(source, error, movementActor);
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -140,8 +156,9 @@ const App: React.FC = () => {
 
   const handleUpdateLoan = async (loanId: string, payload: Partial<Loan>) => {
     try {
-      await updateLoan(loanId, payload);
+      await updateLoan(loanId, payload, movementActor);
     } catch (error: unknown) {
+      reportAppError('loan.update', error);
       showToast('Erro ao atualizar contrato', 'error');
       throw error;
     }
@@ -207,6 +224,7 @@ const App: React.FC = () => {
 
       throw lastError || new Error('FALHA_MOVIMENTACAO');
     } catch (error: unknown) {
+      reportAppError('cash.movement.create', error);
       const errorCode = getFirebaseErrorCode(error);
       const detail = errorCode ? ` (${errorCode})` : '';
       showToast(`Erro no processamento do caixa${detail}`, 'error');
@@ -256,8 +274,24 @@ const App: React.FC = () => {
         expectedVersion: Math.max(0, Math.trunc(Number(currentLoan?.version || 0))),
       });
     } catch (error: unknown) {
+      reportAppError('loan.operation', error);
       showToast('Erro ao processar operacao', 'error');
       throw error;
+    }
+  };
+
+  const handleEnableAccessControl = async () => {
+    if (!user || isEnablingAccessControl) return;
+    if (!window.confirm('Ativar acesso restrito? A conta atual sera registrada como administradora.')) return;
+    setIsEnablingAccessControl(true);
+    try {
+      await enableAccessControlForCurrentUser(user.uid);
+      showToast('Protecao de acesso ativada', 'success');
+    } catch (error) {
+      console.error('Falha ao ativar protecao de acesso:', error);
+      showToast('Nao foi possivel ativar a protecao de acesso', 'error');
+    } finally {
+      setIsEnablingAccessControl(false);
     }
   };
 
@@ -265,6 +299,7 @@ const App: React.FC = () => {
     try {
       return await applyLoanPayment(loanId, request, movementActor);
     } catch (error: unknown) {
+      reportAppError('loan.payment', error);
       showToast('Erro ao processar pagamento', 'error');
       throw error;
     }
@@ -272,12 +307,14 @@ const App: React.FC = () => {
 
   const handleRecalculateCash = async () => {
     try {
-      const novoSaldo = await recalculateCashBalance();
+      if (!window.confirm('Recalcular o saldo usando exclusivamente o livro de movimentacoes?')) return;
+      const novoSaldo = await recalculateCashBalance(movementActor);
       showToast(
         `Caixa recalculado para R$ ${novoSaldo.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`,
         'success',
       );
     } catch (error: unknown) {
+      reportAppError('cash.recalculate', error);
       showToast('Erro ao recalcular o caixa', 'error');
     }
   };
@@ -287,6 +324,7 @@ const App: React.FC = () => {
       await createCustomer(cliente);
       showToast('Cliente cadastrado com sucesso!', 'success');
     } catch (error: unknown) {
+      reportAppError('customer.create', error);
       showToast('Erro ao salvar cliente', 'error');
       throw error;
     }
@@ -297,6 +335,7 @@ const App: React.FC = () => {
       await updateCustomer(cliente);
       showToast('Cadastro atualizado!', 'info');
     } catch (error: unknown) {
+      reportAppError('customer.update', error);
       showToast('Erro ao atualizar cadastro', 'error');
       throw error;
     }
@@ -304,9 +343,10 @@ const App: React.FC = () => {
 
   const handleDeleteCustomer = async (customerId: string) => {
     try {
-      const removedLoansCount = await deleteCustomerAndLoans(customerId);
-      showToast(removedLoansCount > 0 ? 'Cliente removido' : 'Cliente sem contratos removido', 'info');
+      await archiveCustomer(customerId, movementActor);
+      showToast('Cliente arquivado com historico preservado', 'info');
     } catch (error: unknown) {
+      reportAppError('customer.archive', error);
       const message = error instanceof Error && error.message === 'CLIENTE_POSSUI_CONTRATOS'
         ? 'Cliente possui contratos e nao pode ser excluido. Cancele os contratos se necessario.'
         : 'Erro ao remover cliente';
@@ -322,6 +362,7 @@ const App: React.FC = () => {
       showToast('Contrato efetivado!', 'success');
       return createdLoanId;
     } catch (error: unknown) {
+      reportAppError('loan.create', error);
       showToast('Erro ao salvar contrato', 'error');
       throw error;
     }
@@ -332,6 +373,7 @@ const App: React.FC = () => {
       await cancelLoan(loanId, movementActor, reason);
       showToast('Contrato cancelado com historico preservado!', 'success');
     } catch (error: unknown) {
+      reportAppError('loan.cancel', error);
       showToast('Erro ao cancelar contrato', 'error');
       throw error;
     }
@@ -341,6 +383,7 @@ const App: React.FC = () => {
     try {
       return await reverseLoanPayment(loanId, request, movementActor);
     } catch (error: unknown) {
+      reportAppError('loan.payment.reverse', error);
       showToast('Erro ao estornar pagamento', 'error');
       throw error;
     }
@@ -348,8 +391,11 @@ const App: React.FC = () => {
 
   const handleDownloadBackup = async () => {
     try {
-      const { buildBackupPayload } = await import('./services/backupService');
+      const { buildBackupPayload, validateBackupPayload } = await import('./services/backupService');
       const payload = await buildBackupPayload();
+      if (!(await validateBackupPayload(payload))) {
+        throw new Error('BACKUP_INTEGRITY_CHECK_FAILED');
+      }
       const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
@@ -368,6 +414,7 @@ const App: React.FC = () => {
         showToast('Backup completo baixado com clientes, contratos, financeiro e anexos!', 'success');
       }
     } catch (error: unknown) {
+      reportAppError('backup.generate', error);
       showToast('Erro ao gerar backup', 'error');
       throw error;
     }
@@ -390,6 +437,9 @@ const App: React.FC = () => {
             customers={clientes}
             loans={contratos}
             isLoadingCustomers={isCustomersLoading}
+            totalCustomers={totalCustomers}
+            hasMoreCustomers={hasMoreCustomers}
+            onLoadMoreCustomers={() => setCustomersLoadLimit((current) => current + 36)}
             dailyLateFeeRate={dailyLateFeeRate}
             onAddCustomer={handleAddCustomer}
             onUpdateCustomer={handleUpdateCustomer}
@@ -402,6 +452,9 @@ const App: React.FC = () => {
             customers={clientes}
             loans={contratos}
             isLoadingCustomers={isCustomersLoading}
+            totalLoans={totalLoans}
+            hasMoreLoans={hasMoreLoans}
+            onLoadMoreLoans={() => setLoansLoadLimit((current) => current + 30)}
             onAddLoan={handleAddLoan}
             onUpdateLoan={handleUpdateLoan}
             onCancelLoan={handleCancelLoan}
@@ -436,7 +489,7 @@ const App: React.FC = () => {
     }
   };
 
-  if (authLoading) {
+  if (authLoading || (user && accessControl.loading)) {
     return (
       <div className="min-h-dvh bg-[#000000] flex items-center justify-center">
         <Activity size={40} className="text-[#BF953F] animate-pulse" />
@@ -478,6 +531,23 @@ const App: React.FC = () => {
               {loginLoading ? <Loader2 className="animate-spin" size={16} /> : 'Entrar no Sistema'}
             </button>
           </form>
+        </div>
+      </div>
+    );
+  }
+
+  if (!accessControl.authorized) {
+    return (
+      <div className="min-h-dvh bg-black flex items-center justify-center p-6 text-white">
+        <div className="w-full max-w-md bg-[#050505] border border-red-500/30 rounded-[2rem] p-8 text-center">
+          <Lock size={32} className="mx-auto text-red-500" />
+          <h1 className="mt-5 text-lg font-black uppercase tracking-widest">Acesso nao autorizado</h1>
+          <p className="mt-3 text-[10px] text-zinc-500 uppercase tracking-wider leading-relaxed">
+            Esta conta nao possui permissao para consultar os dados do sistema.
+          </p>
+          <button onClick={handleLogout} className="mt-6 px-5 py-3 border border-zinc-800 rounded-xl text-[9px] font-black uppercase tracking-widest text-zinc-300">
+            Sair
+          </button>
         </div>
       </div>
     );
@@ -616,6 +686,26 @@ const App: React.FC = () => {
             </div>
           </div>
         </header>
+
+        {!accessControl.enforced && (
+          <div className="mx-3 sm:mx-4 md:mx-6 mt-3 px-4 py-3 rounded-2xl border border-[#BF953F]/30 bg-[#BF953F]/5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <ShieldCheck size={17} className="text-[#BF953F] shrink-0" />
+              <div>
+                <p className="text-[9px] font-black text-[#F5D77B] uppercase tracking-widest">Protecao de acesso pendente</p>
+                <p className="mt-1 text-[8px] text-zinc-500 uppercase tracking-wider">Ative para permitir somente usuarios cadastrados.</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => { void handleEnableAccessControl(); }}
+              disabled={isEnablingAccessControl}
+              className="px-4 py-2.5 rounded-xl bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-50"
+            >
+              {isEnablingAccessControl ? 'Ativando...' : 'Ativar agora'}
+            </button>
+          </div>
+        )}
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#000000] p-3 sm:p-4 md:p-6">
           <Suspense fallback={<ViewLoadingFallback />}>

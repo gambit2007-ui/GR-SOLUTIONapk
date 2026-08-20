@@ -52,6 +52,7 @@ import {
   buildLegacyPaymentMigrationPreview,
   type LegacyMigrationPreview,
 } from '../services/legacyPaymentMigrationService';
+import { buildFinancialAudit } from '../utils/financialAudit';
 
 interface ReportsProps {
   loans: Loan[];
@@ -131,6 +132,11 @@ const Reports: React.FC<ReportsProps> = ({
     description: '',
     category: 'DESPESA_OPERACIONAL' as CashOutflowCategory,
   });
+  const financialAudit = useMemo(() => buildFinancialAudit({
+    loans,
+    cashMovements,
+    recordedCashBalance: caixa,
+  }), [caixa, cashMovements, loans]);
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
   const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
@@ -1002,6 +1008,57 @@ const Reports: React.FC<ReportsProps> = ({
           </button>
         </div>
       )}
+
+      <div className={`bg-[#050505] border rounded-2xl p-5 ${
+        financialAudit.isConsistent ? 'border-emerald-500/20' : 'border-red-500/30'
+      }`}>
+        <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
+          <div>
+            <div className="flex items-center gap-2">
+              <ShieldCheck size={15} className={financialAudit.isConsistent ? 'text-emerald-500' : 'text-red-500'} />
+              <p className="text-[9px] font-black text-zinc-300 uppercase tracking-widest">
+                Auditoria de integridade financeira
+              </p>
+            </div>
+            <p className="mt-2 text-[9px] text-zinc-600 uppercase tracking-wider">
+              {financialAudit.isConsistent
+                ? 'Caixa reconciliado e sem divergencias criticas detectadas'
+                : `${financialAudit.errors} erro(s) e ${financialAudit.warnings} alerta(s) encontrados`}
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0 lg:min-w-[520px]">
+            <div className="rounded-xl border border-zinc-900 px-3 py-2.5">
+              <p className="text-[7px] font-black text-zinc-600 uppercase tracking-widest">Saldo informado</p>
+              <p className="mt-1 text-[10px] font-black text-white">R$ {financialAudit.recordedCashBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div className="rounded-xl border border-zinc-900 px-3 py-2.5">
+              <p className="text-[7px] font-black text-zinc-600 uppercase tracking-widest">Saldo calculado</p>
+              <p className="mt-1 text-[10px] font-black text-white">R$ {financialAudit.expectedCashBalance.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p>
+            </div>
+            <div className="rounded-xl border border-zinc-900 px-3 py-2.5">
+              <p className="text-[7px] font-black text-zinc-600 uppercase tracking-widest">Diferenca</p>
+              <p className={`mt-1 text-[10px] font-black ${Math.abs(financialAudit.cashDifference) <= 0.01 ? 'text-emerald-500' : 'text-red-500'}`}>
+                R$ {financialAudit.cashDifference.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {financialAudit.issues.length > 0 && (
+          <div className="mt-4 border-t border-zinc-900 pt-4 grid grid-cols-1 lg:grid-cols-2 gap-2">
+            {financialAudit.issues.slice(0, 6).map((issue, index) => (
+              <div key={`${issue.code}-${issue.entityId || index}`} className="flex items-start gap-2 rounded-xl bg-black/40 px-3 py-2.5">
+                <span className={`mt-0.5 h-2 w-2 rounded-full shrink-0 ${issue.severity === 'ERROR' ? 'bg-red-500' : 'bg-[#BF953F]'}`} />
+                <div className="min-w-0">
+                  <p className="text-[7px] font-black text-zinc-500 uppercase tracking-widest">{issue.code}</p>
+                  <p className="mt-1 text-[9px] text-zinc-300 leading-relaxed">{issue.message}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Grade de indicadores financeiros */}
       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">

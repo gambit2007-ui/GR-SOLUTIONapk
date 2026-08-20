@@ -1,19 +1,39 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# GR SOLUTION
 
-# Run and deploy your AI Studio app
+Aplicacao React/Vite para gestao de clientes, contratos de emprestimo e caixa, com persistencia no Firebase.
 
-This contains everything you need to run your app locally.
+## Desenvolvimento
 
-View your app in AI Studio: https://ai.studio/apps/3fded618-66a7-4a1d-8b27-50ef1dfcc99d
+```bash
+npm install
+npm run dev
+```
 
-## Run Locally
+## Validacao obrigatoria
 
-**Prerequisites:**  Node.js
+```bash
+npm run lint
+npm run test
+npm run build
+```
 
+Antes de publicar regras, valide sem deploy:
 
-1. Install dependencies:
-   `npm install`
-2. Run the app:
-   `npm run dev`
+```bash
+npx firebase-tools deploy --only firestore:rules --dry-run --project grsolution-8e6cb
+```
+
+## Controles financeiros
+
+- Pagamentos, estornos, renovacoes e concessoes usam identificadores idempotentes e movimentacoes imutaveis.
+- O saldo consolidado deve coincidir com a soma do livro caixa. A tela Financeiro exibe a reconciliacao automaticamente.
+- Clientes sem contratos sao arquivados; contratos e movimentacoes financeiras nao possuem exclusao fisica.
+- Correcoes de dados antigos devem comecar pela auditoria e por um backup validado. Nunca altere o historico diretamente.
+
+## Controle de acesso
+
+Ao entrar como proprietario, use o aviso **Ativar agora** para registrar a conta atual como administradora e restringir o banco aos usuarios autorizados. Confirme o acesso da conta administradora antes de encerrar a sessao.
+
+## Backup
+
+O backup JSON inclui versao de esquema, contagens e checksum SHA-256. A geracao e interrompida se a verificacao de integridade falhar.

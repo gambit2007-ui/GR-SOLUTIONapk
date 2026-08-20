@@ -31,6 +31,21 @@ export interface LoanMovementPayload {
 
 const round2 = (value: number): number => Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
+type LoanOperationType = NonNullable<Loan['lastOperationType']>;
+
+const buildLoanOperationAudit = (
+  operationId: string,
+  operationType: LoanOperationType,
+  actor?: MovementActor,
+) => sanitizeFirestorePayload({
+  lastOperationId: operationId,
+  lastOperationType: operationType,
+  lastOperationAt: serverTimestamp(),
+  lastOperationByUid: actor?.uid || undefined,
+  lastOperationByEmail: actor?.email?.toLowerCase() || undefined,
+  lastOperationByName: actor?.displayName || undefined,
+});
+
 const toLoanType = (value: unknown): LoanType => {
   const normalized = String(value ?? '').trim().toUpperCase();
   return normalized === 'PRICE' ? 'PRICE' : 'SIMPLE';
@@ -125,6 +140,7 @@ export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): P
 
   const createdLoan = await runTransaction(db, async (tx) => {
     const loanRef = doc(collection(db, 'loans'));
+    const operationId = `loan-created-${loanRef.id}`;
     const contractCounterRef = doc(db, 'settings', 'contractCounter');
     const counterSnapshot = await tx.get(contractCounterRef);
     const saldoAtual = await readCashBalanceInTransaction(tx);
@@ -139,17 +155,23 @@ export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): P
       amount,
       description: `EMPRESTIMO: ${normalizedLoanDraft.customerName}`,
       loanId: loanRef.id,
+      operationId,
       actor,
-    }, { currentCashBalance: saldoAtual });
+    }, { currentCashBalance: saldoAtual, movementId: operationId });
 
     tx.set(loanRef, {
       ...safeLoanData,
       contractNumber: String(contractNumber),
       version: 0,
+      hasFinancialHistory: false,
       createdAt: serverTimestamp(),
+      ...buildLoanOperationAudit(operationId, 'LOAN_CREATED', actor),
     });
     tx.set(contractCounterRef, {
       lastNumber: contractNumber,
+      lastContractNumber: String(contractNumber),
+      lastLoanId: loanRef.id,
+      updatedByUid: actor?.uid || undefined,
       updatedAt: serverTimestamp(),
     }, { merge: true });
 
@@ -159,7 +181,7 @@ export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): P
   return createdLoan;
 };
 
-export const updateLoan = async (loanId: string, payload: Partial<Loan>) => {
+export const updateLoan = async (loanId: string, payload: Partial<Loan>, actor?: MovementActor) => {
   await runTransaction(db, async (tx) => {
     const loanRef = doc(db, 'loans', loanId);
     const currentSnapshot = await tx.get(loanRef);
@@ -186,11 +208,13 @@ export const updateLoan = async (loanId: string, payload: Partial<Loan>) => {
       throw new Error('VALOR_PRINCIPAL_IMUTAVEL');
     }
     const currentVersion = Math.max(0, Math.trunc(Number(currentSnapshot.data().version || 0)));
+    const operationId = `contract-edit-${loanId}-${Date.now()}`;
     tx.update(loanRef, sanitizeFirestorePayload({
       ...payload,
       amount: currentAmount,
       version: currentVersion + 1,
       updatedAt: serverTimestamp(),
+      ...buildLoanOperationAudit(operationId, 'CONTRACT_EDIT', actor),
     }));
   });
 };
@@ -221,6 +245,7 @@ export const cancelLoan = async (
       canceledByName: actor?.displayName || undefined,
       version: Math.max(0, Math.trunc(Number(currentLoan.version || 0))) + 1,
       updatedAt: serverTimestamp(),
+      ...buildLoanOperationAudit(`cancellation-${loanId}-${Date.now()}`, 'CANCELLATION', actor),
     }));
   });
 };
@@ -267,6 +292,12 @@ export const updateLoanAndAddMovement = async (
       ...payload,
       version: currentVersion + 1,
       updatedAt: serverTimestamp(),
+      ...buildLoanOperationAudit(
+        operationId || `loan-operation-${loanId}-${Date.now()}`,
+        movementType === 'PAGAMENTO' ? 'INTEREST_RENEWAL' : 'PAYMENT_REVERSAL',
+        movement.actor,
+      ),
+      hasFinancialHistory: true,
     }));
   });
 };
@@ -344,7 +375,9 @@ export const applyLoanPayment = async (
       status: output.loan.status,
       fiscalPaymentEntries: output.loan.fiscalPaymentEntries,
       version: output.loan.version,
+      hasFinancialHistory: true,
       updatedAt: serverTimestamp(),
+      ...buildLoanOperationAudit(operationId, 'PAYMENT', actor),
     }));
 
     return {
@@ -411,7 +444,9 @@ export const reverseLoanPayment = async (
       installments: output.loan.installments,
       status: output.loan.status,
       version: output.loan.version,
+      hasFinancialHistory: true,
       updatedAt: serverTimestamp(),
+      ...buildLoanOperationAudit(operationId, 'PAYMENT_REVERSAL', actor),
     }));
 
     return {

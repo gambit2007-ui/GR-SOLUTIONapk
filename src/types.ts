@@ -124,6 +124,11 @@ export interface Customer {
   birthDate?: string;
   documents?: CustomerDocument[];
   createdAt?: number;
+  archived?: boolean;
+  archivedAt?: FirestoreTimestampLike | Date | number | string;
+  archivedByUid?: string;
+  archivedByEmail?: string;
+  archivedByName?: string;
 }
 
 export interface Installment {
@@ -231,6 +236,13 @@ export interface Loan {
   canceledByEmail?: string;
   canceledByName?: string;
   cancellationReason?: string;
+  lastOperationId?: string;
+  lastOperationType?: 'LOAN_CREATED' | 'CONTRACT_EDIT' | 'PAYMENT' | 'PAYMENT_REVERSAL' | 'INTEREST_RENEWAL' | 'CANCELLATION';
+  lastOperationAt?: FirestoreTimestampLike | Date | number | string;
+  lastOperationByUid?: string;
+  lastOperationByEmail?: string;
+  lastOperationByName?: string;
+  hasFinancialHistory?: boolean;
 }
 
 export type PaymentApplyMode =
