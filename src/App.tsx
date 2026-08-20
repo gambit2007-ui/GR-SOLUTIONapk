@@ -67,7 +67,7 @@ const App: React.FC = () => {
   const [isEnablingAccessControl, setIsEnablingAccessControl] = useState(false);
   const shouldLoadCustomers = currentView === 'LOANS';
   const shouldLoadLoans = currentView !== 'SIMULATION' && currentView !== 'LOANS';
-  const shouldLoadCashMovements = currentView === 'DASHBOARD' || currentView === 'REPORTS' || currentView === 'AUDIT';
+  const shouldLoadCashMovements = currentView === 'REPORTS' || currentView === 'AUDIT';
   const shouldLoadMonthlySnapshots = currentView === 'REPORTS';
 
   const { user, authLoading, loginLoading, login, logout } = useAuthState();
@@ -437,7 +437,6 @@ const App: React.FC = () => {
         return (
           <Dashboard
             loans={contratos}
-            cashMovements={movimentacoes}
             dailyLateFeeRate={dailyLateFeeRate}
             onNavigateToLoan={navigateToLoan}
           />
@@ -502,6 +501,7 @@ const App: React.FC = () => {
             cashMovements={movimentacoes}
             caixa={caixa}
             currentUserUid={user?.uid}
+            onNavigateToLoan={navigateToLoan}
             onDownloadBackup={handleDownloadBackup}
             showToast={showToast}
           />
@@ -597,7 +597,7 @@ const App: React.FC = () => {
     },
     { id: 'SIMULATION', label: 'Simular', icon: Calculator },
     { id: 'REPORTS', label: 'Financeiro', icon: PieChart },
-    { id: 'AUDIT', label: 'Auditoria', icon: ShieldCheck },
+    { id: 'AUDIT', label: 'Auditoria e Historico', icon: ShieldCheck },
   ];
 
   const handleSelectView = (view: View) => {

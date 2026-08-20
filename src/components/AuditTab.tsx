@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ScanSearch, ShieldCheck } from 'lucide-react';
+import { ScanSearch, ShieldCheck, X } from 'lucide-react';
 import type { CashMovement, Loan } from '../types';
 import {
   applySafeLegacyPaymentMigration,
@@ -10,22 +10,65 @@ import {
   listRecentOperationalErrors,
   type OperationalDiagnosticEvent,
 } from '../services/operationalLoggingService';
+import { formatDateTimeBR } from '../utils/dateTime';
+import { resolveCashDelta } from '../utils/domainParsers';
 import { buildFinancialAudit } from '../utils/financialAudit';
+import { effectiveLoanStatus } from '../utils/loanCompat';
 
 interface AuditTabProps {
   loans: Loan[];
   cashMovements: CashMovement[];
   caixa: number;
   currentUserUid?: string;
+  onNavigateToLoan: (loanId: string) => void;
   onDownloadBackup: () => Promise<void>;
   showToast: (message: string, type?: 'success' | 'error') => void;
 }
+
+const loanStatusLabel: Record<string, string> = {
+  ACTIVE: 'Ativo',
+  COMPLETED: 'Concluido',
+  CANCELLED: 'Cancelado',
+};
+
+const cashEntryTypes = new Set(['APORTE', 'PAGAMENTO', 'ENTRADA']);
+
+const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+
+const formatCurrency = (value: number) =>
+  roundMoney(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+const getMovementDisplayAmount = (movement: CashMovement) =>
+  Math.abs(roundMoney(Number(movement.amount ?? movement.value ?? 0)));
+
+const getMovementTime = (movement: CashMovement) => {
+  const timestamp = new Date(movement.date).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+};
+
+const getMovementActorLabel = (movement: CashMovement) => {
+  if (movement.createdByName?.trim()) return movement.createdByName.trim();
+  if (movement.createdByEmail?.trim()) return movement.createdByEmail.trim();
+  if (movement.createdByUid?.trim()) return movement.createdByUid.trim();
+  return 'Sistema';
+};
+
+const groupByMonth = <T,>(items: T[], getDate: (item: T) => string) =>
+  items.reduce<Record<string, T[]>>((groups, item) => {
+    const date = new Date(getDate(item));
+    const monthYear = Number.isNaN(date.getTime())
+      ? 'Sem data'
+      : date.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+    (groups[monthYear] ||= []).push(item);
+    return groups;
+  }, {});
 
 const AuditTab: React.FC<AuditTabProps> = ({
   loans,
   cashMovements,
   caixa,
   currentUserUid,
+  onNavigateToLoan,
   onDownloadBackup,
   showToast,
 }) => {
@@ -34,12 +77,44 @@ const AuditTab: React.FC<AuditTabProps> = ({
   const [isApplyingLegacyMigration, setIsApplyingLegacyMigration] = useState(false);
   const [diagnosticEvents, setDiagnosticEvents] = useState<OperationalDiagnosticEvent[] | null>(null);
   const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(false);
+  const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
+  const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
+  const [selectedCashMovement, setSelectedCashMovement] = useState<CashMovement | null>(null);
 
   const financialAudit = useMemo(() => buildFinancialAudit({
     loans,
     cashMovements,
     recordedCashBalance: caixa,
   }), [caixa, cashMovements, loans]);
+
+  const loansByMonth = useMemo(() => groupByMonth(loans, (loan) => loan.startDate), [loans]);
+  const movementsByMonth = useMemo(
+    () => groupByMonth(cashMovements, (movement) => movement.date),
+    [cashMovements],
+  );
+
+  const getMonthCashBalance = (monthMovements: CashMovement[]) => {
+    const firstMovement = monthMovements[0];
+    const monthDate = firstMovement ? new Date(firstMovement.date) : new Date();
+    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1).getTime();
+    const nextMonthStart = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1).getTime();
+
+    const openingBalance = cashMovements.reduce((total, movement) => (
+      getMovementTime(movement) < monthStart
+        ? roundMoney(total + resolveCashDelta(movement))
+        : total
+    ), 0);
+    const closingBalance = cashMovements.reduce((total, movement) => (
+      getMovementTime(movement) < nextMonthStart
+        ? roundMoney(total + resolveCashDelta(movement))
+        : total
+    ), 0);
+
+    return {
+      openingBalance: roundMoney(openingBalance),
+      closingBalance: roundMoney(closingBalance),
+    };
+  };
 
   const handleLoadDiagnostics = async () => {
     if (isLoadingDiagnostics) return;
@@ -100,9 +175,9 @@ const AuditTab: React.FC<AuditTabProps> = ({
             <ShieldCheck size={22} className="text-[#BF953F]" />
           </div>
           <div>
-            <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Auditoria e Diagnosticos</h2>
+            <h2 className="text-sm font-black text-white uppercase tracking-[0.2em]">Auditoria e Historico</h2>
             <p className="mt-2 text-[9px] text-zinc-500 uppercase tracking-widest leading-relaxed">
-              Area administrativa separada da operacao financeira diaria
+              Integridade, contratos e rastreabilidade financeira
             </p>
           </div>
         </div>
@@ -221,6 +296,235 @@ const AuditTab: React.FC<AuditTabProps> = ({
           </div>
         )}
       </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <section className="bg-[#050505] border border-zinc-900 p-6 sm:p-8 rounded-[2rem]">
+          <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-6">Contratos por Mes</h3>
+          <div className="space-y-3">
+            {Object.entries(loansByMonth).map(([month, monthLoans]) => (
+              <div key={month} className="border border-zinc-900 rounded-2xl overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setExpandedMonthLoans(expandedMonthLoans === month ? null : month)}
+                  aria-expanded={expandedMonthLoans === month}
+                  className="w-full p-4 flex items-center justify-between bg-black/40 hover:bg-zinc-900/50 transition-colors"
+                >
+                  <span className="text-[10px] font-black text-white uppercase tracking-widest truncate max-w-[70%] text-left">
+                    {month}
+                  </span>
+                  <span className="text-[9px] font-black text-[#BF953F] px-2 py-1 bg-[#BF953F]/10 rounded-lg">
+                    {monthLoans.length}
+                  </span>
+                </button>
+                {expandedMonthLoans === month && (
+                  <div className="p-4 space-y-2 bg-black/20 border-t border-zinc-900 animate-in slide-in-from-top duration-200">
+                    {monthLoans.map((loan) => {
+                      const status = effectiveLoanStatus(loan);
+                      return (
+                        <button
+                          key={loan.id}
+                          type="button"
+                          onClick={() => onNavigateToLoan(loan.id)}
+                          className="w-full flex items-center justify-between gap-3 p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-[#BF953F]/40 transition-colors text-left"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-[9px] font-black text-white uppercase truncate">{loan.customerName}</p>
+                            <p className="text-[8px] text-zinc-500 uppercase">{formatCurrency(loan.amount)}</p>
+                          </div>
+                          <span className={`text-[7px] font-black px-2 py-0.5 rounded-full uppercase shrink-0 ${
+                            status === 'ACTIVE'
+                              ? 'bg-emerald-500/10 text-emerald-500'
+                              : status === 'COMPLETED'
+                                ? 'bg-blue-500/10 text-blue-500'
+                                : 'bg-zinc-800 text-zinc-500'
+                          }`}>
+                            {loanStatusLabel[status] || status}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            ))}
+            {Object.keys(loansByMonth).length === 0 && (
+              <p className="py-8 text-center text-[9px] text-zinc-600 uppercase tracking-widest">Nenhum contrato encontrado</p>
+            )}
+          </div>
+        </section>
+
+        <section className="bg-[#050505] border border-zinc-900 p-6 sm:p-8 rounded-[2rem]">
+          <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-6">Livro Caixa</h3>
+          <div className="space-y-3">
+            {Object.entries(movementsByMonth).map(([month, monthMovements]) => {
+              const entryMovements = monthMovements.filter((movement) => cashEntryTypes.has(movement.type));
+              const exitMovements = monthMovements.filter((movement) => !cashEntryTypes.has(movement.type));
+              const entryTotal = entryMovements.reduce(
+                (total, movement) => total + getMovementDisplayAmount(movement),
+                0,
+              );
+              const exitTotal = exitMovements.reduce(
+                (total, movement) => total + getMovementDisplayAmount(movement),
+                0,
+              );
+              const { openingBalance, closingBalance } = getMonthCashBalance(monthMovements);
+
+              return (
+                <div key={month} className="border border-zinc-900 rounded-2xl overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedMonthMovements(expandedMonthMovements === month ? null : month)}
+                    aria-expanded={expandedMonthMovements === month}
+                    className="w-full p-4 flex items-center justify-between bg-black/40 hover:bg-zinc-900/50 transition-colors"
+                  >
+                    <span className="text-[10px] font-black text-white uppercase tracking-widest truncate max-w-[70%] text-left">
+                      {month}
+                    </span>
+                    <span className="text-[9px] font-black text-[#BF953F] px-2 py-1 bg-[#BF953F]/10 rounded-lg">
+                      {monthMovements.length}
+                    </span>
+                  </button>
+                  {expandedMonthMovements === month && (
+                    <div className="p-4 bg-black/20 border-t border-zinc-900 animate-in slide-in-from-top duration-200">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+                        <div className="bg-zinc-950/60 border border-zinc-900 rounded-2xl p-3">
+                          <p className="text-[7px] font-black text-zinc-500 uppercase tracking-[0.2em]">Saldo inicial do mes</p>
+                          <p className="text-sm font-black text-white mt-1">{formatCurrency(openingBalance)}</p>
+                        </div>
+                        <div className="bg-zinc-950/60 border border-zinc-900 rounded-2xl p-3">
+                          <p className="text-[7px] font-black text-zinc-500 uppercase tracking-[0.2em]">Saldo final do mes</p>
+                          <p className={`text-sm font-black mt-1 ${closingBalance >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                            {formatCurrency(closingBalance)}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between mb-3 px-1 gap-3">
+                            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em]">Entradas</span>
+                            <span className="text-[8px] font-black text-zinc-600 uppercase">Total: {formatCurrency(entryTotal)}</span>
+                          </div>
+                          {entryMovements.map((movement) => (
+                            <button
+                              key={movement.id}
+                              type="button"
+                              onClick={() => setSelectedCashMovement(movement)}
+                              className="w-full flex items-start justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-emerald-500/30 transition-colors text-left"
+                            >
+                              <div className="min-w-0 flex-1 mr-3">
+                                <p className="text-[9px] font-black text-white uppercase whitespace-normal break-words">{movement.description}</p>
+                                <p className="text-[7px] text-zinc-500 uppercase tracking-tighter whitespace-normal break-words">
+                                  {formatDateTimeBR(movement.date)} - {movement.type} - POR: {getMovementActorLabel(movement)}
+                                </p>
+                              </div>
+                              <span className="text-[9px] font-black text-emerald-500 whitespace-nowrap">
+                                + {formatCurrency(getMovementDisplayAmount(movement))}
+                              </span>
+                            </button>
+                          ))}
+                          {entryMovements.length === 0 && (
+                            <p className="text-[8px] text-zinc-700 italic text-center py-4">Nenhuma entrada</p>
+                          )}
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between mb-3 px-1 gap-3">
+                            <span className="text-[8px] font-black text-red-500 uppercase tracking-[0.2em]">Saidas</span>
+                            <span className="text-[8px] font-black text-zinc-600 uppercase">Total: {formatCurrency(exitTotal)}</span>
+                          </div>
+                          {exitMovements.map((movement) => (
+                            <button
+                              key={movement.id}
+                              type="button"
+                              onClick={() => setSelectedCashMovement(movement)}
+                              className="w-full flex items-start justify-between p-3 bg-zinc-950/50 rounded-xl border border-zinc-900/50 hover:border-red-500/30 transition-colors text-left"
+                            >
+                              <div className="min-w-0 flex-1 mr-3">
+                                <p className="text-[9px] font-black text-white uppercase whitespace-normal break-words">{movement.description}</p>
+                                <p className="text-[7px] text-zinc-500 uppercase tracking-tighter whitespace-normal break-words">
+                                  {formatDateTimeBR(movement.date)} - {movement.type} - POR: {getMovementActorLabel(movement)}
+                                </p>
+                              </div>
+                              <span className="text-[9px] font-black text-red-500 whitespace-nowrap">
+                                - {formatCurrency(getMovementDisplayAmount(movement))}
+                              </span>
+                            </button>
+                          ))}
+                          {exitMovements.length === 0 && (
+                            <p className="text-[8px] text-zinc-700 italic text-center py-4">Nenhuma saida</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {Object.keys(movementsByMonth).length === 0 && (
+              <p className="py-8 text-center text-[9px] text-zinc-600 uppercase tracking-widest">Nenhuma movimentacao encontrada</p>
+            )}
+          </div>
+        </section>
+      </div>
+
+      {selectedCashMovement && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-2xl bg-[#050505] border border-zinc-800 rounded-[2rem] p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4 mb-6">
+              <div>
+                <p className="text-[9px] font-black text-[#BF953F] uppercase tracking-[0.25em] mb-2">Detalhe do Livro Caixa</p>
+                <h4 className="text-xl font-black text-white uppercase leading-tight break-words">
+                  {selectedCashMovement.description}
+                </h4>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedCashMovement(null)}
+                className="shrink-0 p-2 rounded-xl bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white hover:border-zinc-600 transition-colors"
+                aria-label="Fechar detalhe da movimentacao"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-black border border-zinc-900 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Valor</p>
+                <p className={`text-2xl font-black mt-1 ${resolveCashDelta(selectedCashMovement) >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                  {resolveCashDelta(selectedCashMovement) >= 0 ? '+' : '-'} {formatCurrency(getMovementDisplayAmount(selectedCashMovement))}
+                </p>
+              </div>
+              <div className="bg-black border border-zinc-900 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Tipo</p>
+                <p className="text-sm font-black text-white uppercase mt-2">{selectedCashMovement.type}</p>
+              </div>
+              <div className="bg-black border border-zinc-900 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Data</p>
+                <p className="text-sm font-black text-white uppercase mt-2">{formatDateTimeBR(selectedCashMovement.date)}</p>
+              </div>
+              <div className="bg-black border border-zinc-900 rounded-2xl p-4">
+                <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Responsavel</p>
+                <p className="text-sm font-black text-white uppercase mt-2 break-words">{getMovementActorLabel(selectedCashMovement)}</p>
+              </div>
+              {selectedCashMovement.loanId && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const loanId = selectedCashMovement.loanId;
+                    setSelectedCashMovement(null);
+                    if (loanId) onNavigateToLoan(loanId);
+                  }}
+                  className="sm:col-span-2 bg-black border border-zinc-900 rounded-2xl p-4 text-left hover:border-[#BF953F]/40 transition-colors"
+                >
+                  <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Contrato vinculado</p>
+                  <p className="text-sm font-black text-white uppercase mt-2 break-all">{selectedCashMovement.loanId}</p>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
