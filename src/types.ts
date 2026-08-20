@@ -287,6 +287,6 @@ export interface CreatedLoanResult {
 
 export type LoanDraft = Omit<Loan, 'id' | 'createdAt'>;
 
-export type View = 'DASHBOARD' | 'CUSTOMERS' | 'LOANS' | 'SIMULATION' | 'REPORTS';
+export type View = 'DASHBOARD' | 'CUSTOMERS' | 'LOANS' | 'SIMULATION' | 'REPORTS' | 'AUDIT';
 
 

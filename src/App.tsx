@@ -46,6 +46,7 @@ const CustomerSection = lazy(() => import('./components/CustomerSection'));
 const SimulationTab = lazy(() => import('./components/SimulationTab'));
 const Reports = lazy(() => import('./components/Reports'));
 const LoanSection = lazy(() => import('./components/LoanSection'));
+const AuditTab = lazy(() => import('./components/AuditTab'));
 
 const ViewLoadingFallback: React.FC = () => (
   <div className="min-h-[240px] flex items-center justify-center">
@@ -66,7 +67,7 @@ const App: React.FC = () => {
   const [isEnablingAccessControl, setIsEnablingAccessControl] = useState(false);
   const shouldLoadCustomers = currentView === 'LOANS';
   const shouldLoadLoans = currentView !== 'SIMULATION' && currentView !== 'LOANS';
-  const shouldLoadCashMovements = currentView === 'DASHBOARD' || currentView === 'REPORTS';
+  const shouldLoadCashMovements = currentView === 'DASHBOARD' || currentView === 'REPORTS' || currentView === 'AUDIT';
   const shouldLoadMonthlySnapshots = currentView === 'REPORTS';
 
   const { user, authLoading, loginLoading, login, logout } = useAuthState();
@@ -494,6 +495,17 @@ const App: React.FC = () => {
             showToast={showToast}
           />
         );
+      case 'AUDIT':
+        return (
+          <AuditTab
+            loans={contratos}
+            cashMovements={movimentacoes}
+            caixa={caixa}
+            currentUserUid={user?.uid}
+            onDownloadBackup={handleDownloadBackup}
+            showToast={showToast}
+          />
+        );
       default:
         return null;
     }
@@ -585,6 +597,7 @@ const App: React.FC = () => {
     },
     { id: 'SIMULATION', label: 'Simular', icon: Calculator },
     { id: 'REPORTS', label: 'Financeiro', icon: PieChart },
+    { id: 'AUDIT', label: 'Auditoria', icon: ShieldCheck },
   ];
 
   const handleSelectView = (view: View) => {
