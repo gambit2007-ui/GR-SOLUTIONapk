@@ -8,6 +8,7 @@ import {
 import { getLocalISODate } from '../utils/dateTime';
 import { calculateInstallmentLateFee } from '../utils/lateFee';
 import { getInstallmentOutstanding } from '../utils/financialEngine';
+import { calculateDelinquencyRate } from '../utils/delinquencyRate';
 
 interface DashboardProps {
   loans: Loan[];
@@ -82,6 +83,11 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
       (inst) => normalizeInstallmentStatus(inst.status) !== 'PAID' && inst.dueDate < today,
     );
   });
+  const delinquencyRate = calculateDelinquencyRate(overdueLoans.length, activeLoans.length);
+  const delinquencyRateLabel = `${delinquencyRate.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}%`;
 
   // Prestacoes do dia selecionado
   const installmentsOfDay = loans.flatMap((loan) => {
@@ -113,13 +119,21 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
       value: new Set(activeLoans.map((loan) => loan.customerId).filter(Boolean)).size,
       icon: Users,
       color: 'text-blue-500',
+      secondaryValue: null,
     },
-    { label: 'Contratos Ativos', value: activeLoans.length, icon: FileText, color: 'text-gold-500' },
+    {
+      label: 'Contratos Ativos',
+      value: activeLoans.length,
+      icon: FileText,
+      color: 'text-gold-500',
+      secondaryValue: null,
+    },
     { 
       label: 'Contratos em Atraso', 
       value: overdueLoans.length, 
       icon: Activity, 
       color: 'text-red-500',
+      secondaryValue: delinquencyRateLabel,
       onClick: () => {
         const element = document.getElementById('overdue-section');
         if (element) element.scrollIntoView({ behavior: 'smooth' });
@@ -140,8 +154,20 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
               <stat.icon size={24} className={stat.color} />
               <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Indicador</span>
             </div>
-            <p className="text-2xl font-black text-white">{stat.value}</p>
+            <div className="flex items-end justify-between gap-3">
+              <p className="text-2xl font-black text-white">{stat.value}</p>
+              {stat.secondaryValue && (
+                <span className="mb-0.5 rounded-lg bg-red-500/10 px-2 py-1 text-[10px] font-black text-red-500">
+                  {stat.secondaryValue}
+                </span>
+              )}
+            </div>
             <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest mt-1">{stat.label}</p>
+            {stat.secondaryValue && (
+              <p className="mt-2 text-[8px] font-black text-red-500/70 uppercase tracking-widest">
+                Taxa de inadimplencia
+              </p>
+            )}
           </div>
         ))}
       </div>
