@@ -12,13 +12,22 @@ import { calculateCustomerFinancialSummary } from '../utils/customerFinancialSum
 import { auth } from '../firebase';
 import { storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebaseStorage';
 
+const normalizeCustomerSearch = (value: string | undefined) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+
 interface CustomerSectionProps {
   customers: Customer[];
   loans: Loan[];
   isLoadingCustomers?: boolean;
   totalCustomers?: number;
   hasMoreCustomers?: boolean;
-  onLoadMoreCustomers?: () => void;
+  isLoadingMoreCustomers?: boolean;
+  onLoadMoreCustomers?: () => Promise<void> | void;
+  onLoadAllCustomers?: () => Promise<void> | void;
   dailyLateFeeRate?: number;
   onAddCustomer: (c: Customer) => Promise<void> | void;
   onUpdateCustomer: (c: Customer) => Promise<void> | void;
@@ -31,7 +40,9 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   isLoadingCustomers = false,
   totalCustomers,
   hasMoreCustomers = false,
+  isLoadingMoreCustomers = false,
   onLoadMoreCustomers,
+  onLoadAllCustomers,
   dailyLateFeeRate,
   onAddCustomer,
   onUpdateCustomer,
@@ -375,11 +386,15 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     }));
   };
 
+  const normalizedSearchTerm = normalizeCustomerSearch(searchTerm);
+  const numericSearchTerm = searchTerm.replace(/\D/g, '');
   const filteredCustomers = [...customers]
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR', { sensitivity: 'base' }))
     .filter(c =>
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.cpf?.includes(searchTerm)
+      normalizeCustomerSearch(c.name).includes(normalizedSearchTerm) ||
+      normalizeCustomerSearch(c.email).includes(normalizedSearchTerm) ||
+      (numericSearchTerm.length > 0 && (c.cpf || '').replace(/\D/g, '').includes(numericSearchTerm)) ||
+      (numericSearchTerm.length > 0 && (c.phone || '').replace(/\D/g, '').includes(numericSearchTerm))
     );
 
   const CUSTOMERS_PER_PAGE = 12;
@@ -393,6 +408,11 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   React.useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
+
+  React.useEffect(() => {
+    if (!searchTerm.trim() || !hasMoreCustomers || isLoadingMoreCustomers || !onLoadAllCustomers) return;
+    void onLoadAllCustomers();
+  }, [hasMoreCustomers, isLoadingMoreCustomers, onLoadAllCustomers, searchTerm]);
 
   React.useEffect(() => {
     if (currentPage > totalPages) {
@@ -616,6 +636,16 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                 >
                   Proxima
                 </button>
+                {hasMoreCustomers && onLoadMoreCustomers && (
+                  <button
+                    type="button"
+                    onClick={() => { void onLoadMoreCustomers(); }}
+                    disabled={isLoadingMoreCustomers}
+                    className="px-4 py-2 border border-[#BF953F]/30 text-[#BF953F] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-[#BF953F]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isLoadingMoreCustomers ? 'Carregando...' : 'Carregar mais'}
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -875,15 +905,6 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                   <p className="text-[10px] text-white font-bold break-words">{viewingDetails.address || 'Nao informado'}</p>
                 </div>
               </div>
-              {hasMoreCustomers && onLoadMoreCustomers && (
-                <button
-                  type="button"
-                  onClick={onLoadMoreCustomers}
-                  className="px-4 py-2 border border-[#BF953F]/30 text-[#BF953F] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-[#BF953F]/10"
-                >
-                  Carregar mais
-                </button>
-              )}
             </div>
 
             {viewingFinancialSummary && (

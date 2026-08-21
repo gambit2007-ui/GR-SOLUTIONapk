@@ -449,7 +449,9 @@ const App: React.FC = () => {
             isLoadingCustomers={isCustomersLoading}
             totalCustomers={paginatedCustomers.total}
             hasMoreCustomers={paginatedCustomers.hasMore}
-            onLoadMoreCustomers={() => { void paginatedCustomers.loadMore(); }}
+            isLoadingMoreCustomers={paginatedCustomers.loadingMore}
+            onLoadMoreCustomers={paginatedCustomers.loadMore}
+            onLoadAllCustomers={paginatedCustomers.loadAll}
             dailyLateFeeRate={dailyLateFeeRate}
             onAddCustomer={handleAddCustomer}
             onUpdateCustomer={handleUpdateCustomer}

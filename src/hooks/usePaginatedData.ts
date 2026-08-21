@@ -3,6 +3,7 @@ import type { User } from 'firebase/auth';
 import {
   collection,
   doc,
+  documentId,
   DocumentData,
   getCountFromServer,
   getDoc,
@@ -71,7 +72,7 @@ export const usePaginatedCustomers = (
     setState((previous) => ({ ...previous, loading: true }));
     const firstPageQuery = query(
       collection(db, 'clientes'),
-      orderBy('createdAt', 'desc'),
+      orderBy(documentId()),
       limit(pageSize + 1),
     );
 
@@ -102,7 +103,7 @@ export const usePaginatedCustomers = (
     try {
       const nextPageQuery = query(
         collection(db, 'clientes'),
-        orderBy('createdAt', 'desc'),
+        orderBy(documentId()),
         startAfter(cursorRef.current),
         limit(pageSize + 1),
       );
@@ -125,7 +126,28 @@ export const usePaginatedCustomers = (
     }
   }, [enabled, onError, pageSize, state.hasMore, state.loadingMore, user]);
 
-  return { ...state, loadMore };
+  const loadAll = useCallback(async () => {
+    if (!user || !enabled || state.loadingMore || !state.hasMore) return;
+    setState((previous) => ({ ...previous, loadingMore: true }));
+    try {
+      const snapshot = await getDocs(query(collection(db, 'clientes'), orderBy(documentId())));
+      const items = snapshot.docs
+        .map((item) => parseCustomer(item.id, item.data()))
+        .filter((customer) => !customer.archived && !customer.archivedAt);
+      cursorRef.current = snapshot.docs.at(-1) || cursorRef.current;
+      setState((previous) => ({
+        ...previous,
+        items: mergeUniqueById(previous.items, items),
+        hasMore: false,
+        loadingMore: false,
+      }));
+    } catch {
+      setState((previous) => ({ ...previous, loadingMore: false }));
+      onError?.('Erro ao pesquisar todos os clientes');
+    }
+  }, [enabled, onError, state.hasMore, state.loadingMore, user]);
+
+  return { ...state, loadMore, loadAll };
 };
 
 export const usePaginatedLoans = (
