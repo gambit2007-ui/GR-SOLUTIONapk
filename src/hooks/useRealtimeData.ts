@@ -22,6 +22,7 @@ interface RealtimeDataState {
   feeSettings: FeeSettings;
   caixa: number;
   isCustomersLoading: boolean;
+  cashMovementsStatus: 'idle' | 'loading' | 'ready' | 'error';
 }
 
 const initialState: RealtimeDataState = {
@@ -34,6 +35,7 @@ const initialState: RealtimeDataState = {
   },
   caixa: 0,
   isCustomersLoading: false,
+  cashMovementsStatus: 'idle',
 };
 
 interface UseRealtimeDataOptions {
@@ -142,22 +144,40 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
       },
     );
 
-    const movimentacoesListener = loadCashMovements
-      ? onSnapshot(
-          query(collection(db, 'cashMovement'), orderBy('date', 'desc')),
-          (snapshot) => {
-            const movimentacoes = snapshot.docs.map((docSnap) => parseCashMovement(docSnap.id, docSnap.data()));
-            setState((previous) => ({ ...previous, movimentacoes }));
-          },
-          (error) => {
-            reportRealtimeError('movimentacoes do caixa', error, onError);
-            setState((previous) => ({ ...previous, movimentacoes: [] }));
-          },
-        )
-      : (() => {
-          setState((previous) => previous.movimentacoes.length > 0 ? { ...previous, movimentacoes: [] } : previous);
-          return () => {};
-        })();
+    let movimentacoesListener = () => {};
+
+    if (loadCashMovements) {
+      setState((previous) => ({
+        ...previous,
+        cashMovementsStatus: 'loading',
+      }));
+
+      movimentacoesListener = onSnapshot(
+        query(collection(db, 'cashMovement'), orderBy('date', 'desc')),
+        (snapshot) => {
+          const movimentacoes = snapshot.docs.map((docSnap) => parseCashMovement(docSnap.id, docSnap.data()));
+          setState((previous) => ({
+            ...previous,
+            movimentacoes,
+            cashMovementsStatus: 'ready',
+          }));
+        },
+        (error) => {
+          reportRealtimeError('movimentacoes do caixa', error, onError);
+          setState((previous) => ({
+            ...previous,
+            movimentacoes: [],
+            cashMovementsStatus: 'error',
+          }));
+        },
+      );
+    } else {
+      setState((previous) => (
+        previous.movimentacoes.length > 0 || previous.cashMovementsStatus !== 'idle'
+          ? { ...previous, movimentacoes: [], cashMovementsStatus: 'idle' }
+          : previous
+      ));
+    }
 
     const monthlySnapshotsListener = loadMonthlySnapshots
       ? onSnapshot(

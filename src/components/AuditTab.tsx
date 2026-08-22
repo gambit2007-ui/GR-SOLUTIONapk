@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ScanSearch, ShieldCheck, X } from 'lucide-react';
+import { LoaderCircle, ScanSearch, ShieldCheck, X } from 'lucide-react';
 import type { CashMovement, Loan } from '../types';
 import {
   applySafeLegacyPaymentMigration,
@@ -18,6 +18,7 @@ import { effectiveLoanStatus } from '../utils/loanCompat';
 interface AuditTabProps {
   loans: Loan[];
   cashMovements: CashMovement[];
+  cashMovementsStatus: 'idle' | 'loading' | 'ready' | 'error';
   caixa: number;
   currentUserUid?: string;
   onNavigateToLoan: (loanId: string) => void;
@@ -66,6 +67,7 @@ const groupByMonth = <T,>(items: T[], getDate: (item: T) => string) =>
 const AuditTab: React.FC<AuditTabProps> = ({
   loans,
   cashMovements,
+  cashMovementsStatus,
   caixa,
   currentUserUid,
   onNavigateToLoan,
@@ -461,7 +463,18 @@ const AuditTab: React.FC<AuditTabProps> = ({
                 </div>
               );
             })}
-            {Object.keys(movementsByMonth).length === 0 && (
+            {(cashMovementsStatus === 'idle' || cashMovementsStatus === 'loading') && (
+              <div role="status" aria-live="polite" className="flex items-center justify-center gap-2 py-8 text-zinc-600">
+                <LoaderCircle size={14} className="animate-spin text-[#BF953F]" />
+                <p className="text-[9px] font-black uppercase tracking-widest">Carregando movimentacoes</p>
+              </div>
+            )}
+            {cashMovementsStatus === 'error' && (
+              <p role="alert" className="py-8 text-center text-[9px] font-black text-red-500 uppercase tracking-widest">
+                Nao foi possivel carregar as movimentacoes
+              </p>
+            )}
+            {cashMovementsStatus === 'ready' && Object.keys(movementsByMonth).length === 0 && (
               <p className="py-8 text-center text-[9px] text-zinc-600 uppercase tracking-widest">Nenhuma movimentacao encontrada</p>
             )}
           </div>

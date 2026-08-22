@@ -17,7 +17,7 @@ import {
   where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import type { Customer, Loan } from '../types';
+import type { Customer, DataLoadStatus, Loan } from '../types';
 import { parseCustomer, parseLoan } from '../utils/domainParsers';
 
 interface PaginatedState<T> {
@@ -26,6 +26,7 @@ interface PaginatedState<T> {
   hasMore: boolean;
   loading: boolean;
   loadingMore: boolean;
+  status: DataLoadStatus;
 }
 
 const createInitialState = <T,>(): PaginatedState<T> => ({
@@ -34,6 +35,7 @@ const createInitialState = <T,>(): PaginatedState<T> => ({
   hasMore: false,
   loading: false,
   loadingMore: false,
+  status: 'idle',
 });
 
 const mergeUniqueById = <T extends { id: string }>(current: T[], incoming: T[]): T[] => {
@@ -69,7 +71,7 @@ export const usePaginatedCustomers = (
       return;
     }
 
-    setState((previous) => ({ ...previous, loading: true }));
+    setState((previous) => ({ ...previous, loading: true, status: 'loading' }));
     const firstPageQuery = query(
       collection(db, 'clientes'),
       orderBy(documentId()),
@@ -85,11 +87,11 @@ export const usePaginatedCustomers = (
         const items = pageDocs
           .map((item) => parseCustomer(item.id, item.data()))
           .filter((customer) => !customer.archived && !customer.archivedAt);
-        setState((previous) => ({ ...previous, items, hasMore, loading: false }));
+        setState((previous) => ({ ...previous, items, hasMore, loading: false, status: 'ready' }));
         void refreshTotal().catch(() => onError?.('Erro ao carregar total de clientes'));
       },
       () => {
-        setState((previous) => ({ ...previous, loading: false }));
+        setState((previous) => ({ ...previous, loading: false, status: 'error' }));
         onError?.('Erro ao carregar clientes');
       },
     );
@@ -172,7 +174,7 @@ export const usePaginatedLoans = (
       return;
     }
 
-    setState((previous) => ({ ...previous, loading: true }));
+    setState((previous) => ({ ...previous, loading: true, status: 'loading' }));
     const firstPageQuery = query(
       collection(db, 'loans'),
       orderBy('startDate', 'desc'),
@@ -185,11 +187,11 @@ export const usePaginatedLoans = (
         const pageDocs = hasMore ? snapshot.docs.slice(0, pageSize) : snapshot.docs;
         cursorRef.current = pageDocs.at(-1) || null;
         const items = pageDocs.map((item) => parseLoan(item.id, item.data()));
-        setState((previous) => ({ ...previous, items, hasMore, loading: false }));
+        setState((previous) => ({ ...previous, items, hasMore, loading: false, status: 'ready' }));
         void refreshTotal().catch(() => onError?.('Erro ao carregar total de contratos'));
       },
       () => {
-        setState((previous) => ({ ...previous, loading: false }));
+        setState((previous) => ({ ...previous, loading: false, status: 'error' }));
         onError?.('Erro ao carregar contratos');
       },
     );

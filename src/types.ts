@@ -10,6 +10,7 @@
 
 export type InterestType = 'SIMPLES' | 'PRICE' | 'SIMPLE' | 'SPLIT';
 export type LoanType = 'SIMPLE' | 'PRICE';
+export type DataLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export type InstallmentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO' | 'PENDING' | 'PAID' | 'OVERDUE';
 export type PaymentStatus = InstallmentStatus;

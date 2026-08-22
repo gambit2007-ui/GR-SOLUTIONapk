@@ -2,7 +2,7 @@
 import { Plus, Search, User, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle } from 'lucide-react';
 import { getDownloadURL, ref, uploadBytes, type FirebaseStorage } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
-import { Customer, Loan, CustomerDocument } from '../types';
+import { Customer, Loan, CustomerDocument, type DataLoadStatus } from '../types';
 import {
   effectiveLoanStatus,
   loanInstallmentsCount,
@@ -23,6 +23,7 @@ interface CustomerSectionProps {
   customers: Customer[];
   loans: Loan[];
   isLoadingCustomers?: boolean;
+  customersLoadStatus?: DataLoadStatus;
   totalCustomers?: number;
   hasMoreCustomers?: boolean;
   isLoadingMoreCustomers?: boolean;
@@ -38,6 +39,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
   customers,
   loans,
   isLoadingCustomers = false,
+  customersLoadStatus = 'ready',
   totalCustomers,
   hasMoreCustomers = false,
   isLoadingMoreCustomers = false,
@@ -514,7 +516,9 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
           <div>
             <p className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Total de clientes</p>
             <p className="text-lg font-black text-white leading-none mt-1">
-              {isLoadingCustomers && customers.length === 0 ? '--' : (totalCustomers ?? customers.length)}
+              {(isLoadingCustomers || customersLoadStatus === 'idle') && customers.length === 0
+                ? '--'
+                : (totalCustomers ?? customers.length)}
             </p>
           </div>
         </div>
@@ -526,12 +530,19 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         </button>
       </div>
 
-      {isLoadingCustomers && customers.length === 0 ? (
+      {(isLoadingCustomers || customersLoadStatus === 'idle') && customers.length === 0 ? (
         <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 flex items-center justify-center gap-3">
           <div className="h-4 w-4 rounded-full border-2 border-zinc-800 border-t-[#BF953F] animate-spin" />
           <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
             Carregando clientes...
           </span>
+        </div>
+      ) : customersLoadStatus === 'error' && customers.length === 0 ? (
+        <div role="alert" className="bg-[#050505] border border-red-500/30 rounded-[2rem] p-8 flex items-center justify-center gap-3 text-red-500">
+          <AlertTriangle size={16} />
+          <p className="text-[10px] font-black uppercase tracking-widest">
+            Nao foi possivel carregar os clientes
+          </p>
         </div>
       ) : filteredCustomers.length === 0 ? (
         <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 text-center">

@@ -10,6 +10,7 @@ import {
   LoanPaymentReversalRequest,
   LoanPaymentReversalResult,
   PaymentApplyMode,
+  DataLoadStatus,
 } from '../../types';
 import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown } from 'lucide-react';
 import {
@@ -39,6 +40,8 @@ interface LoanSectionProps {
   customers: Customer[];
   loans: Loan[];
   isLoadingCustomers?: boolean;
+  loansLoadStatus?: DataLoadStatus;
+  isLoadingMoreLoans?: boolean;
   totalLoans?: number;
   hasMoreLoans?: boolean;
   onLoadMoreLoans?: () => void;
@@ -93,6 +96,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   customers, 
   loans, 
   isLoadingCustomers = false,
+  loansLoadStatus = 'ready',
+  isLoadingMoreLoans = false,
   totalLoans,
   hasMoreLoans = false,
   onLoadMoreLoans,
@@ -1092,7 +1097,20 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       )}
 
       <div className="space-y-4">
-        {filteredLoans.length === 0 ? (
+        {(loansLoadStatus === 'idle' || loansLoadStatus === 'loading') && loans.length === 0 ? (
+          <div role="status" aria-live="polite" className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 flex items-center justify-center gap-3">
+            <Loader2 size={16} className="animate-spin text-[#BF953F]" />
+            <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+              Carregando contratos...
+            </p>
+          </div>
+        ) : loansLoadStatus === 'error' && loans.length === 0 ? (
+          <div role="alert" className="bg-[#050505] border border-red-500/30 rounded-[2rem] p-8 text-center">
+            <p className="text-[10px] font-black text-red-500 uppercase tracking-widest">
+              Nao foi possivel carregar os contratos
+            </p>
+          </div>
+        ) : filteredLoans.length === 0 ? (
           <div className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 text-center">
             <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
               Nenhum contrato encontrado
@@ -1450,9 +1468,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
               <button
                 type="button"
                 onClick={onLoadMoreLoans}
-                className="px-4 py-2 border border-[#BF953F]/30 text-[#BF953F] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-[#BF953F]/10"
+                disabled={isLoadingMoreLoans}
+                className="px-4 py-2 border border-[#BF953F]/30 text-[#BF953F] rounded-xl text-[9px] font-black uppercase tracking-widest hover:bg-[#BF953F]/10 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
               >
-                Carregar mais
+                {isLoadingMoreLoans && <Loader2 size={12} className="animate-spin" />}
+                {isLoadingMoreLoans ? 'Carregando...' : 'Carregar mais'}
               </button>
             )}
           </div>

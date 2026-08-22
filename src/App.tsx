@@ -85,6 +85,7 @@ const App: React.FC = () => {
     feeSettings,
     caixa,
     isCustomersLoading: isRealtimeCustomersLoading,
+    cashMovementsStatus,
   } = useRealtimeData(activeDataUser, {
     loadCustomers: shouldLoadCustomers,
     loadLoans: shouldLoadLoans,
@@ -106,7 +107,7 @@ const App: React.FC = () => {
   const clientes = currentView === 'CUSTOMERS' ? paginatedCustomers.items : realtimeCustomers;
   const contratos = currentView === 'LOANS' ? paginatedLoans.items : realtimeLoans;
   const isCustomersLoading = currentView === 'CUSTOMERS'
-    ? paginatedCustomers.loading
+    ? paginatedCustomers.status === 'idle' || paginatedCustomers.status === 'loading'
     : isRealtimeCustomersLoading;
   const dailyLateFeeRate = feeSettings.dailyLateFeeRate;
   const {
@@ -447,6 +448,7 @@ const App: React.FC = () => {
             customers={clientes}
             loans={contratos}
             isLoadingCustomers={isCustomersLoading}
+            customersLoadStatus={paginatedCustomers.status}
             totalCustomers={paginatedCustomers.total}
             hasMoreCustomers={paginatedCustomers.hasMore}
             isLoadingMoreCustomers={paginatedCustomers.loadingMore}
@@ -464,6 +466,8 @@ const App: React.FC = () => {
             customers={clientes}
             loans={contratos}
             isLoadingCustomers={isCustomersLoading}
+            loansLoadStatus={paginatedLoans.status}
+            isLoadingMoreLoans={paginatedLoans.loadingMore}
             totalLoans={paginatedLoans.total}
             hasMoreLoans={paginatedLoans.hasMore}
             onLoadMoreLoans={() => { void paginatedLoans.loadMore(); }}
@@ -501,6 +505,7 @@ const App: React.FC = () => {
           <AuditTab
             loans={contratos}
             cashMovements={movimentacoes}
+            cashMovementsStatus={cashMovementsStatus}
             caixa={caixa}
             currentUserUid={user?.uid}
             onNavigateToLoan={navigateToLoan}
