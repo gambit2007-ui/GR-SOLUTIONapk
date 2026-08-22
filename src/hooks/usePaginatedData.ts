@@ -237,5 +237,24 @@ export const usePaginatedLoans = (
     }
   }, [enabled, onError, pageSize, state.hasMore, state.loadingMore, user]);
 
-  return { ...state, loadMore };
+  const loadAll = useCallback(async () => {
+    if (!user || !enabled || state.loadingMore || !state.hasMore) return;
+    setState((previous) => ({ ...previous, loadingMore: true }));
+    try {
+      const snapshot = await getDocs(query(collection(db, 'loans'), orderBy('startDate', 'desc')));
+      const items = snapshot.docs.map((item) => parseLoan(item.id, item.data()));
+      cursorRef.current = snapshot.docs.at(-1) || cursorRef.current;
+      setState((previous) => ({
+        ...previous,
+        items: mergeUniqueById(previous.items, items),
+        hasMore: false,
+        loadingMore: false,
+      }));
+    } catch {
+      setState((previous) => ({ ...previous, loadingMore: false }));
+      onError?.('Erro ao pesquisar todos os contratos');
+    }
+  }, [enabled, onError, state.hasMore, state.loadingMore, user]);
+
+  return { ...state, loadMore, loadAll };
 };

@@ -471,6 +471,7 @@ const App: React.FC = () => {
             totalLoans={paginatedLoans.total}
             hasMoreLoans={paginatedLoans.hasMore}
             onLoadMoreLoans={() => { void paginatedLoans.loadMore(); }}
+            onLoadAllLoans={paginatedLoans.loadAll}
             onAddLoan={handleAddLoan}
             onUpdateLoan={handleUpdateLoan}
             onCancelLoan={handleCancelLoan}

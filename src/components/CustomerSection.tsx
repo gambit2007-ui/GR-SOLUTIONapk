@@ -9,15 +9,9 @@ import {
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { calculateCustomerFinancialSummary } from '../utils/customerFinancialSummary';
+import { normalizeSearchText } from '../utils/search';
 import { auth } from '../firebase';
 import { storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebaseStorage';
-
-const normalizeCustomerSearch = (value: string | undefined) =>
-  String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
 
 interface CustomerSectionProps {
   customers: Customer[];
@@ -52,6 +46,7 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
 }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [lastCompleteSearchKey, setLastCompleteSearchKey] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
   const [formData, setFormData] = useState<Partial<Customer>>({});
@@ -388,13 +383,13 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     }));
   };
 
-  const normalizedSearchTerm = normalizeCustomerSearch(searchTerm);
+  const normalizedSearchTerm = normalizeSearchText(searchTerm);
   const numericSearchTerm = searchTerm.replace(/\D/g, '');
   const filteredCustomers = [...customers]
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR', { sensitivity: 'base' }))
     .filter(c =>
-      normalizeCustomerSearch(c.name).includes(normalizedSearchTerm) ||
-      normalizeCustomerSearch(c.email).includes(normalizedSearchTerm) ||
+      normalizeSearchText(c.name).includes(normalizedSearchTerm) ||
+      normalizeSearchText(c.email).includes(normalizedSearchTerm) ||
       (numericSearchTerm.length > 0 && (c.cpf || '').replace(/\D/g, '').includes(numericSearchTerm)) ||
       (numericSearchTerm.length > 0 && (c.phone || '').replace(/\D/g, '').includes(numericSearchTerm))
     );
@@ -406,15 +401,29 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
     (currentPageSafe - 1) * CUSTOMERS_PER_PAGE,
     currentPageSafe * CUSTOMERS_PER_PAGE,
   );
+  const isCompletingCustomerSearch = normalizedSearchTerm.length > 0 && (
+    isLoadingMoreCustomers ||
+    (hasMoreCustomers && lastCompleteSearchKey !== normalizedSearchTerm)
+  );
 
   React.useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm]);
 
   React.useEffect(() => {
-    if (!searchTerm.trim() || !hasMoreCustomers || isLoadingMoreCustomers || !onLoadAllCustomers) return;
+    if (!normalizedSearchTerm) {
+      setLastCompleteSearchKey('');
+      return;
+    }
+    if (
+      !hasMoreCustomers ||
+      isLoadingMoreCustomers ||
+      !onLoadAllCustomers ||
+      lastCompleteSearchKey === normalizedSearchTerm
+    ) return;
+    setLastCompleteSearchKey(normalizedSearchTerm);
     void onLoadAllCustomers();
-  }, [hasMoreCustomers, isLoadingMoreCustomers, onLoadAllCustomers, searchTerm]);
+  }, [hasMoreCustomers, isLoadingMoreCustomers, lastCompleteSearchKey, normalizedSearchTerm, onLoadAllCustomers]);
 
   React.useEffect(() => {
     if (currentPage > totalPages) {
@@ -536,6 +545,13 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
           <span className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
             Carregando clientes...
           </span>
+        </div>
+      ) : isCompletingCustomerSearch && filteredCustomers.length === 0 ? (
+        <div role="status" aria-live="polite" className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 flex items-center justify-center gap-3">
+          <div className="h-4 w-4 rounded-full border-2 border-zinc-800 border-t-[#BF953F] animate-spin" />
+          <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+            Procurando clientes...
+          </p>
         </div>
       ) : customersLoadStatus === 'error' && customers.length === 0 ? (
         <div role="alert" className="bg-[#050505] border border-red-500/30 rounded-[2rem] p-8 flex items-center justify-center gap-3 text-red-500">

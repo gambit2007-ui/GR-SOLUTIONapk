@@ -23,6 +23,7 @@ import {
 } from '../../utils/loanCompat';
 import { buildInstallmentDueDate, getLocalISODate } from '../../utils/dateTime';
 import { calculateInstallmentLateFee } from '../../utils/lateFee';
+import { normalizeSearchText } from '../../utils/search';
 import {
   buildEarlySettlementQuote,
   EarlySettlementQuote,
@@ -45,6 +46,7 @@ interface LoanSectionProps {
   totalLoans?: number;
   hasMoreLoans?: boolean;
   onLoadMoreLoans?: () => void;
+  onLoadAllLoans?: () => Promise<void> | void;
   onAddLoan: (draft: LoanDraft) => Promise<CreatedLoanResult>;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onCancelLoan: (loanId: string, reason: string) => Promise<void>;
@@ -101,6 +103,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   totalLoans,
   hasMoreLoans = false,
   onLoadMoreLoans,
+  onLoadAllLoans,
   onAddLoan, 
   onUpdateLoan,
   onCancelLoan,
@@ -136,6 +139,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [processingRenewal, setProcessingRenewal] = useState<string | null>(null);
   const [generatingContractPdfId, setGeneratingContractPdfId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [lastCompleteSearchKey, setLastCompleteSearchKey] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -297,8 +301,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     );
   };
 
+  const normalizedSearchTerm = normalizeSearchText(searchTerm);
   const filteredLoans = loans.filter(loan => {
-    const matchesSearch = loan.customerName.toLowerCase().includes(searchTerm.toLowerCase()) || loan.id.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSearch = normalizeSearchText(loan.customerName).includes(normalizedSearchTerm) ||
+      normalizeSearchText(loan.id).includes(normalizedSearchTerm) ||
+      normalizeSearchText(loan.contractNumber).includes(normalizedSearchTerm);
     const installments = Array.isArray(loan.installments) ? loan.installments : [];
     const loanStatus = effectiveLoanStatus(loan);
     
@@ -326,10 +333,31 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     (currentPageSafe - 1) * LOANS_PER_PAGE,
     currentPageSafe * LOANS_PER_PAGE,
   );
+  const completeSearchKey = `${normalizedSearchTerm}|${statusFilter}`;
+  const requiresCompleteList = normalizedSearchTerm.length > 0 || statusFilter !== 'ALL';
+  const isCompletingLoanSearch = requiresCompleteList && (
+    isLoadingMoreLoans ||
+    (hasMoreLoans && lastCompleteSearchKey !== completeSearchKey)
+  );
 
   React.useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, statusFilter]);
+
+  React.useEffect(() => {
+    if (!requiresCompleteList) {
+      setLastCompleteSearchKey('');
+      return;
+    }
+    if (
+      !hasMoreLoans ||
+      isLoadingMoreLoans ||
+      !onLoadAllLoans ||
+      lastCompleteSearchKey === completeSearchKey
+    ) return;
+    setLastCompleteSearchKey(completeSearchKey);
+    void onLoadAllLoans();
+  }, [completeSearchKey, hasMoreLoans, isLoadingMoreLoans, lastCompleteSearchKey, onLoadAllLoans, requiresCompleteList]);
 
   React.useEffect(() => {
     if (currentPage > totalPages) {
@@ -1102,6 +1130,13 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             <Loader2 size={16} className="animate-spin text-[#BF953F]" />
             <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
               Carregando contratos...
+            </p>
+          </div>
+        ) : isCompletingLoanSearch && filteredLoans.length === 0 ? (
+          <div role="status" aria-live="polite" className="bg-[#050505] border border-zinc-900 rounded-[2rem] p-8 flex items-center justify-center gap-3">
+            <Loader2 size={16} className="animate-spin text-[#BF953F]" />
+            <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">
+              Procurando contratos...
             </p>
           </div>
         ) : loansLoadStatus === 'error' && loans.length === 0 ? (
