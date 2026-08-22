@@ -176,6 +176,12 @@ const parseInstallmentPaymentEntry = (raw: unknown): InstallmentPaymentEntry | n
   };
 };
 
+const parseStringArray = (value: unknown): string[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const parsed = value.map((item) => toOptionalString(item)).filter((item): item is string => Boolean(item));
+  return parsed.length > 0 ? parsed : undefined;
+};
+
 const parseBreakdownSource = (raw: unknown): BreakdownSource | string | undefined => {
   const source = toOptionalString(raw);
   if (!source) return undefined;
@@ -249,6 +255,7 @@ export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installm
         .map((entry) => parseInstallmentPaymentEntry(entry))
         .filter((entry): entry is InstallmentPaymentEntry => Boolean(entry))
     : [];
+  const credigrupo = isRecord(payload.credigrupo) ? payload.credigrupo : undefined;
 
   return {
     id: toOptionalString(payload.id),
@@ -272,6 +279,17 @@ export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installm
     paymentEntries: paymentEntries.length > 0 ? paymentEntries : undefined,
     breakdownSource: parseBreakdownSource(payload.breakdownSource),
     needsFiscalReview: payload.needsFiscalReview === true ? true : undefined,
+    credigrupo: credigrupo
+      ? {
+          installmentId: toOptionalString(credigrupo.installmentId),
+          externalStatus: toOptionalString(credigrupo.externalStatus),
+          investorPayoutStatus: toOptionalString(credigrupo.investorPayoutStatus),
+          pixBrcode: toOptionalString(credigrupo.pixBrcode),
+          pixQrCode: toOptionalString(credigrupo.pixQrCode),
+          totalCents: toOptionalPositiveNumber(credigrupo.totalCents),
+          updatedAt: toOptionalString(credigrupo.updatedAt),
+        }
+      : undefined,
   };
 };
 
@@ -289,6 +307,14 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
   );
   const amount = toNumber(payload.amount, 0);
   const interestRate = toNumber(payload.interestRate, 0);
+  const formalizationType = String(payload.formalizationType || '').toUpperCase() === 'BANCARIZED'
+    ? 'BANCARIZED'
+    : 'DIRECT';
+  const provider = String(payload.provider || '').toUpperCase() === 'CREDIGRUPO'
+    ? 'CREDIGRUPO'
+    : 'GR';
+  const funding = isRecord(payload.funding) ? payload.funding : undefined;
+  const credigrupo = isRecord(payload.credigrupo) ? payload.credigrupo : undefined;
 
   return {
     id,
@@ -337,11 +363,41 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     lastOperationByEmail: toOptionalString(payload.lastOperationByEmail),
     lastOperationByName: toOptionalString(payload.lastOperationByName),
     hasFinancialHistory: payload.hasFinancialHistory === true,
+    formalizationType,
+    provider,
+    funding: funding && toOptionalString(funding.investorId)
+      ? {
+          source: String(funding.source || '').toUpperCase() === 'EXTERNAL' ? 'EXTERNAL' : 'GR',
+          investorId: toString(funding.investorId, ''),
+          investorName: toString(funding.investorName, 'INVESTIDOR'),
+        }
+      : undefined,
+    credigrupo: credigrupo
+      ? {
+          operationId: toOptionalString(credigrupo.operationId),
+          borrowerId: toOptionalString(credigrupo.borrowerId),
+          investorId: toOptionalString(credigrupo.investorId),
+          proposalId: toOptionalString(credigrupo.proposalId),
+          requestId: toOptionalString(credigrupo.requestId),
+          kycStatus: toOptionalString(credigrupo.kycStatus),
+          ccbStatus: toOptionalString(credigrupo.ccbStatus),
+          fundingStatus: toOptionalString(credigrupo.fundingStatus),
+          borrowerSignUrl: toOptionalString(credigrupo.borrowerSignUrl),
+          investorSignUrl: toOptionalString(credigrupo.investorSignUrl),
+          ccbUrl: toOptionalString(credigrupo.ccbUrl),
+          ccbNumber: toOptionalString(credigrupo.ccbNumber),
+          externalStatus: toOptionalString(credigrupo.externalStatus),
+          signedAt: toOptionalString(credigrupo.signedAt),
+          fundedAt: toOptionalString(credigrupo.fundedAt),
+          updatedAt: toOptionalString(credigrupo.updatedAt),
+        }
+      : undefined,
   };
 };
 
 export const parseCustomer = (id: string, raw: unknown): Customer => {
   const payload = isRecord(raw) ? raw : {};
+  const credigrupo = isRecord(payload.credigrupo) ? payload.credigrupo : undefined;
 
   return {
     id,
@@ -372,6 +428,16 @@ export const parseCustomer = (id: string, raw: unknown): Customer => {
     archivedByUid: toOptionalString(payload.archivedByUid),
     archivedByEmail: toOptionalString(payload.archivedByEmail),
     archivedByName: toOptionalString(payload.archivedByName),
+    credigrupo: credigrupo
+      ? {
+          borrowerId: toOptionalString(credigrupo.borrowerId),
+          investorId: toOptionalString(credigrupo.investorId),
+          kycStatus: toOptionalString(credigrupo.kycStatus),
+          ccbEligible: typeof credigrupo.ccbEligible === 'boolean' ? credigrupo.ccbEligible : undefined,
+          eligibilityErrors: parseStringArray(credigrupo.eligibilityErrors),
+          updatedAt: credigrupo.updatedAt as Customer['credigrupo'] extends { updatedAt?: infer T } ? T : never,
+        }
+      : undefined,
   };
 };
 

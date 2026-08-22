@@ -99,10 +99,15 @@ service cloud.firestore {
 
     function validLoanUpdate(previousData, nextData, loanId) {
       return validLoan(nextData) &&
+        previousData.get('formalizationType', 'DIRECT') != 'BANCARIZED' &&
         nextData.amount == previousData.amount &&
         nextData.customerId == previousData.customerId &&
         nextData.get('contractNumber', '') == previousData.get('contractNumber', '') &&
         nextData.get('createdAt', null) == previousData.get('createdAt', null) &&
+        nextData.get('formalizationType', 'DIRECT') == previousData.get('formalizationType', 'DIRECT') &&
+        nextData.get('provider', 'GR') == previousData.get('provider', 'GR') &&
+        nextData.get('funding', null) == previousData.get('funding', null) &&
+        nextData.get('credigrupo', null) == previousData.get('credigrupo', null) &&
         nextData.version is int &&
         nextData.version == previousData.get('version', 0) + 1 &&
         validLoanOperationAudit(nextData) &&
@@ -178,7 +183,10 @@ service cloud.firestore {
 
     match /clientes/{customerId} {
       allow read: if isAuthorized();
-      allow create, update: if isAuthorized() && validCustomer(request.resource.data);
+      allow create: if isAuthorized() && validCustomer(request.resource.data) &&
+        !('credigrupo' in request.resource.data);
+      allow update: if isAuthorized() && validCustomer(request.resource.data) &&
+        request.resource.data.get('credigrupo', null) == resource.data.get('credigrupo', null);
       allow delete: if false;
     }
 
@@ -186,6 +194,8 @@ service cloud.firestore {
       allow read: if isAuthorized();
       allow create: if isAuthorized() &&
         validLoan(request.resource.data) &&
+        request.resource.data.get('formalizationType', 'DIRECT') != 'BANCARIZED' &&
+        request.resource.data.get('provider', 'GR') != 'CREDIGRUPO' &&
         request.resource.data.version == 0 &&
         request.resource.data.hasFinancialHistory == false &&
         validLoanOperationAudit(request.resource.data) &&

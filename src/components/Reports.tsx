@@ -866,6 +866,54 @@ const Reports: React.FC<ReportsProps> = ({
     );
   };
 
+  const investorSummaries = useMemo(() => {
+    const grouped = new Map<string, {
+      groupKey: string;
+      investorId: string;
+      investorName: string;
+      source: 'GR' | 'EXTERNAL';
+      capital: number;
+      received: number;
+      realProfit: number;
+      projectedProfit: number;
+      contracts: number;
+    }>();
+
+    loans.forEach((loan) => {
+      if (effectiveLoanStatus(loan) === 'CANCELLED') return;
+      const investorId = loan.funding?.investorId || 'GR-SOLUTION';
+      const source = loan.funding?.source || 'GR';
+      const groupKey = `${investorId}::${source}`;
+      const current = grouped.get(groupKey) || {
+        groupKey,
+        investorId,
+        investorName: loan.funding?.investorName || 'GR Solutions',
+        source,
+        capital: 0,
+        received: 0,
+        realProfit: 0,
+        projectedProfit: 0,
+        contracts: 0,
+      };
+      const totalReceivable = (loan.installments || []).reduce((sum, installment) => sum + installmentAmount(installment), 0);
+      const received = (loan.installments || []).reduce((sum, installment) => sum + installmentPaidAmount(installment), 0);
+      const recoveredPrincipal = (loan.installments || []).reduce(
+        (sum, installment) => sum + getInstallmentPrincipalRecovered(loan, installment),
+        0,
+      );
+      current.capital = roundMoney(current.capital + Number(loan.amount || 0));
+      current.received = roundMoney(current.received + received);
+      current.realProfit = roundMoney(current.realProfit + Math.max(received - recoveredPrincipal, 0));
+      current.projectedProfit = roundMoney(current.projectedProfit + Math.max(totalReceivable - Number(loan.amount || 0), 0));
+      current.contracts += 1;
+      grouped.set(groupKey, current);
+    });
+
+    return Array.from(grouped.values())
+      .map((item) => ({ ...item, roi: item.capital > 0 ? roundMoney((item.realProfit / item.capital) * 100) : 0 }))
+      .sort((left, right) => right.capital - left.capital);
+  }, [loans]);
+
   const financialCards = [
     { label: 'Total a Receber', value: totalAReceber, color: 'text-[#BF953F]' },
     { label: 'Valor em Rua', value: valorEmRua, color: 'text-blue-500' },
@@ -981,6 +1029,21 @@ const Reports: React.FC<ReportsProps> = ({
             </p>
           </div>
         ))}
+      </div>
+
+      <div className="bg-[#050505] border border-zinc-900 rounded-[2.5rem] p-6 sm:p-8">
+        <div className="flex items-center justify-between gap-4 mb-5">
+          <div><h3 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Carteira por Investidor</h3><p className="text-[8px] text-zinc-600 uppercase tracking-widest mt-1">Um investidor por contrato, com consolidacao individual</p></div>
+          <span className="text-[8px] font-black text-zinc-600 uppercase">{investorSummaries.length} fonte(s)</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {investorSummaries.map((investor) => (
+            <div key={investor.groupKey} className="rounded-2xl border border-zinc-900 bg-black p-4">
+              <div className="flex items-start justify-between gap-3"><div><p className="text-[9px] font-black text-white uppercase">{investor.investorName}</p><p className="text-[7px] text-zinc-600 uppercase mt-1">{investor.source === 'GR' ? 'Capital GR' : 'Capital externo'} - {investor.contracts} contrato(s)</p></div><span className={`text-[9px] font-black ${getRoiColorClass(investor.roi)}`}>{formatPercentage(investor.roi)}</span></div>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-[8px]"><p className="text-zinc-500">Capital<br /><strong className="text-white">R$ {investor.capital.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p><p className="text-zinc-500">Recebido<br /><strong className="text-emerald-500">R$ {investor.received.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p><p className="text-zinc-500">Lucro real<br /><strong className="text-[#BF953F]">R$ {investor.realProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p><p className="text-zinc-500">Lucro projetado<br /><strong className="text-blue-400">R$ {investor.projectedProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong></p></div>
+            </div>
+          ))}
+        </div>
       </div>
 
       {/* Resumo de lucratividade */}

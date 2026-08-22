@@ -196,4 +196,62 @@ describe('firestore.rules', () => {
     await assertFails(deleteDoc(doc(db, 'clientes', 'customer-1')));
     await assertFails(deleteDoc(doc(db, 'cashMovement', 'movement-1')));
   });
+
+  it('impede que o navegador crie um contrato bancarizado', async () => {
+    const db = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertFails(runTransaction(db, async (tx) => {
+      const loanRef = doc(db, 'loans', 'loan-bancarized');
+      const movementRef = doc(db, 'cashMovement', 'loan-created-bancarized');
+      tx.set(movementRef, {
+        type: 'RETIRADA',
+        amount: 100,
+        description: 'EMPRESTIMO BANCARIZADO: CLIENTE TESTE',
+        date: '2026-01-01T12:00:00.000Z',
+        loanId: loanRef.id,
+        operationId: movementRef.id,
+        createdByUid: 'admin-1',
+        recordedAt: serverTimestamp(),
+      });
+      tx.set(loanRef, {
+        ...validLoan,
+        formalizationType: 'BANCARIZED',
+        provider: 'CREDIGRUPO',
+        lastOperationId: movementRef.id,
+        lastOperationType: 'LOAN_CREATED',
+        lastOperationAt: serverTimestamp(),
+        lastOperationByUid: 'admin-1',
+      });
+    }));
+  });
+
+  it('impede que o navegador altere um contrato bancarizado existente', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'loans', 'loan-bancarized'), {
+        ...validLoan,
+        formalizationType: 'BANCARIZED',
+        provider: 'CREDIGRUPO',
+        funding: { source: 'GR', investorId: 'investor-1', investorName: 'GR Solutions' },
+      });
+    });
+
+    const db = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertFails(updateDoc(doc(db, 'loans', 'loan-bancarized'), {
+      status: 'QUITADO',
+      version: 1,
+      lastOperationId: 'client-forged-operation',
+      lastOperationType: 'PAYMENT',
+      lastOperationAt: serverTimestamp(),
+      lastOperationByUid: 'admin-1',
+    }));
+  });
+
+  it('mantem as colecoes Credigrupo acessiveis somente pelo backend', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), 'creditOperations', 'operation-1'), { status: 'FUNDED' });
+    });
+
+    const db = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertFails(getDoc(doc(db, 'creditOperations', 'operation-1')));
+    await assertFails(setDoc(doc(db, 'creditInvestorLedger', 'ledger-1'), { amount: 100 }));
+  });
 });

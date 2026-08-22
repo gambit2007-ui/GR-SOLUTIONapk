@@ -11,6 +11,9 @@
 export type InterestType = 'SIMPLES' | 'PRICE' | 'SIMPLE' | 'SPLIT';
 export type LoanType = 'SIMPLE' | 'PRICE';
 export type DataLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
+export type FormalizationType = 'DIRECT' | 'BANCARIZED';
+export type LoanProvider = 'GR' | 'CREDIGRUPO';
+export type FundingSourceType = 'GR' | 'EXTERNAL';
 
 export type InstallmentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO' | 'PENDING' | 'PAID' | 'OVERDUE';
 export type PaymentStatus = InstallmentStatus;
@@ -130,6 +133,14 @@ export interface Customer {
   archivedByUid?: string;
   archivedByEmail?: string;
   archivedByName?: string;
+  credigrupo?: {
+    borrowerId?: string;
+    investorId?: string;
+    kycStatus?: string;
+    ccbEligible?: boolean;
+    eligibilityErrors?: string[];
+    updatedAt?: FirestoreTimestampLike | Date | number | string;
+  };
 }
 
 export interface Installment {
@@ -154,6 +165,15 @@ export interface Installment {
   paymentEntries?: InstallmentPaymentEntry[];
   breakdownSource?: BreakdownSource | string;
   needsFiscalReview?: boolean;
+  credigrupo?: {
+    installmentId?: string;
+    externalStatus?: string;
+    investorPayoutStatus?: string;
+    pixBrcode?: string;
+    pixQrCode?: string;
+    totalCents?: number;
+    updatedAt?: string;
+  };
 }
 
 export interface PaymentBreakdown {
@@ -238,12 +258,45 @@ export interface Loan {
   canceledByName?: string;
   cancellationReason?: string;
   lastOperationId?: string;
-  lastOperationType?: 'LOAN_CREATED' | 'CONTRACT_EDIT' | 'PAYMENT' | 'PAYMENT_REVERSAL' | 'INTEREST_RENEWAL' | 'CANCELLATION';
+  lastOperationType?:
+    | 'LOAN_CREATED'
+    | 'CONTRACT_EDIT'
+    | 'PAYMENT'
+    | 'PAYMENT_REVERSAL'
+    | 'INTEREST_RENEWAL'
+    | 'CANCELLATION'
+    | 'BANCARIZATION_FUNDED'
+    | 'CREDIGRUPO_PAYMENT';
   lastOperationAt?: FirestoreTimestampLike | Date | number | string;
   lastOperationByUid?: string;
   lastOperationByEmail?: string;
   lastOperationByName?: string;
   hasFinancialHistory?: boolean;
+  formalizationType?: FormalizationType;
+  provider?: LoanProvider;
+  funding?: {
+    source: FundingSourceType;
+    investorId: string;
+    investorName: string;
+  };
+  credigrupo?: {
+    operationId?: string;
+    borrowerId?: string;
+    investorId?: string;
+    proposalId?: string;
+    requestId?: string;
+    kycStatus?: string;
+    ccbStatus?: string;
+    fundingStatus?: string;
+    borrowerSignUrl?: string;
+    investorSignUrl?: string;
+    ccbUrl?: string;
+    ccbNumber?: string;
+    externalStatus?: string;
+    signedAt?: string;
+    fundedAt?: string;
+    updatedAt?: string;
+  };
 }
 
 export type PaymentApplyMode =

@@ -12,7 +12,7 @@ import {
   PaymentApplyMode,
   DataLoadStatus,
 } from '../../types';
-import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown } from 'lucide-react';
+import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown, ExternalLink, ShieldCheck } from 'lucide-react';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -36,6 +36,12 @@ import {
   getNextMonthlyDueDate,
   shiftPendingInstallmentsToNewDueDate,
 } from '../../utils/interestOnlyRenewal';
+import BancarizationFields, {
+  BancarizationDraft,
+  createDefaultBancarizationDraft,
+} from './BancarizationFields';
+import BancarizationOperations from './BancarizationOperations';
+import { createBancarizedLoan, getCredigrupoStatus } from '../../services/credigrupoService';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -124,7 +130,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     interestType: 'SIMPLE' as 'SIMPLE' | 'PRICE' | 'SPLIT',
     frequency: 'MONTHLY' as 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY',
     installmentsCount: '',
-    startDate: getLocalISODate()
+    startDate: getLocalISODate(),
+    formalizationType: 'DIRECT' as 'DIRECT' | 'BANCARIZED',
   });
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -141,7 +148,26 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [lastCompleteSearchKey, setLastCompleteSearchKey] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'>('ALL');
+  const [formalizationFilter, setFormalizationFilter] = useState<'ALL' | 'DIRECT' | 'BANCARIZED'>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
+  const [credigrupoEnabled, setCredigrupoEnabled] = useState(false);
+  const [hasCredigrupoOperations, setHasCredigrupoOperations] = useState(false);
+  const [bancarizationDraft, setBancarizationDraft] = useState<BancarizationDraft>(() => createDefaultBancarizationDraft());
+  const [creatingBancarized, setCreatingBancarized] = useState(false);
+  const [bancarizationRefreshKey, setBancarizationRefreshKey] = useState(0);
+  const pendingBancarizationOperationIdsRef = React.useRef<Record<string, string>>({});
+
+  React.useEffect(() => {
+    let active = true;
+    void getCredigrupoStatus()
+      .then((status) => {
+        if (!active) return;
+        setCredigrupoEnabled(status.enabled);
+        setHasCredigrupoOperations(Boolean(status.hasExistingOperations));
+      })
+      .catch(() => { if (active) setCredigrupoEnabled(false); });
+    return () => { active = false; };
+  }, []);
 
   const fromLegacyInterestType = (value: unknown): 'SIMPLE' | 'PRICE' | 'SPLIT' => {
     const normalized = String(value || '').toUpperCase();
@@ -308,6 +334,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       normalizeSearchText(loan.contractNumber).includes(normalizedSearchTerm);
     const installments = Array.isArray(loan.installments) ? loan.installments : [];
     const loanStatus = effectiveLoanStatus(loan);
+    const loanFormalization = loan.formalizationType === 'BANCARIZED' ? 'BANCARIZED' : 'DIRECT';
+    const matchesFormalization = formalizationFilter === 'ALL' || formalizationFilter === loanFormalization;
     
     const isOverdue = loanStatus === 'ACTIVE' && installments.some(inst => {
       if (!inst?.dueDate || normalizeInstallmentStatus(inst.status) === 'PAID') return false;
@@ -318,12 +346,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       return dueDate < today;
     });
 
-    if (statusFilter === 'ALL') return matchesSearch;
-    if (statusFilter === 'ACTIVE') return matchesSearch && loanStatus === 'ACTIVE' && !isOverdue;
-    if (statusFilter === 'COMPLETED') return matchesSearch && loanStatus === 'COMPLETED';
-    if (statusFilter === 'CANCELLED') return matchesSearch && loanStatus === 'CANCELLED';
-    if (statusFilter === 'OVERDUE') return matchesSearch && isOverdue;
-    return matchesSearch;
+    if (statusFilter === 'ALL') return matchesSearch && matchesFormalization;
+    if (statusFilter === 'ACTIVE') return matchesSearch && matchesFormalization && loanStatus === 'ACTIVE' && !isOverdue;
+    if (statusFilter === 'COMPLETED') return matchesSearch && matchesFormalization && loanStatus === 'COMPLETED';
+    if (statusFilter === 'CANCELLED') return matchesSearch && matchesFormalization && loanStatus === 'CANCELLED';
+    if (statusFilter === 'OVERDUE') return matchesSearch && matchesFormalization && isOverdue;
+    return matchesSearch && matchesFormalization;
   });
 
   const LOANS_PER_PAGE = 10;
@@ -333,8 +361,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     (currentPageSafe - 1) * LOANS_PER_PAGE,
     currentPageSafe * LOANS_PER_PAGE,
   );
-  const completeSearchKey = `${normalizedSearchTerm}|${statusFilter}`;
-  const requiresCompleteList = normalizedSearchTerm.length > 0 || statusFilter !== 'ALL';
+  const completeSearchKey = `${normalizedSearchTerm}|${statusFilter}|${formalizationFilter}`;
+  const requiresCompleteList = normalizedSearchTerm.length > 0 || statusFilter !== 'ALL' || formalizationFilter !== 'ALL';
   const isCompletingLoanSearch = requiresCompleteList && (
     isLoadingMoreLoans ||
     (hasMoreLoans && lastCompleteSearchKey !== completeSearchKey)
@@ -342,7 +370,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, statusFilter]);
+  }, [searchTerm, statusFilter, formalizationFilter]);
 
   React.useEffect(() => {
     if (!requiresCompleteList) {
@@ -390,6 +418,18 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     }
   }, [initialExpandedLoanId]);
   const [formData, setFormData] = useState(buildDefaultFormData);
+
+  React.useEffect(() => {
+    if (!bancarizationDraft.simulation) return;
+    setBancarizationDraft((current) => ({ ...current, simulation: undefined }));
+  }, [
+    formData.amount,
+    formData.installmentsCount,
+    formData.interestRate,
+    formData.startDate,
+    formData.frequency,
+    formData.interestType,
+  ]);
 
   const calculateInstallments = () => {
     const amount = Number(formData.amount);
@@ -464,6 +504,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
   const resetLoanForm = () => {
     setFormData(buildDefaultFormData());
+    setBancarizationDraft(createDefaultBancarizationDraft());
     setEditingLoanId(null);
   };
 
@@ -473,6 +514,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   };
 
   const openEditLoanModal = (loan: Loan) => {
+    if (loan.formalizationType === 'BANCARIZED') {
+      showToast('Contratos bancarizados sao atualizados pela Credigrupo', 'error');
+      return;
+    }
     const hasPaidInstallment = (Array.isArray(loan.installments) ? loan.installments : [])
       .some(inst => installmentPaidAmount(inst) > 0 || normalizeInstallmentStatus(inst?.status) === 'PAID');
 
@@ -491,7 +536,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       interestType: fromLegacyInterestType(loan.interestType),
       frequency: fromLegacyFrequency(loan.frequency),
       installmentsCount: String(loanInstallmentsCount(loan)),
-      startDate: loan.startDate || getLocalISODate()
+      startDate: loan.startDate || getLocalISODate(),
+      formalizationType: 'DIRECT',
     });
     setIsModalOpen(true);
   };
@@ -785,6 +831,42 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const customer = customers.find(c => c.id === formData.customerId);
     if (!customer) return showToast('Selecione um cliente', 'error');
 
+    if (formData.formalizationType === 'BANCARIZED') {
+      if (editingLoanId) return showToast('Bancarizacao nao pode ser aplicada por edicao', 'error');
+      if (!credigrupoEnabled) return showToast('Integracao Credigrupo desativada', 'error');
+      if (!bancarizationDraft.simulation) return showToast('Realize e confirme a simulacao oficial', 'error');
+      if (!bancarizationDraft.investorId || !bancarizationDraft.investorName) {
+        return showToast('Selecione o investidor', 'error');
+      }
+      if (creatingBancarized) return;
+
+      const simulationId = bancarizationDraft.simulation.simulationId;
+      const operationId = pendingBancarizationOperationIdsRef.current[simulationId]
+        || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID()
+          : `bancarization-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`);
+      pendingBancarizationOperationIdsRef.current[simulationId] = operationId;
+      setCreatingBancarized(true);
+      try {
+        await createBancarizedLoan({
+          operationId,
+          simulationId,
+          fundingSource: bancarizationDraft.fundingSource,
+        });
+        delete pendingBancarizationOperationIdsRef.current[simulationId];
+        setIsModalOpen(false);
+        resetLoanForm();
+        setHasCredigrupoOperations(true);
+        setBancarizationRefreshKey((current) => current + 1);
+        showToast('Proposta criada. Aguardando PIX de funding.', 'success');
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Falha ao criar proposta bancarizada', 'error');
+      } finally {
+        setCreatingBancarized(false);
+      }
+      return;
+    }
+
     if (formData.interestType === 'SPLIT') {
       const totalMonthlyRate = Number(formData.interestRate);
       const paidMonthlyRate = Number(formData.monthlyPaidInterestRate);
@@ -830,7 +912,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       dueDate,
       startDate: formData.startDate,
       paidAmount: 0,
-      installments
+      installments,
+      formalizationType: 'DIRECT',
+      provider: 'GR',
+      funding: {
+        source: 'GR',
+        investorId: 'GR-SOLUTION',
+        investorName: 'GR Solutions',
+      },
     };
 
     try {
@@ -1078,6 +1167,21 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     window.open(`https://wa.me/55${phone}?text=${text}`, '_blank');
   };
 
+  const openCredigrupoUrl = (value?: string) => {
+    if (!value) return;
+    try {
+      const url = new URL(value);
+      const allowedHosts = new Set(['app.zapsign.com.br', 'storage.supabase.co']);
+      if (url.protocol !== 'https:' || !allowedHosts.has(url.hostname.toLowerCase())) {
+        showToast('Link externo bloqueado por seguranca', 'error');
+        return;
+      }
+      window.open(url.toString(), '_blank', 'noopener,noreferrer');
+    } catch {
+      showToast('Link externo invalido', 'error');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
@@ -1106,6 +1210,22 @@ const LoanSection: React.FC<LoanSectionProps> = ({
               </button>
             ))}
           </div>
+          {(credigrupoEnabled || loans.some((loan) => loan.formalizationType === 'BANCARIZED')) && (
+            <div className="flex bg-[#050505] border border-zinc-900 rounded-xl p-1 overflow-x-auto max-w-full">
+              {(['ALL', 'DIRECT', 'BANCARIZED'] as const).map((filter) => (
+                <button
+                  key={filter}
+                  type="button"
+                  onClick={() => setFormalizationFilter(filter)}
+                  className={`px-3 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${
+                    formalizationFilter === filter ? 'bg-[#BF953F]/15 text-[#F5D77B]' : 'text-zinc-600 hover:text-white'
+                  }`}
+                >
+                  {filter === 'ALL' ? 'Todos tipos' : filter === 'DIRECT' ? 'GR Direto' : 'Bancarizados'}
+                </button>
+              ))}
+            </div>
+          )}
           <button
             onClick={openNewLoanModal}
             className="px-6 py-3 gold-gradient text-black rounded-xl font-black text-[10px] tracking-widest uppercase flex items-center gap-2 whitespace-nowrap"
@@ -1123,6 +1243,16 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           </span>
         </div>
       )}
+
+      <BancarizationOperations
+        enabled={credigrupoEnabled || hasCredigrupoOperations}
+        refreshKey={bancarizationRefreshKey}
+        showToast={showToast}
+        onOpenLoan={(loanId) => {
+          setExpandedLoanId(loanId);
+          window.setTimeout(() => document.getElementById(`loan-${loanId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+        }}
+      />
 
       <div className="space-y-4">
         {(loansLoadStatus === 'idle' || loansLoadStatus === 'loading') && loans.length === 0 ? (
@@ -1153,6 +1283,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           </div>
         ) : paginatedLoans.map(loan => {
           const loanInstallments = Array.isArray(loan.installments) ? loan.installments : [];
+          const isBancarized = loan.formalizationType === 'BANCARIZED' || loan.provider === 'CREDIGRUPO';
           const resolvedLoanStatus = effectiveLoanStatus(loan);
           const paidInstallmentsCount = loanInstallments.filter((inst) => normalizeInstallmentStatus(inst.status) === 'PAID').length;
           const hasFinancialHistory = loanInstallments.some((installment) => (
@@ -1190,10 +1321,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             showOverdueLoanAmount &&
             totalRemainingLoanAmount > overdueLoanAmount + 0.009;
           const canEarlySettle =
+            !isBancarized &&
             resolvedLoanStatus === 'ACTIVE' &&
             fromLegacyInterestType(loan.interestType) === 'PRICE' &&
             loanInstallments.some((inst) => getRemainingInstallmentValue(inst) > 0);
-          const canInterestOnlyRenew = canLoanRenewWithInterestOnly(loan);
+          const canInterestOnlyRenew = !isBancarized && canLoanRenewWithInterestOnly(loan);
           const canChargeLoan = resolvedLoanStatus === 'ACTIVE' && totalRemainingLoanAmount > 0;
 
           return (
@@ -1205,9 +1337,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 className="w-full p-4 sm:p-6 flex flex-wrap items-center justify-between gap-3 sm:gap-4 hover:bg-zinc-900/30 transition-colors text-left cursor-pointer"
               >
                 <div className="flex-1 min-w-[200px]">
-                  <div className="flex items-center gap-2">
-                    <p className="text-[10px] font-black text-white uppercase break-words">{loan.customerName}</p>
-                  </div>
+                   <div className="flex items-center gap-2">
+                     <p className="text-[10px] font-black text-white uppercase break-words">{loan.customerName}</p>
+                     <span className={`text-[7px] font-black uppercase px-2 py-0.5 rounded-full ${isBancarized ? 'bg-blue-500/10 text-blue-400' : 'bg-[#BF953F]/10 text-[#F5D77B]'}`}>
+                       {isBancarized ? 'CCB' : 'GR'}
+                     </span>
+                   </div>
                   <p className="text-[9px] text-zinc-500 uppercase tracking-widest break-all">Contrato: {loan.id}</p>
                 </div>
               <div className="flex-1 min-w-[160px]">
@@ -1278,30 +1413,41 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 >
                   <MessageCircle size={18} />
                 </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleDownloadContract(loan);
-                  }}
-                  disabled={generatingContractPdfId !== null}
-                  className="h-[42px] w-[42px] shrink-0 bg-[#BF953F]/10 text-[#BF953F] rounded-xl hover:bg-[#BF953F] hover:text-black transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
-                  title="Baixar contrato atualizado em PDF"
-                  aria-label="Baixar contrato atualizado em PDF"
-                >
-                  {generatingContractPdfId === loan.id ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <FileDown size={16} />
-                  )}
-                </button>
+                {isBancarized ? (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); openCredigrupoUrl(loan.credigrupo?.ccbUrl); }}
+                    disabled={!loan.credigrupo?.ccbUrl}
+                    className="h-[42px] w-[42px] shrink-0 bg-blue-500/10 text-blue-400 rounded-xl hover:bg-blue-500 hover:text-black transition-all flex items-center justify-center disabled:bg-zinc-900 disabled:text-zinc-700 disabled:cursor-not-allowed"
+                    title={loan.credigrupo?.ccbUrl ? 'Abrir CCB assinada' : 'CCB ainda indisponivel'}
+                  >
+                    <ExternalLink size={16} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDownloadContract(loan);
+                    }}
+                    disabled={generatingContractPdfId !== null}
+                    className="h-[42px] w-[42px] shrink-0 bg-[#BF953F]/10 text-[#BF953F] rounded-xl hover:bg-[#BF953F] hover:text-black transition-all flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+                    title="Baixar contrato atualizado em PDF"
+                    aria-label="Baixar contrato atualizado em PDF"
+                  >
+                    {generatingContractPdfId === loan.id ? (
+                      <Loader2 size={16} className="animate-spin" />
+                    ) : (
+                      <FileDown size={16} />
+                    )}
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     openEditLoanModal(loan);
                   }}
-                  disabled={hasFinancialHistory}
+                  disabled={hasFinancialHistory || isBancarized}
                   className="h-[42px] w-[42px] shrink-0 bg-blue-500/10 text-blue-500 rounded-xl hover:bg-blue-500 hover:text-black transition-all flex items-center justify-center disabled:bg-zinc-900 disabled:text-zinc-700 disabled:cursor-not-allowed"
-                  title={hasFinancialHistory ? 'Condicoes financeiras bloqueadas apos o primeiro pagamento' : 'Editar contrato'}
+                  title={isBancarized ? 'Contrato gerenciado pela Credigrupo' : hasFinancialHistory ? 'Condicoes financeiras bloqueadas apos o primeiro pagamento' : 'Editar contrato'}
                 >
                   <Pencil size={16} />
                 </button>
@@ -1311,12 +1457,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     handleCancelLoan(loan);
                   }}
                   className={`h-[42px] w-[42px] shrink-0 rounded-xl transition-all flex items-center justify-center ${
-                    resolvedLoanStatus !== 'ACTIVE'
+                    resolvedLoanStatus !== 'ACTIVE' || isBancarized
                       ? 'bg-zinc-800 text-zinc-500 cursor-not-allowed'
                       : 'bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-black'
                   }`}
-                  title={resolvedLoanStatus === 'COMPLETED' ? 'Contrato quitado nao pode ser cancelado' : 'Cancelar contrato'}
-                  disabled={resolvedLoanStatus !== 'ACTIVE'}
+                  title={isBancarized ? 'Cancelamento gerenciado pela Credigrupo' : resolvedLoanStatus === 'COMPLETED' ? 'Contrato quitado nao pode ser cancelado' : 'Cancelar contrato'}
+                  disabled={resolvedLoanStatus !== 'ACTIVE' || isBancarized}
                 >
                   <Ban size={16} />
                 </button>
@@ -1343,6 +1489,21 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     <p className="mt-1 text-[9px] text-zinc-400">
                       {loan.cancellationReason}{loan.canceledByName ? ` - ${loan.canceledByName}` : ''}
                     </p>
+                  </div>
+                )}
+                {isBancarized && (
+                  <div className="mt-6 rounded-2xl border border-blue-500/20 bg-blue-500/5 p-4">
+                    <div className="flex items-center gap-2 mb-3"><ShieldCheck size={15} className="text-blue-400" /><p className="text-[8px] font-black text-blue-400 uppercase tracking-widest">Bancarizacao</p></div>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-[8px]">
+                      <p className="text-zinc-500">Investidor<br /><strong className="text-white">{loan.funding?.investorName || 'Nao informado'}</strong></p>
+                      <p className="text-zinc-500">Capital<br /><strong className="text-white">{loan.funding?.source === 'EXTERNAL' ? 'Externo' : 'GR Solution'}</strong></p>
+                      <p className="text-zinc-500">Status externo<br /><strong className="text-white">{loan.credigrupo?.externalStatus || 'funded'}</strong></p>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {loan.credigrupo?.borrowerSignUrl && <button type="button" onClick={() => openCredigrupoUrl(loan.credigrupo?.borrowerSignUrl)} className="px-3 py-2 rounded-xl bg-blue-500/10 text-blue-400 text-[7px] font-black uppercase">Assinatura cliente</button>}
+                      {loan.credigrupo?.investorSignUrl && <button type="button" onClick={() => openCredigrupoUrl(loan.credigrupo?.investorSignUrl)} className="px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 text-[7px] font-black uppercase">Assinatura investidor</button>}
+                    </div>
+                    <p className="mt-3 text-[7px] text-zinc-600 uppercase">Pagamentos e alteracoes financeiras sao sincronizados automaticamente pelos webhooks.</p>
                   </div>
                 )}
                 <div className="pt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -1398,7 +1559,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                         </div>
 
                         <div className="flex flex-col gap-2">
-                          {normalizeInstallmentStatus(inst.status) !== 'PAID' && (
+                          {normalizeInstallmentStatus(inst.status) !== 'PAID' && !isBancarized && (
                             <div className="flex gap-2">
                               <button
                                 disabled={isLocked || !!processingPayment}
@@ -1449,7 +1610,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                             </div>
                           )}
                           
-                          {installmentPaidAmount(inst) > 0 && (
+                          {installmentPaidAmount(inst) > 0 && !isBancarized && (
                             <button
                               disabled={!!processingPayment}
                               onClick={(e) => {
@@ -1984,13 +2145,40 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             </button>
             <h2 className="text-xl font-black gold-text uppercase tracking-tighter mb-8">{editingLoanId ? 'Editar Contrato' : 'Novo Emprestimo'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
+              {!editingLoanId && credigrupoEnabled && (
+                <div className="space-y-1">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Forma de formalizacao</label>
+                  <select
+                    value={formData.formalizationType}
+                    onChange={(event) => {
+                      const formalizationType = event.target.value as 'DIRECT' | 'BANCARIZED';
+                      setFormData((current) => ({
+                        ...current,
+                        formalizationType,
+                        interestType: formalizationType === 'BANCARIZED' && current.interestType === 'SPLIT' ? 'SIMPLE' : current.interestType,
+                        frequency: formalizationType === 'BANCARIZED' && !['MONTHLY', 'WEEKLY'].includes(current.frequency) ? 'MONTHLY' : current.frequency,
+                      }));
+                      const selectedCustomer = customers.find((item) => item.id === formData.customerId);
+                      setBancarizationDraft(createDefaultBancarizationDraft(selectedCustomer));
+                    }}
+                    className="w-full bg-black border border-[#BF953F]/30 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
+                  >
+                    <option value="DIRECT">GR SOLUTION</option>
+                    <option value="BANCARIZED">BANCARIZADO / CCB</option>
+                  </select>
+                </div>
+              )}
               <div className="space-y-1">
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Cliente</label>
                 <select
                   required
                   className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
                   value={formData.customerId}
-                  onChange={e => setFormData({ ...formData, customerId: e.target.value })}
+                  onChange={e => {
+                    const customerId = e.target.value;
+                    setFormData({ ...formData, customerId });
+                    setBancarizationDraft(createDefaultBancarizationDraft(customers.find((item) => item.id === customerId)));
+                  }}
                 >
                   <option value="">
                     {isLoadingCustomers ? 'CARREGANDO CLIENTES...' : 'SELECIONE O CLIENTE'}
@@ -2015,7 +2203,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   >
                     <option value="SIMPLE">JUROS SIMPLES (TOTAL)</option>
                     <option value="PRICE">TABELA PRICE (MENSAL)</option>
-                    <option value="SPLIT">JUROS DIVIDIDOS (PAGO + ACUMULADO)</option>
+                    {formData.formalizationType === 'DIRECT' && <option value="SPLIT">JUROS DIVIDIDOS (PAGO + ACUMULADO)</option>}
                   </select>
                 </div>
                 <div className="space-y-1">
@@ -2026,9 +2214,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     onChange={e => setFormData({ ...formData, frequency: e.target.value as 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY' })}
                     disabled={formData.interestType === 'SPLIT'}
                   >
-                    <option value="DAILY">DIARIO</option>
+                    {formData.formalizationType === 'DIRECT' && <option value="DAILY">DIARIO</option>}
                     <option value="WEEKLY">SEMANAL</option>
-                    <option value="BIWEEKLY">QUINZENAL</option>
+                    {formData.formalizationType === 'DIRECT' && <option value="BIWEEKLY">QUINZENAL</option>}
                     <option value="MONTHLY">MENSAL</option>
                   </select>
                   {formData.interestType === 'SPLIT' && (
@@ -2118,7 +2306,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
               </div>
 
               {/* RESUMO DO CALCULO */}
-              {formData.amount && formData.installmentsCount && (
+              {formData.formalizationType === 'DIRECT' && formData.amount && formData.installmentsCount && (
                 <div className="space-y-3 p-6 bg-zinc-900/50 border border-zinc-800 rounded-2xl">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -2148,8 +2336,26 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 </div>
               )}
 
-              <button className="w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4">
-                {editingLoanId ? 'Salvar Alteracoes' : 'Efetivar Contrato'}
+              {formData.formalizationType === 'BANCARIZED' && (
+                <BancarizationFields
+                  customer={customers.find((item) => item.id === formData.customerId)}
+                  terms={{
+                    amount: formData.amount,
+                    installments: formData.installmentsCount,
+                    interestRate: formData.interestRate,
+                    firstPaymentDate: formData.startDate,
+                    frequency: formData.frequency,
+                    interestType: formData.interestType,
+                  }}
+                  value={bancarizationDraft}
+                  onChange={setBancarizationDraft}
+                  showToast={showToast}
+                />
+              )}
+
+              <button disabled={creatingBancarized || (formData.formalizationType === 'BANCARIZED' && !bancarizationDraft.simulation)} className="w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {creatingBancarized && <Loader2 size={13} className="animate-spin" />}
+                {editingLoanId ? 'Salvar Alteracoes' : formData.formalizationType === 'BANCARIZED' ? 'Confirmar Bancarizacao' : 'Efetivar Contrato'}
               </button>
             </form>
           </div>
