@@ -75,14 +75,28 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
 
   const formatOverdueDays = (days: number) => `${days} ${days === 1 ? 'dia' : 'dias'}`;
 
+  const today = getLocalISODate();
+  const isInstallmentOverdue = (installment: Installment) => (
+    normalizeInstallmentStatus(installment.status) !== 'PAID' &&
+    installment.dueDate < today &&
+    getRemainingInstallmentValue(installment) > 0
+  );
+
   // Identificar contratos em atraso
   const overdueLoans = loans.filter(loan => {
     if (effectiveLoanStatus(loan) !== 'ACTIVE') return false;
-    const today = getLocalISODate();
-    return loan.installments.some(
-      (inst) => normalizeInstallmentStatus(inst.status) !== 'PAID' && inst.dueDate < today,
-    );
+    return loan.installments.some(isInstallmentOverdue);
   });
+  const overdueAmount = roundMoney(overdueLoans.reduce(
+    (loanSum, loan) => loanSum + loan.installments
+      .filter(isInstallmentOverdue)
+      .reduce((installmentSum, installment) => installmentSum + getRemainingInstallmentValue(installment), 0),
+    0,
+  ));
+  const overdueAmountLabel = `R$ ${overdueAmount.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
   const delinquencyRate = calculateDelinquencyRate(overdueLoans.length, activeLoans.length);
   const delinquencyRateLabel = `${delinquencyRate.toLocaleString('pt-BR', {
     minimumFractionDigits: 2,
@@ -120,6 +134,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
       icon: Users,
       color: 'text-blue-500',
       secondaryValue: null,
+      detailValue: null,
     },
     {
       label: 'Contratos Ativos',
@@ -127,6 +142,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
       icon: FileText,
       color: 'text-gold-500',
       secondaryValue: null,
+      detailValue: null,
     },
     { 
       label: 'Contratos em Atraso', 
@@ -134,6 +150,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
       icon: Activity, 
       color: 'text-red-500',
       secondaryValue: delinquencyRateLabel,
+      detailValue: overdueAmountLabel,
       onClick: () => {
         const element = document.getElementById('overdue-section');
         if (element) element.scrollIntoView({ behavior: 'smooth' });
@@ -167,6 +184,12 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
               <p className="mt-2 text-[8px] font-black text-red-500/70 uppercase tracking-widest">
                 Taxa de inadimplencia
               </p>
+            )}
+            {stat.detailValue && (
+              <div className="mt-3 flex items-center justify-between gap-3 border-t border-red-500/10 pt-3">
+                <p className="text-[8px] font-black text-zinc-600 uppercase tracking-widest">Valor em atraso</p>
+                <p className="text-[11px] font-black text-red-500 whitespace-nowrap">{stat.detailValue}</p>
+              </div>
             )}
           </div>
         ))}
@@ -313,14 +336,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {overdueLoans.map((loan) => {
-                const overdueInstallments = loan.installments.filter(i => {
-                  const today = getLocalISODate();
-                  return (
-                    normalizeInstallmentStatus(i.status) !== 'PAID' &&
-                    i.dueDate < today &&
-                    getRemainingInstallmentValue(i) > 0
-                  );
-                });
+                const overdueInstallments = loan.installments.filter(isInstallmentOverdue);
                 const overdueCount = overdueInstallments.length;
                 const overdueValue = roundMoney(
                   overdueInstallments.reduce((sum, i) => sum + getRemainingInstallmentValue(i), 0),

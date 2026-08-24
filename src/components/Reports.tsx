@@ -35,6 +35,11 @@ import {
 import { getInstallmentOutstanding } from '../utils/financialEngine';
 import { canCloseMonth, getLocalISODate } from '../utils/dateTime';
 import { calculatePortfolioRoi } from '../utils/portfolioRoi';
+import {
+  calculateNetReceivedFromCashMovements,
+  groupReceivedCashByInvestor,
+  resolveLoanInvestor,
+} from '../utils/investorReceipts';
 import { resolveCashDelta } from '../utils/domainParsers';
 import { generateMonthlySnapshot, saveMonthlySnapshot } from '../services/monthlySnapshotService';
 import {
@@ -420,12 +425,7 @@ const Reports: React.FC<ReportsProps> = ({
 
   const totalEmprestado = loans.reduce((acc, l) => acc + Number(l.amount || 0), 0);
 
-  const totalRecebido = cashMovements
-    .reduce((acc, m) => {
-      if (m.type === 'PAGAMENTO') return acc + m.amount;
-      if (m.type === 'ESTORNO') return acc - m.amount;
-      return acc;
-    }, 0);
+  const totalRecebido = calculateNetReceivedFromCashMovements(cashMovements);
 
   const now = new Date();
   const currentYear = now.getFullYear();
@@ -874,45 +874,69 @@ const Reports: React.FC<ReportsProps> = ({
       source: 'GR' | 'EXTERNAL';
       capital: number;
       received: number;
+      principalRecovered: number;
       realProfit: number;
       projectedProfit: number;
       contracts: number;
     }>();
 
     loans.forEach((loan) => {
-      if (effectiveLoanStatus(loan) === 'CANCELLED') return;
-      const investorId = loan.funding?.investorId || 'GR-SOLUTION';
-      const source = loan.funding?.source || 'GR';
-      const groupKey = `${investorId}::${source}`;
+      const investor = resolveLoanInvestor(loan);
+      const { groupKey, investorId, investorName, source } = investor;
       const current = grouped.get(groupKey) || {
         groupKey,
         investorId,
-        investorName: loan.funding?.investorName || 'GR Solutions',
+        investorName,
         source,
         capital: 0,
         received: 0,
+        principalRecovered: 0,
         realProfit: 0,
         projectedProfit: 0,
         contracts: 0,
       };
-      const totalReceivable = (loan.installments || []).reduce((sum, installment) => sum + installmentAmount(installment), 0);
-      const received = (loan.installments || []).reduce((sum, installment) => sum + installmentPaidAmount(installment), 0);
       const recoveredPrincipal = (loan.installments || []).reduce(
         (sum, installment) => sum + getInstallmentPrincipalRecovered(loan, installment),
         0,
       );
-      current.capital = roundMoney(current.capital + Number(loan.amount || 0));
-      current.received = roundMoney(current.received + received);
-      current.realProfit = roundMoney(current.realProfit + Math.max(received - recoveredPrincipal, 0));
-      current.projectedProfit = roundMoney(current.projectedProfit + Math.max(totalReceivable - Number(loan.amount || 0), 0));
-      current.contracts += 1;
+      current.principalRecovered = roundMoney(current.principalRecovered + recoveredPrincipal);
+
+      if (effectiveLoanStatus(loan) !== 'CANCELLED') {
+        const totalReceivable = (loan.installments || []).reduce(
+          (sum, installment) => sum + installmentAmount(installment),
+          0,
+        );
+        current.capital = roundMoney(current.capital + Number(loan.amount || 0));
+        current.projectedProfit = roundMoney(current.projectedProfit + Math.max(totalReceivable - Number(loan.amount || 0), 0));
+        current.contracts += 1;
+      }
       grouped.set(groupKey, current);
     });
 
+    groupReceivedCashByInvestor(loans, cashMovements).forEach((receiptGroup) => {
+      const current = grouped.get(receiptGroup.groupKey) || {
+        ...receiptGroup,
+        capital: 0,
+        principalRecovered: 0,
+        realProfit: 0,
+        projectedProfit: 0,
+        contracts: 0,
+      };
+      current.received = receiptGroup.received;
+      grouped.set(receiptGroup.groupKey, current);
+    });
+
     return Array.from(grouped.values())
-      .map((item) => ({ ...item, roi: item.capital > 0 ? roundMoney((item.realProfit / item.capital) * 100) : 0 }))
+      .map((item) => {
+        const realProfit = roundMoney(Math.max(item.received - item.principalRecovered, 0));
+        return {
+          ...item,
+          realProfit,
+          roi: item.capital > 0 ? roundMoney((realProfit / item.capital) * 100) : 0,
+        };
+      })
       .sort((left, right) => right.capital - left.capital);
-  }, [loans]);
+  }, [cashMovements, loans]);
 
   const financialCards = [
     { label: 'Total a Receber', value: totalAReceber, color: 'text-[#BF953F]' },
