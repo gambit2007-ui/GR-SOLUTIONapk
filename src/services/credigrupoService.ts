@@ -8,6 +8,7 @@ import type {
   CredigrupoInstallmentPixResult,
   CredigrupoInvestorSummary,
   CredigrupoOperationSummary,
+  CredigrupoRuntimeDiagnostics,
   CredigrupoSimulationRequest,
   CredigrupoSimulationResult,
   CredigrupoTestPayRequest,
@@ -51,6 +52,8 @@ const request = async <T>(path: string, init?: RequestInit): Promise<T> => {
 };
 
 export const getCredigrupoStatus = () => request<CredigrupoIntegrationStatus>('/api/credigrupo/status');
+export const getCredigrupoRuntimeDiagnostics = () =>
+  request<CredigrupoRuntimeDiagnostics>('/api/credigrupo/status?diagnostic=true');
 
 export const syncCredigrupoInvestors = async () => {
   const result = await request<{ investors: CredigrupoInvestorSummary[] }>('/api/credigrupo/investors');

@@ -27,6 +27,18 @@ export interface CredigrupoIntegrationStatus {
   >;
 }
 
+export interface CredigrupoRuntimeDiagnostics {
+  apiKeyPresent: boolean;
+  apiKeyIsSandbox: boolean;
+  envPresent: boolean;
+  envIsSandbox: boolean;
+  enabledPresent: boolean;
+  integrationEnabled: boolean;
+  webhookSecretPresent: boolean;
+  webhookSecretValidLength: boolean;
+  webhookSecretLength: number;
+}
+
 export interface CredigrupoInstallmentPixResult {
   brCode: string;
   qrCodeImage: string;

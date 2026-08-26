@@ -10,6 +10,8 @@ import {
   listRecentOperationalErrors,
   type OperationalDiagnosticEvent,
 } from '../services/operationalLoggingService';
+import { getCredigrupoRuntimeDiagnostics } from '../services/credigrupoService';
+import type { CredigrupoRuntimeDiagnostics } from '../lib/creditProviders/types';
 import { formatDateTimeBR } from '../utils/dateTime';
 import { resolveCashDelta } from '../utils/domainParsers';
 import { buildFinancialAudit } from '../utils/financialAudit';
@@ -79,6 +81,8 @@ const AuditTab: React.FC<AuditTabProps> = ({
   const [isApplyingLegacyMigration, setIsApplyingLegacyMigration] = useState(false);
   const [diagnosticEvents, setDiagnosticEvents] = useState<OperationalDiagnosticEvent[] | null>(null);
   const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(false);
+  const [credigrupoDiagnostics, setCredigrupoDiagnostics] = useState<CredigrupoRuntimeDiagnostics | null>(null);
+  const [isLoadingCredigrupoDiagnostics, setIsLoadingCredigrupoDiagnostics] = useState(false);
   const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
   const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
   const [selectedCashMovement, setSelectedCashMovement] = useState<CashMovement | null>(null);
@@ -133,6 +137,19 @@ const AuditTab: React.FC<AuditTabProps> = ({
       showToast('Somente administradores podem consultar diagnosticos', 'error');
     } finally {
       setIsLoadingDiagnostics(false);
+    }
+  };
+
+  const handleLoadCredigrupoDiagnostics = async () => {
+    if (isLoadingCredigrupoDiagnostics) return;
+    setIsLoadingCredigrupoDiagnostics(true);
+    try {
+      setCredigrupoDiagnostics(await getCredigrupoRuntimeDiagnostics());
+    } catch (error) {
+      console.error('Falha ao consultar runtime Credigrupo:', error);
+      showToast('Somente administradores podem consultar o runtime', 'error');
+    } finally {
+      setIsLoadingCredigrupoDiagnostics(false);
     }
   };
 
@@ -241,6 +258,14 @@ const AuditTab: React.FC<AuditTabProps> = ({
                 ? 'Carregando diagnosticos...'
                 : diagnosticEvents === null ? 'Ver diagnosticos recentes' : 'Ocultar diagnosticos'}
             </button>
+            <button
+              type="button"
+              onClick={() => { void handleLoadCredigrupoDiagnostics(); }}
+              disabled={isLoadingCredigrupoDiagnostics}
+              className="mt-3 ml-4 text-[8px] font-black uppercase tracking-widest text-zinc-500 hover:text-[#BF953F] disabled:opacity-50"
+            >
+              {isLoadingCredigrupoDiagnostics ? 'Verificando runtime...' : 'Diagnosticar runtime Credigrupo'}
+            </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0 lg:min-w-[520px]">
@@ -296,6 +321,12 @@ const AuditTab: React.FC<AuditTabProps> = ({
               </div>
             )}
           </div>
+        )}
+
+        {credigrupoDiagnostics && (
+          <pre className="mt-4 overflow-x-auto border-t border-zinc-900 pt-4 text-[9px] leading-relaxed text-zinc-400">
+            {JSON.stringify(credigrupoDiagnostics, null, 2)}
+          </pre>
         )}
       </div>
 
