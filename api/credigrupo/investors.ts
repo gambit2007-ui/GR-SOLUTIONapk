@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { FieldValue } from 'firebase-admin/firestore';
-import { requireAuthorizedActor } from '../_lib/auth';
-import { adminDb } from '../_lib/firebaseAdmin';
-import { handleApiError, sendJson } from '../_lib/http';
-import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client';
+import { requireAuthorizedActor } from '../_lib/auth.js';
+import { adminDb } from '../_lib/firebaseAdmin.js';
+import { handleApiError, sendJson } from '../_lib/http.js';
+import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {

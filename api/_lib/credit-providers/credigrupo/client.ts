@@ -1,11 +1,11 @@
-import { ApiError } from '../../http';
-import { getCredigrupoServerConfig } from '../../env';
+import { ApiError } from '../../http.js';
+import { getCredigrupoServerConfig } from '../../env.js';
 import type {
   CredigrupoInstallmentPixResult,
   CredigrupoKycData,
   CredigrupoSimulationInstallment,
   CredigrupoSimulationValues,
-} from '../../../../src/lib/creditProviders/types';
+} from '../../../../src/lib/creditProviders/types.js';
 
 interface CredigrupoInvestorResponse {
   id: string;

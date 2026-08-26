@@ -1,12 +1,12 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { applyLoanPaymentToCurrentLoan } from '../../../../src/utils/financialEngine';
-import { parseLoan } from '../../../../src/utils/domainParsers';
-import { resolveBancarizedCashDelta } from '../../../../src/utils/creditFunding';
-import type { Installment, Loan } from '../../../../src/types';
-import { adminDb } from '../../firebaseAdmin';
-import { StoredCredigrupoOperation, findOperationByProposalId, removeUndefined } from './store';
-import type { CredigrupoWebhookEvent } from './webhook';
-export type { CredigrupoWebhookEvent } from './webhook';
+import { applyLoanPaymentToCurrentLoan } from '../../../../src/utils/financialEngine.js';
+import { parseLoan } from '../../../../src/utils/domainParsers.js';
+import { resolveBancarizedCashDelta } from '../../../../src/utils/creditFunding.js';
+import type { Installment, Loan } from '../../../../src/types.js';
+import { adminDb } from '../../firebaseAdmin.js';
+import { StoredCredigrupoOperation, findOperationByProposalId, removeUndefined } from './store.js';
+import type { CredigrupoWebhookEvent } from './webhook.js';
+export type { CredigrupoWebhookEvent } from './webhook.js';
 
 const SYSTEM_UID = 'system:credigrupo';
 const allowedSignatureHosts = new Set(['app.zapsign.com.br']);

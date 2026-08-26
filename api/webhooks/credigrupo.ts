@@ -1,16 +1,16 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { waitUntil } from '@vercel/functions';
-import { getCredigrupoServerConfig } from '../_lib/env';
+import { getCredigrupoServerConfig } from '../_lib/env.js';
 import {
   buildCredigrupoWebhookEventId,
   parseCredigrupoWebhookEvent,
   verifyCredigrupoWebhookSignature,
-} from '../_lib/credit-providers/credigrupo/webhook';
+} from '../_lib/credit-providers/credigrupo/webhook.js';
 import {
   processStoredCredigrupoEvent,
   registerCredigrupoWebhookEvent,
-} from '../_lib/credit-providers/credigrupo/webhookProcessor';
-import { ApiError, handleApiError, readRawBody, sendJson } from '../_lib/http';
+} from '../_lib/credit-providers/credigrupo/webhookProcessor.js';
+import { ApiError, handleApiError, readRawBody, sendJson } from '../_lib/http.js';
 
 export const config = { api: { bodyParser: false } };
 

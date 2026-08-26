@@ -1,11 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { FieldValue } from 'firebase-admin/firestore';
-import type { EnsureCredigrupoBorrowerRequest } from '../../src/lib/creditProviders/types';
-import { requireAuthorizedActor } from '../_lib/auth';
-import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client';
-import { borrowerLinkId, removeUndefined } from '../_lib/credit-providers/credigrupo/store';
-import { adminDb } from '../_lib/firebaseAdmin';
-import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http';
+import type { EnsureCredigrupoBorrowerRequest } from '../../src/lib/creditProviders/types.js';
+import { requireAuthorizedActor } from '../_lib/auth.js';
+import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
+import { borrowerLinkId, removeUndefined } from '../_lib/credit-providers/credigrupo/store.js';
+import { adminDb } from '../_lib/firebaseAdmin.js';
+import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http.js';
 
 const requiredText = (value: unknown, field: string): string => {
   const parsed = String(value || '').trim();

@@ -1,9 +1,9 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { adminDb } from '../../firebaseAdmin';
-import { ApiError } from '../../http';
-import { processCredigrupoEvent } from './events';
-import { removeUndefined } from './store';
-import type { CredigrupoWebhookEvent } from './webhook';
+import { adminDb } from '../../firebaseAdmin.js';
+import { ApiError } from '../../http.js';
+import { processCredigrupoEvent } from './events.js';
+import { removeUndefined } from './store.js';
+import type { CredigrupoWebhookEvent } from './webhook.js';
 
 export type CredigrupoWebhookEventStatus = 'RECEIVED' | 'PROCESSING' | 'PROCESSED' | 'FAILED';
 

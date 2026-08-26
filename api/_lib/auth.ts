@@ -1,6 +1,6 @@
 import type { VercelRequest } from '@vercel/node';
-import { adminAuth, adminDb } from './firebaseAdmin';
-import { ApiError, AuthorizedActor } from './http';
+import { adminAuth, adminDb } from './firebaseAdmin.js';
+import { ApiError, AuthorizedActor } from './http.js';
 
 export const requireAuthorizedActor = async (request: VercelRequest): Promise<AuthorizedActor> => {
   const authorization = String(request.headers.authorization || '').trim();

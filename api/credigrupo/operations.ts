@@ -1,8 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuthorizedActor } from '../_lib/auth';
-import { StoredCredigrupoOperation, toOperationSummary } from '../_lib/credit-providers/credigrupo/store';
-import { adminDb } from '../_lib/firebaseAdmin';
-import { handleApiError, sendJson } from '../_lib/http';
+import { requireAuthorizedActor } from '../_lib/auth.js';
+import { StoredCredigrupoOperation, toOperationSummary } from '../_lib/credit-providers/credigrupo/store.js';
+import { adminDb } from '../_lib/firebaseAdmin.js';
+import { handleApiError, sendJson } from '../_lib/http.js';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {

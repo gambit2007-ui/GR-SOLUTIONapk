@@ -1,10 +1,10 @@
 import crypto from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuthorizedActor } from '../_lib/auth';
-import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client';
-import { getCredigrupoPublicStatus } from '../_lib/env';
-import { adminDb } from '../_lib/firebaseAdmin';
-import { ApiError, handleApiError, sendJson } from '../_lib/http';
+import { requireAuthorizedActor } from '../_lib/auth.js';
+import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
+import { getCredigrupoPublicStatus } from '../_lib/env.js';
+import { adminDb } from '../_lib/firebaseAdmin.js';
+import { ApiError, handleApiError, sendJson } from '../_lib/http.js';
 
 const hasValidPrivateKey = (value: string): boolean => {
   if (!value.includes('-----BEGIN PRIVATE KEY-----') || !value.includes('-----END PRIVATE KEY-----')) return false;

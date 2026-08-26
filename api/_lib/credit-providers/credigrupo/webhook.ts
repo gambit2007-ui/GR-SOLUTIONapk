@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { ApiError } from '../../http';
+import { ApiError } from '../../http.js';
 
 export const CREDIGRUPO_WEBHOOK_EVENTS = [
   'kyc.approved',

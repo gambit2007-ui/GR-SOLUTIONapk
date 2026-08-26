@@ -1,16 +1,16 @@
 import crypto from 'node:crypto';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { FieldValue } from 'firebase-admin/firestore';
-import { requireAuthorizedActor } from '../_lib/auth';
-import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client';
+import { requireAuthorizedActor } from '../_lib/auth.js';
+import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
 import {
   updateOperationFromRemoteLoan,
-} from '../_lib/credit-providers/credigrupo/events';
-import { syncCredigrupoInstallments } from '../_lib/credit-providers/credigrupo/installments';
-import { processStoredCredigrupoEvent } from '../_lib/credit-providers/credigrupo/webhookProcessor';
-import type { StoredCredigrupoOperation } from '../_lib/credit-providers/credigrupo/store';
-import { adminDb } from '../_lib/firebaseAdmin';
-import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http';
+} from '../_lib/credit-providers/credigrupo/events.js';
+import { syncCredigrupoInstallments } from '../_lib/credit-providers/credigrupo/installments.js';
+import { processStoredCredigrupoEvent } from '../_lib/credit-providers/credigrupo/webhookProcessor.js';
+import type { StoredCredigrupoOperation } from '../_lib/credit-providers/credigrupo/store.js';
+import { adminDb } from '../_lib/firebaseAdmin.js';
+import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http.js';
 
 const reconciliationEventRef = (key: string) =>
   adminDb.doc(`creditWebhookEvents/reconcile-${crypto.createHash('sha256').update(key).digest('hex')}`);

@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuthorizedActor } from '../../_lib/auth';
-import { validateCredigrupoWebhookEvent } from '../../_lib/credit-providers/credigrupo/webhook';
-import { processStoredCredigrupoEvent } from '../../_lib/credit-providers/credigrupo/webhookProcessor';
-import { adminDb } from '../../_lib/firebaseAdmin';
-import { ApiError, handleApiError, parseJsonBody, sendJson } from '../../_lib/http';
+import { requireAuthorizedActor } from '../../_lib/auth.js';
+import { validateCredigrupoWebhookEvent } from '../../_lib/credit-providers/credigrupo/webhook.js';
+import { processStoredCredigrupoEvent } from '../../_lib/credit-providers/credigrupo/webhookProcessor.js';
+import { adminDb } from '../../_lib/firebaseAdmin.js';
+import { ApiError, handleApiError, parseJsonBody, sendJson } from '../../_lib/http.js';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {

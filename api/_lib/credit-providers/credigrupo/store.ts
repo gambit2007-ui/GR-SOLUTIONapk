@@ -1,13 +1,13 @@
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { adminDb } from '../../firebaseAdmin';
-import { ApiError, AuthorizedActor } from '../../http';
+import { adminDb } from '../../firebaseAdmin.js';
+import { ApiError, AuthorizedActor } from '../../http.js';
 import type {
   CreateBancarizedLoanRequest,
   CredigrupoOperationSummary,
   CredigrupoSimulationRequest,
   CredigrupoSimulationResult,
   FundingSourceType,
-} from '../../../../src/lib/creditProviders/types';
+} from '../../../../src/lib/creditProviders/types.js';
 
 export interface StoredCredigrupoOperation {
   formalizationType?: 'BANCARIZED';

@@ -1,12 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { requireAuthorizedActor } from '../../_lib/auth';
-import { CredigrupoClient } from '../../_lib/credit-providers/credigrupo/client';
+import { requireAuthorizedActor } from '../../_lib/auth.js';
+import { CredigrupoClient } from '../../_lib/credit-providers/credigrupo/client.js';
 import {
   resolveCredigrupoInstallment,
   saveCredigrupoInstallmentPix,
   validateCredigrupoInstallmentPix,
-} from '../../_lib/credit-providers/credigrupo/installments';
-import { ApiError, handleApiError, parseJsonBody, sendJson } from '../../_lib/http';
+} from '../../_lib/credit-providers/credigrupo/installments.js';
+import { ApiError, handleApiError, parseJsonBody, sendJson } from '../../_lib/http.js';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {

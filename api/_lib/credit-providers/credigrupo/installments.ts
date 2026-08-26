@@ -1,11 +1,11 @@
 import { FieldValue } from 'firebase-admin/firestore';
-import { parseLoan } from '../../../../src/utils/domainParsers';
-import type { Installment, Loan } from '../../../../src/types';
-import { adminDb } from '../../firebaseAdmin';
-import { ApiError } from '../../http';
-import type { CredigrupoInstallmentPixResult } from '../../../../src/lib/creditProviders/types';
-import type { CredigrupoClient, CredigrupoExternalInstallment } from './client';
-import { removeUndefined } from './store';
+import { parseLoan } from '../../../../src/utils/domainParsers.js';
+import type { Installment, Loan } from '../../../../src/types.js';
+import { adminDb } from '../../firebaseAdmin.js';
+import { ApiError } from '../../http.js';
+import type { CredigrupoInstallmentPixResult } from '../../../../src/lib/creditProviders/types.js';
+import type { CredigrupoClient, CredigrupoExternalInstallment } from './client.js';
+import { removeUndefined } from './store.js';
 
 const allowedPixHosts = new Set(['api.woovi.com']);
 
