@@ -82,7 +82,7 @@ Quando `CREDIGRUPO_ENABLED=false`, novas operacoes ficam ocultas, mas contratos 
 - `POST /api/credigrupo/cancel`: cancela proposta ainda nao assinada; exige ADMIN.
 - `POST /api/credigrupo/installments/pix`: gera ou renova o PIX da parcela; exige ADMIN.
 - `POST /api/admin/credigrupo/test-pay`: simula funding ou pagamento de parcela somente no sandbox; exige ADMIN.
-- `GET /api/admin/credigrupo/runtime-status`: valida somente booleanos de configuracao e conectividade; exige ADMIN.
+- `GET /api/credigrupo/status?diagnostic=true`: valida somente booleanos de configuracao e conectividade; exige ADMIN.
 - `POST /api/credigrupo/events/reprocess`: reprocessa um evento armazenado; exige ADMIN.
 - `POST /api/webhooks/credigrupo`: recebe eventos assinados.
 
