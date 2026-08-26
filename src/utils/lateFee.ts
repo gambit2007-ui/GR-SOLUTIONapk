@@ -1,5 +1,5 @@
 import type { Installment } from '../types';
-import { installmentAmount, installmentPaidAmount, normalizeInstallmentStatus } from './loanCompat';
+import { installmentAmount, installmentPaidAmount, normalizeInstallmentStatus } from './loanCompat.js';
 
 export const DEFAULT_DAILY_LATE_FEE_RATE = 0.015;
 

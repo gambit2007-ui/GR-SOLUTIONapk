@@ -5,10 +5,10 @@ import type {
   LoanPaymentRequest,
   PaymentBreakdown,
 } from '../types';
-import { buildInstallmentDueDate, getLocalISODate } from './dateTime';
-import { calculateInstallmentLateFee } from './lateFee';
-import { installmentAmount, installmentPaidAmount, normalizeInstallmentStatus, normalizeLoanStatus } from './loanCompat';
-import { buildPaymentBreakdown } from './paymentBreakdown';
+import { buildInstallmentDueDate, getLocalISODate } from './dateTime.js';
+import { calculateInstallmentLateFee } from './lateFee.js';
+import { installmentAmount, installmentPaidAmount, normalizeInstallmentStatus, normalizeLoanStatus } from './loanCompat.js';
+import { buildPaymentBreakdown } from './paymentBreakdown.js';
 
 export const roundMoney = (value: number): number =>
   Number((Number.isFinite(value) ? value : 0).toFixed(2));

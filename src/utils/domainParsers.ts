@@ -13,8 +13,8 @@ import type {
   LoanStatus,
   PaymentBreakdown,
 } from '../types';
-import { parseCashOutflowCategory } from './cashCategories';
-import { getLocalISODate } from './dateTime';
+import { parseCashOutflowCategory } from './cashCategories.js';
+import { getLocalISODate } from './dateTime.js';
 
 const CASH_MOVEMENT_TYPES: readonly CashMovementType[] = [
   'APORTE',
