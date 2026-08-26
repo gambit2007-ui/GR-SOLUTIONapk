@@ -41,7 +41,8 @@ import BancarizationFields, {
   createDefaultBancarizationDraft,
 } from './BancarizationFields';
 import BancarizationOperations from './BancarizationOperations';
-import { createBancarizedLoan, getCredigrupoStatus } from '../../services/credigrupoService';
+import BancarizedInstallmentActions from './BancarizedInstallmentActions';
+import { createBancarizedLoan, getCredigrupoStatus, reconcileCredigrupoOperation } from '../../services/credigrupoService';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -151,6 +152,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [formalizationFilter, setFormalizationFilter] = useState<'ALL' | 'DIRECT' | 'BANCARIZED'>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [credigrupoEnabled, setCredigrupoEnabled] = useState(false);
+  const [credigrupoIsAdmin, setCredigrupoIsAdmin] = useState(false);
+  const [credigrupoEnvironment, setCredigrupoEnvironment] = useState<'sandbox'>('sandbox');
   const [hasCredigrupoOperations, setHasCredigrupoOperations] = useState(false);
   const [bancarizationDraft, setBancarizationDraft] = useState<BancarizationDraft>(() => createDefaultBancarizationDraft());
   const [creatingBancarized, setCreatingBancarized] = useState(false);
@@ -164,6 +167,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         if (!active) return;
         setCredigrupoEnabled(status.enabled);
         setHasCredigrupoOperations(Boolean(status.hasExistingOperations));
+        setCredigrupoIsAdmin(Boolean(status.isAdmin));
+        setCredigrupoEnvironment(status.environment);
       })
       .catch(() => { if (active) setCredigrupoEnabled(false); });
     return () => { active = false; };
@@ -1247,6 +1252,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       <BancarizationOperations
         enabled={credigrupoEnabled || hasCredigrupoOperations}
         refreshKey={bancarizationRefreshKey}
+        isAdmin={credigrupoIsAdmin}
+        isSandbox={credigrupoEnvironment === 'sandbox'}
         showToast={showToast}
         onOpenLoan={(loanId) => {
           setExpandedLoanId(loanId);
@@ -1503,6 +1510,16 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                       {loan.credigrupo?.borrowerSignUrl && <button type="button" onClick={() => openCredigrupoUrl(loan.credigrupo?.borrowerSignUrl)} className="px-3 py-2 rounded-xl bg-blue-500/10 text-blue-400 text-[7px] font-black uppercase">Assinatura cliente</button>}
                       {loan.credigrupo?.investorSignUrl && <button type="button" onClick={() => openCredigrupoUrl(loan.credigrupo?.investorSignUrl)} className="px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 text-[7px] font-black uppercase">Assinatura investidor</button>}
                     </div>
+                    {credigrupoIsAdmin && credigrupoEnvironment === 'sandbox' && loan.credigrupo?.operationId && (
+                      <div className="mt-3 pt-3 border-t border-blue-500/10 flex items-center justify-between gap-3">
+                        <div><p className="text-[7px] font-black uppercase tracking-widest text-amber-400">Ferramentas Sandbox</p><p className="text-[7px] text-zinc-600 uppercase mt-1">Consulta sem alterar valores locais</p></div>
+                        <button type="button" onClick={() => {
+                          void reconcileCredigrupoOperation(loan.credigrupo?.operationId || '')
+                            .then(() => showToast('Operacao reconciliada com a Credigrupo', 'success'))
+                            .catch((error) => showToast(error instanceof Error ? error.message : 'Falha na reconciliacao', 'error'));
+                        }} className="px-3 py-2 rounded-xl border border-amber-500/20 text-amber-400 text-[7px] font-black uppercase">Consultar e reconciliar</button>
+                      </div>
+                    )}
                     <p className="mt-3 text-[7px] text-zinc-600 uppercase">Pagamentos e alteracoes financeiras sao sincronizados automaticamente pelos webhooks.</p>
                   </div>
                 )}
@@ -1559,6 +1576,15 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                         </div>
 
                         <div className="flex flex-col gap-2">
+                          {isBancarized && (
+                            <BancarizedInstallmentActions
+                              contractId={loan.id}
+                              installment={inst}
+                              isAdmin={credigrupoIsAdmin}
+                              isSandbox={credigrupoEnvironment === 'sandbox'}
+                              showToast={showToast}
+                            />
+                          )}
                           {normalizeInstallmentStatus(inst.status) !== 'PAID' && !isBancarized && (
                             <div className="flex gap-2">
                               <button

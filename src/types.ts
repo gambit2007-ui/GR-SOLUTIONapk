@@ -171,7 +171,10 @@ export interface Installment {
     investorPayoutStatus?: string;
     pixBrcode?: string;
     pixQrCode?: string;
+    pixCorrelationId?: string;
+    amountCents?: number;
     totalCents?: number;
+    serviceFee?: number;
     updatedAt?: string;
   };
 }

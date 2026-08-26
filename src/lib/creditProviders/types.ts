@@ -16,6 +16,24 @@ export interface CredigrupoIntegrationStatus {
   provider: 'CREDIGRUPO';
   message?: string;
   hasExistingOperations?: boolean;
+  isAdmin?: boolean;
+  configurationIssues?: Array<
+    | 'CREDIGRUPO_API_KEY_MISSING'
+    | 'CREDIGRUPO_SANDBOX_KEY_REQUIRED'
+    | 'CREDIGRUPO_LIVE_KEY_BLOCKED'
+    | 'CREDIGRUPO_ENV_INVALID'
+    | 'CREDIGRUPO_WEBHOOK_SECRET_MISSING'
+    | 'CREDIGRUPO_WEBHOOK_SECRET_TOO_SHORT'
+  >;
+}
+
+export interface CredigrupoInstallmentPixResult {
+  brCode: string;
+  qrCodeImage: string;
+  correlationID: string;
+  amountCents: number;
+  totalCents: number;
+  serviceFee: number;
 }
 
 export interface CredigrupoInvestorSummary {
@@ -146,3 +164,12 @@ export interface CredigrupoOperationSummary {
   investorSignUrl?: string;
   ccbUrl?: string;
 }
+
+export interface CredigrupoInstallmentActionRequest {
+  contractId: string;
+  installmentId: string;
+}
+
+export type CredigrupoTestPayRequest =
+  | { operationId: string; contractId?: never; installmentId?: never }
+  | { operationId?: never; contractId: string; installmentId: string };

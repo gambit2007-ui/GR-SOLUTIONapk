@@ -33,16 +33,27 @@ export const parseJsonBody = <T>(request: VercelRequest): T => {
     throw new ApiError(400, 'INVALID_JSON', 'JSON invalido.');
   }
 };
-export const readRawBody = async (request: VercelRequest): Promise<Buffer> => {
-  if (Buffer.isBuffer(request.body)) return request.body;
-  if (typeof request.body === 'string') return Buffer.from(request.body, 'utf8');
+export const readRawBody = async (request: VercelRequest, maxBytes = 1_000_000): Promise<Buffer> => {
+  if (Buffer.isBuffer(request.body)) {
+    if (request.body.length > maxBytes) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Payload excede o limite permitido.');
+    return request.body;
+  }
+  if (typeof request.body === 'string') {
+    const body = Buffer.from(request.body, 'utf8');
+    if (body.length > maxBytes) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Payload excede o limite permitido.');
+    return body;
+  }
   if (request.body && typeof request.body === 'object') {
     throw new ApiError(400, 'RAW_BODY_UNAVAILABLE', 'Corpo bruto indisponivel para validar a assinatura.');
   }
 
   const chunks: Buffer[] = [];
+  let totalBytes = 0;
   for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    totalBytes += buffer.length;
+    if (totalBytes > maxBytes) throw new ApiError(413, 'PAYLOAD_TOO_LARGE', 'Payload excede o limite permitido.');
+    chunks.push(buffer);
   }
   return Buffer.concat(chunks);
 };

@@ -5,13 +5,8 @@ import { resolveBancarizedCashDelta } from '../../../../src/utils/creditFunding'
 import type { Installment, Loan } from '../../../../src/types';
 import { adminDb } from '../../firebaseAdmin';
 import { StoredCredigrupoOperation, findOperationByProposalId, removeUndefined } from './store';
-
-export interface CredigrupoWebhookEvent {
-  event: string;
-  partnerId: string;
-  timestamp: string;
-  data: Record<string, unknown>;
-}
+import type { CredigrupoWebhookEvent } from './webhook';
+export type { CredigrupoWebhookEvent } from './webhook';
 
 const SYSTEM_UID = 'system:credigrupo';
 const allowedSignatureHosts = new Set(['app.zapsign.com.br']);
@@ -435,13 +430,11 @@ export const processCredigrupoEvent = async (
 
   const proposalId = asText(event.data.proposalId);
   if (!proposalId) {
-    await eventRef.set({ status: 'IGNORED', reason: 'MISSING_PROPOSAL_ID', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    return;
+    throw new Error('CREDIGRUPO_MISSING_PROPOSAL_ID');
   }
   const operation = await findOperationByProposalId(proposalId);
   if (!operation) {
-    await eventRef.set({ status: 'PENDING_RECONCILIATION', reason: 'OPERATION_NOT_FOUND', proposalId, updatedAt: FieldValue.serverTimestamp() }, { merge: true });
-    return;
+    throw new Error('CREDIGRUPO_OPERATION_NOT_FOUND');
   }
 
   switch (event.event) {
@@ -480,7 +473,7 @@ export const processCredigrupoEvent = async (
       });
       return;
     default:
-      await eventRef.set({ status: 'IGNORED', reason: 'UNSUPPORTED_EVENT', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
+      await eventRef.set({ processingResult: 'IGNORED_UNSUPPORTED_EVENT', updatedAt: FieldValue.serverTimestamp() }, { merge: true });
   }
 };
 

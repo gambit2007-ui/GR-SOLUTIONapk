@@ -1,6 +1,7 @@
 import { ApiError } from '../../http';
 import { getCredigrupoServerConfig } from '../../env';
 import type {
+  CredigrupoInstallmentPixResult,
   CredigrupoKycData,
   CredigrupoSimulationInstallment,
   CredigrupoSimulationValues,
@@ -199,6 +200,26 @@ export class CredigrupoClient {
   listInstallments(proposalId: string) {
     return this.request<{ data: CredigrupoExternalInstallment[] }>(
       `/loans/${encodeURIComponent(proposalId)}/installments`,
+    );
+  }
+
+  createInstallmentPix(proposalId: string, installmentId: string) {
+    return this.request<CredigrupoInstallmentPixResult>(
+      `/loans/${encodeURIComponent(proposalId)}/installments/${encodeURIComponent(installmentId)}/pix`,
+      { method: 'POST' },
+    );
+  }
+
+  testPayLoan(proposalId: string) {
+    return this.request<Record<string, unknown>>(`/loans/${encodeURIComponent(proposalId)}/test-pay`, {
+      method: 'POST',
+    });
+  }
+
+  testPayInstallment(proposalId: string, installmentId: string) {
+    return this.request<Record<string, unknown>>(
+      `/loans/${encodeURIComponent(proposalId)}/installments/${encodeURIComponent(installmentId)}/test-pay`,
+      { method: 'POST' },
     );
   }
 

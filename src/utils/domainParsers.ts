@@ -286,7 +286,10 @@ export const normalizeInstallment = (raw: unknown, fallbackNumber = 1): Installm
           investorPayoutStatus: toOptionalString(credigrupo.investorPayoutStatus),
           pixBrcode: toOptionalString(credigrupo.pixBrcode),
           pixQrCode: toOptionalString(credigrupo.pixQrCode),
+          pixCorrelationId: toOptionalString(credigrupo.pixCorrelationId),
+          amountCents: toOptionalPositiveNumber(credigrupo.amountCents),
           totalCents: toOptionalPositiveNumber(credigrupo.totalCents),
+          serviceFee: toOptionalPositiveNumber(credigrupo.serviceFee),
           updatedAt: toOptionalString(credigrupo.updatedAt),
         }
       : undefined,

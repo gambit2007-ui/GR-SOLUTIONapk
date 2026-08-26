@@ -20,7 +20,7 @@ describe('normalizacao de contratos', () => {
       startDate: '2026-01-01', status: 'ATIVO', formalizationType: 'BANCARIZED',
       provider: 'CREDIGRUPO', funding: { source: 'EXTERNAL', investorId: 'investor-1', investorName: 'Investidor' },
       credigrupo: { proposalId: 'proposal-1', externalStatus: 'funded' },
-      installments: [{ number: 1, amount: 110, dueDate: '2026-02-01', status: 'PENDENTE', credigrupo: { installmentId: 'external-1' } }],
+      installments: [{ number: 1, amount: 110, dueDate: '2026-02-01', status: 'PENDENTE', credigrupo: { installmentId: 'external-1', pixBrcode: '000201', pixQrCode: 'https://api.woovi.com/qr.png', pixCorrelationId: 'correlation-1', amountCents: 11000, totalCents: 12000, serviceFee: 1000 } }],
     });
 
     expect(loan).toMatchObject({
@@ -29,7 +29,13 @@ describe('normalizacao de contratos', () => {
       funding: { source: 'EXTERNAL', investorId: 'investor-1' },
       credigrupo: { proposalId: 'proposal-1', externalStatus: 'funded' },
     });
-    expect(loan.installments[0].credigrupo?.installmentId).toBe('external-1');
+    expect(loan.installments[0].credigrupo).toMatchObject({
+      installmentId: 'external-1',
+      pixCorrelationId: 'correlation-1',
+      amountCents: 11000,
+      totalCents: 12000,
+      serviceFee: 1000,
+    });
   });
 
   it('preserva identificadores e valores negativos das entradas de estorno', () => {

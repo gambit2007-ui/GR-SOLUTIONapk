@@ -25,6 +25,8 @@ O navegador chama somente os endpoints internos em `api/credigrupo`. Cada chamad
 
 O backend utiliza Firebase Admin e o cliente central em `api/_lib/credit-providers/credigrupo/client.ts`. A API Key nunca e enviada ao navegador.
 
+PIX de parcela, `test-pay`, reconciliacao e cancelamento exigem perfil `ADMIN` no backend. Esconder o botao no frontend e apenas uma conveniencia visual; a autorizacao efetiva sempre ocorre na rota interna.
+
 Fluxo de criacao:
 
 1. Cadastrar/aprovar o investidor no fluxo oficial e sincroniza-lo no app.
@@ -36,6 +38,8 @@ Fluxo de criacao:
 7. Criar a proposta e exibir o PIX de funding.
 8. Receber CCB, assinatura e funding pelos webhooks.
 9. Criar o contrato local somente em `loan.funded`.
+10. Sincronizar os IDs externos das parcelas por `GET /loans/:proposalId/installments`.
+11. Gerar ou renovar o PIX de cada parcela sob demanda.
 
 ## Contabilizacao
 
@@ -62,7 +66,9 @@ CREDIGRUPO_ENV=sandbox
 CREDIGRUPO_ENABLED=true
 ```
 
-`CREDIGRUPO_ENV` diferente de `sandbox` e chaves `wl_live_` sao bloqueados. Quando `CREDIGRUPO_ENABLED=false`, novas operacoes ficam ocultas, mas webhooks e conciliacao de operacoes existentes continuam funcionando.
+`CREDIGRUPO_ENV` diferente de `sandbox` e chaves `wl_live_` sao bloqueados. A integracao so e considerada configurada quando a API key de teste, o ambiente sandbox e o segredo de webhook com pelo menos 32 caracteres estao validos. O status administrativo informa apenas os nomes das configuracoes ausentes ou invalidas, nunca seus valores.
+
+Quando `CREDIGRUPO_ENABLED=false`, novas operacoes ficam ocultas, mas contratos existentes permanecem visiveis. Webhooks e conciliacao de operacoes existentes continuam disponiveis quando as credenciais estao validas.
 
 ## Endpoints internos
 
@@ -74,7 +80,23 @@ CREDIGRUPO_ENABLED=true
 - `GET /api/credigrupo/operations`: lista as operacoes recentes.
 - `POST /api/credigrupo/reconcile`: concilia proposta e parcelas por polling.
 - `POST /api/credigrupo/cancel`: cancela proposta ainda nao assinada; exige ADMIN.
+- `POST /api/credigrupo/installments/pix`: gera ou renova o PIX da parcela; exige ADMIN.
+- `POST /api/admin/credigrupo/test-pay`: simula funding ou pagamento de parcela somente no sandbox; exige ADMIN.
+- `GET /api/admin/credigrupo/runtime-status`: valida somente booleanos de configuracao e conectividade; exige ADMIN.
+- `POST /api/credigrupo/events/reprocess`: reprocessa um evento armazenado; exige ADMIN.
 - `POST /api/webhooks/credigrupo`: recebe eventos assinados.
+
+## PIX de parcela
+
+O frontend envia apenas `contractId` e o identificador local da parcela. O backend recupera `proposalId` no contrato, valida `BANCARIZED/CREDIGRUPO` e resolve o ID externo pela listagem oficial de parcelas quando ele ainda nao estiver salvo.
+
+O client chama somente o endpoint oficial:
+
+```text
+POST /loans/{proposalId}/installments/{installmentId}/pix
+```
+
+Sao persistidos apenas os campos retornados: `brCode`, `qrCodeImage`, `correlationID`, `amountCents`, `totalCents` e `serviceFee`. A URL do QR Code precisa usar HTTPS no host oficial da Woovi. Gerar PIX nao altera valor, juros, vencimento, status de pagamento, caixa ou KPIs. Quando um QR ainda e valido, a propria Credigrupo retorna o mesmo QR; quando expirado, ela o renova.
 
 ## Collections e campos
 
@@ -92,7 +114,18 @@ As collections de integracao nao possuem acesso pelo Firebase Client SDK. O fall
 
 ## Webhooks
 
-O endpoint usa o corpo bruto, calcula HMAC-SHA256 com `CREDIGRUPO_WEBHOOK_SECRET` e compara `X-Webhook-Signature` em tempo constante.
+O endpoint usa o corpo bruto, calcula HMAC-SHA256 com `CREDIGRUPO_WEBHOOK_SECRET` e compara `X-Webhook-Signature` em tempo constante. Payloads acima de 1 MB sao recusados antes do processamento.
+
+Depois da assinatura e do envelope minimo serem validados, o evento e registrado transacionalmente em `creditWebhookEvents` e a rota responde `200`. O processamento continua com `waitUntil` da Vercel, fora do tempo de resposta ao provedor.
+
+Estados da inbox:
+
+- `RECEIVED`: evento persistido.
+- `PROCESSING`: processador adquiriu o evento.
+- `PROCESSED`: handler terminou, inclusive eventos desconhecidos ignorados de forma segura.
+- `FAILED`: erro seguro registrado em `errorCode`, disponivel para reconciliacao ou reprocessamento administrativo.
+
+Um evento preso em `PROCESSING` por mais de 90 segundos pode ser retomado por um retry. O reprocessamento manual nao remove o payload nem o historico do evento.
 
 Eventos implementados:
 
@@ -108,6 +141,17 @@ Eventos implementados:
 
 O hash SHA-256 do payload identifica a entrega. Efeitos financeiros possuem uma segunda idempotencia por parcela, impedindo pagamento ou repasse duplicado mesmo quando o provedor reenviar um evento com outro envelope.
 
+`installment.pix_created` permanece suportado, mas a documentacao oficial informa que ele nao e disparado atualmente. Por isso a UI gera PIX sob demanda e a reconciliacao consulta as parcelas diretamente.
+
+## Test-pay e ferramentas sandbox
+
+A rota administrativa aceita dois alvos:
+
+- `operationId`: chama `POST /loans/{proposalId}/test-pay` para simular o funding.
+- `contractId + installmentId`: chama `POST /loans/{proposalId}/installments/{installmentId}/test-pay`.
+
+Ela nao baixa parcelas diretamente. O resultado financeiro so entra no app quando `installment.paid` for recebido e processado de forma idempotente. A secao `Ferramentas Sandbox` aparece apenas para administradores e nunca deve ser habilitada em live.
+
 ## Checklist de sandbox
 
 1. Configurar as variaveis usando somente `wl_test_`.
@@ -118,13 +162,15 @@ O hash SHA-256 do payload identifica a entrega. Efeitos financeiros possuem uma 
 6. Atualizar KYC/elegibilidade no app.
 7. Simular e conferir principal, IOF, tarifa, juros e parcelas.
 8. Confirmar a bancarizacao uma unica vez.
-9. Copiar o PIX de funding e usar o endpoint sandbox `test-pay` da Credigrupo.
+9. Copiar o PIX de funding e usar `Simular funding` nas ferramentas sandbox.
 10. Abrir os links ZapSign de tomador e investidor.
 11. Confirmar que `loan.funded` criou um unico contrato local.
 12. Confirmar a retirada somente quando a fonte for GR.
-13. Simular o pagamento da parcela.
-14. Reenviar o mesmo webhook e confirmar que a baixa nao duplica.
-15. Conciliar manualmente pelo card e confirmar que os valores permanecem iguais.
+13. Gerar o PIX da parcela, conferir o valor total com tarifa e copiar o codigo.
+14. Simular o pagamento da parcela pelo botao administrativo.
+15. Reenviar o mesmo webhook e confirmar que a baixa nao duplica.
+16. Conciliar manualmente pelo card e confirmar que os valores permanecem iguais.
+17. Conferir contrato, parcela, ledger, caixa por origem do capital e indicadores.
 
 No sandbox, `ccb_url` pode permanecer `null` e `installment.investor_repaid` pode nao ser entregue por falta de saldo Woovi. Esses comportamentos nao devem bloquear a homologacao.
 
@@ -132,6 +178,11 @@ No sandbox, `ccb_url` pode permanecer `null` e `installment.investor_repaid` pod
 
 - `CREDIGRUPO_DISABLED`: habilitar a feature flag somente depois de configurar o sandbox.
 - `CREDIGRUPO_SANDBOX_KEY_REQUIRED`: a chave nao possui prefixo `wl_test_`.
+- `CREDIGRUPO_WEBHOOK_SECRET_MISSING`: configurar o segredo sem registrar seu valor em logs.
+- `CREDIGRUPO_WEBHOOK_SECRET_TOO_SHORT`: usar um segredo com pelo menos 32 caracteres.
+- `DIRECT_CONTRACT_NOT_ALLOWED`: a rota de parcela recebeu um contrato GR Direto.
+- `EXTERNAL_INSTALLMENT_NOT_AVAILABLE`: reconciliar a operacao para sincronizar o ID externo.
+- `CREDIGRUPO_PIX_RESPONSE_INVALID`: a resposta externa nao possui os campos oficiais ou URL de QR segura.
 - `KYC_NOT_APPROVED`: aprovar o usuario no portal e atualizar o status no app.
 - `BANCARIZATION_PENDING`: uma tentativa com o mesmo identificador ja esta em curso; nao gerar outra proposta.
 - `RECONCILIATION_REQUIRED`: consultar a operacao na Credigrupo antes de tentar novamente.
@@ -140,3 +191,5 @@ No sandbox, `ccb_url` pode permanecer `null` e `installment.investor_repaid` pod
 ## Producao futura
 
 Antes de permitir `wl_live_` sera necessario remover conscientemente o bloqueio de producao, homologar o contrato comercial e contabil, revisar LGPD/KYC, configurar backup Admin das collections de integracao, testar restauracao e executar o fluxo completo com aprovacao formal da Credigrupo.
+
+O codigo atual permanece deliberadamente sandbox-only. A troca para live exige uma alteracao explicita, revisao de seguranca e uma nova rodada de homologacao; nao basta substituir a variavel de ambiente.

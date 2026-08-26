@@ -4,9 +4,10 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { requireAuthorizedActor } from '../_lib/auth';
 import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client';
 import {
-  processCredigrupoEvent,
   updateOperationFromRemoteLoan,
 } from '../_lib/credit-providers/credigrupo/events';
+import { syncCredigrupoInstallments } from '../_lib/credit-providers/credigrupo/installments';
+import { processStoredCredigrupoEvent } from '../_lib/credit-providers/credigrupo/webhookProcessor';
 import type { StoredCredigrupoOperation } from '../_lib/credit-providers/credigrupo/store';
 import { adminDb } from '../_lib/firebaseAdmin';
 import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http';
@@ -17,7 +18,8 @@ const reconciliationEventRef = (key: string) =>
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
-    await requireAuthorizedActor(request);
+    const actor = await requireAuthorizedActor(request);
+    if (!actor.admin) throw new ApiError(403, 'ADMIN_REQUIRED', 'Somente administradores podem reconciliar operacoes.');
     const input = parseJsonBody<{ operationId: string }>(request);
     const operationId = String(input.operationId || '').trim();
     const operationRef = adminDb.doc(`creditOperations/${operationId}`);
@@ -53,9 +55,21 @@ export default async function handler(request: VercelRequest, response: VercelRe
         },
       };
       const eventRef = reconciliationEventRef(`${operation.proposalId}:loan.funded`);
-      await eventRef.set({ status: 'RECEIVED', source: 'RECONCILIATION', receivedAt: FieldValue.serverTimestamp(), payload: event }, { merge: true });
-      await processCredigrupoEvent(eventRef, event);
+      await eventRef.set({
+        eventId: eventRef.id,
+        eventType: event.event,
+        proposalId: operation.proposalId,
+        status: 'RECEIVED',
+        source: 'RECONCILIATION',
+        receivedAt: FieldValue.serverTimestamp(),
+        payload: event,
+      }, { merge: true });
+      await processStoredCredigrupoEvent(eventRef, event);
     }
+
+    const localLoanId = operation.localLoanId
+      || (loanDetails.data.formalization_status === 'funded' ? operationId : undefined);
+    if (localLoanId) await syncCredigrupoInstallments(localLoanId, installments.data);
 
     for (const installment of installments.data) {
       if (installment.status !== 'paid') continue;
@@ -75,8 +89,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
       const paidRef = reconciliationEventRef(`${operation.proposalId}:installment.paid:${installment.id}`);
       const paidSnapshot = await paidRef.get();
       if (!paidSnapshot.exists || paidSnapshot.data()?.status !== 'PROCESSED') {
-        await paidRef.set({ status: 'RECEIVED', source: 'RECONCILIATION', receivedAt: FieldValue.serverTimestamp(), payload: paidEvent }, { merge: true });
-        await processCredigrupoEvent(paidRef, paidEvent);
+        await paidRef.set({
+          eventId: paidRef.id,
+          eventType: paidEvent.event,
+          proposalId: operation.proposalId,
+          installmentId: installment.id,
+          status: 'RECEIVED',
+          source: 'RECONCILIATION',
+          receivedAt: FieldValue.serverTimestamp(),
+          payload: paidEvent,
+        }, { merge: true });
+        await processStoredCredigrupoEvent(paidRef, paidEvent);
       }
 
       if (installment.investor_payout_status === 'completed') {
@@ -94,8 +117,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
         const repaidRef = reconciliationEventRef(`${operation.proposalId}:installment.investor_repaid:${installment.id}`);
         const repaidSnapshot = await repaidRef.get();
         if (!repaidSnapshot.exists || repaidSnapshot.data()?.status !== 'PROCESSED') {
-          await repaidRef.set({ status: 'RECEIVED', source: 'RECONCILIATION', receivedAt: FieldValue.serverTimestamp(), payload: repaidEvent }, { merge: true });
-          await processCredigrupoEvent(repaidRef, repaidEvent);
+          await repaidRef.set({
+            eventId: repaidRef.id,
+            eventType: repaidEvent.event,
+            proposalId: operation.proposalId,
+            installmentId: installment.id,
+            status: 'RECEIVED',
+            source: 'RECONCILIATION',
+            receivedAt: FieldValue.serverTimestamp(),
+            payload: repaidEvent,
+          }, { merge: true });
+          await processStoredCredigrupoEvent(repaidRef, repaidEvent);
         }
       }
     }

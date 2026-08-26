@@ -4,10 +4,13 @@ import type {
   CreateBancarizedLoanResult,
   CredigrupoBorrowerState,
   CredigrupoIntegrationStatus,
+  CredigrupoInstallmentActionRequest,
+  CredigrupoInstallmentPixResult,
   CredigrupoInvestorSummary,
   CredigrupoOperationSummary,
   CredigrupoSimulationRequest,
   CredigrupoSimulationResult,
+  CredigrupoTestPayRequest,
   EnsureCredigrupoBorrowerRequest,
 } from '../lib/creditProviders/types';
 
@@ -86,4 +89,16 @@ export const cancelCredigrupoOperation = (operationId: string) =>
   request<{ cancelled: boolean }>('/api/credigrupo/cancel', {
     method: 'POST',
     body: JSON.stringify({ operationId }),
+  });
+
+export const createCredigrupoInstallmentPix = (payload: CredigrupoInstallmentActionRequest) =>
+  request<CredigrupoInstallmentPixResult>('/api/credigrupo/installments/pix', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const testPayCredigrupoSandbox = (payload: CredigrupoTestPayRequest) =>
+  request<{ simulated: true; target: 'FUNDING' | 'INSTALLMENT' }>('/api/admin/credigrupo/test-pay', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   });

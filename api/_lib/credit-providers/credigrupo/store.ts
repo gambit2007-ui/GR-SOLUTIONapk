@@ -10,6 +10,8 @@ import type {
 } from '../../../../src/lib/creditProviders/types';
 
 export interface StoredCredigrupoOperation {
+  formalizationType?: 'BANCARIZED';
+  provider?: 'CREDIGRUPO';
   customerId: string;
   customerName: string;
   customerPhone?: string;

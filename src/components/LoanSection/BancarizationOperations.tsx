@@ -5,6 +5,7 @@ import {
   cancelCredigrupoOperation,
   listCredigrupoOperations,
   reconcileCredigrupoOperation,
+  testPayCredigrupoSandbox,
 } from '../../services/credigrupoService';
 
 interface BancarizationOperationsProps {
@@ -12,6 +13,8 @@ interface BancarizationOperationsProps {
   refreshKey: number;
   showToast: (message: string, type?: 'success' | 'error') => void;
   onOpenLoan: (loanId: string) => void;
+  isAdmin: boolean;
+  isSandbox: boolean;
 }
 
 const formatMoney = (cents: number) =>
@@ -42,7 +45,7 @@ const safeOpen = (value?: string) => {
   }
 };
 
-const BancarizationOperations: React.FC<BancarizationOperationsProps> = ({ enabled, refreshKey, showToast, onOpenLoan }) => {
+const BancarizationOperations: React.FC<BancarizationOperationsProps> = ({ enabled, refreshKey, showToast, onOpenLoan, isAdmin, isSandbox }) => {
   const [operations, setOperations] = useState<CredigrupoOperationSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [processingId, setProcessingId] = useState<string | null>(null);
@@ -92,6 +95,20 @@ const BancarizationOperations: React.FC<BancarizationOperationsProps> = ({ enabl
     }
   };
 
+  const handleTestFunding = async (operationId: string) => {
+    if (!window.confirm('Simular o pagamento do funding no sandbox?')) return;
+    setProcessingId(operationId);
+    try {
+      await testPayCredigrupoSandbox({ operationId });
+      showToast('Funding simulado. Aguarde os eventos da Credigrupo.', 'success');
+      await load();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Falha ao simular funding', 'error');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
   const visibleOperations = operations.filter((operation) => operation.status !== 'CANCELLED').slice(0, 8);
   if (!loading && visibleOperations.length === 0) return null;
 
@@ -111,7 +128,8 @@ const BancarizationOperations: React.FC<BancarizationOperationsProps> = ({ enabl
       ) : (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
           {visibleOperations.map((operation) => {
-            const canCancel = !['SIGNED', 'FUNDED', 'CANCELLED', 'CANCELLATION_REQUESTED'].includes(operation.status);
+            const canCancel = isAdmin && !['SIGNED', 'FUNDED', 'CANCELLED', 'CANCELLATION_REQUESTED'].includes(operation.status);
+            const canTestFunding = isAdmin && isSandbox && operation.status === 'AWAITING_LENDER_PAYMENT';
             return (
               <article key={operation.id} className="rounded-2xl border border-zinc-900 bg-black p-4 space-y-3">
                 <div className="flex items-start justify-between gap-3">
@@ -126,7 +144,8 @@ const BancarizationOperations: React.FC<BancarizationOperationsProps> = ({ enabl
                   {operation.borrowerSignUrl && <button type="button" onClick={() => safeOpen(operation.borrowerSignUrl)} className="px-3 py-2 rounded-xl bg-blue-500/10 text-blue-400 text-[7px] font-black uppercase flex items-center gap-1"><ExternalLink size={11} /> Assinar cliente</button>}
                   {operation.investorSignUrl && <button type="button" onClick={() => safeOpen(operation.investorSignUrl)} className="px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 text-[7px] font-black uppercase flex items-center gap-1"><ExternalLink size={11} /> Assinar investidor</button>}
                   {operation.localLoanId && operation.status === 'FUNDED' && <button type="button" onClick={() => onOpenLoan(operation.localLoanId || '')} className="px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 text-[7px] font-black uppercase flex items-center gap-1"><CheckCircle size={11} /> Abrir contrato</button>}
-                  <button type="button" disabled={processingId === operation.id} onClick={() => void handleReconcile(operation.id)} className="px-3 py-2 rounded-xl border border-zinc-800 text-zinc-400 text-[7px] font-black uppercase disabled:opacity-50 flex items-center gap-1"><RefreshCw size={11} className={processingId === operation.id ? 'animate-spin' : ''} /> Conciliar</button>
+                  {isAdmin && <button type="button" disabled={processingId === operation.id} onClick={() => void handleReconcile(operation.id)} className="px-3 py-2 rounded-xl border border-zinc-800 text-zinc-400 text-[7px] font-black uppercase disabled:opacity-50 flex items-center gap-1"><RefreshCw size={11} className={processingId === operation.id ? 'animate-spin' : ''} /> Conciliar</button>}
+                  {canTestFunding && <button type="button" disabled={processingId === operation.id} onClick={() => void handleTestFunding(operation.id)} className="px-3 py-2 rounded-xl bg-amber-500/10 text-amber-400 text-[7px] font-black uppercase disabled:opacity-50 flex items-center gap-1"><ShieldCheck size={11} /> Simular funding</button>}
                   {canCancel && <button type="button" disabled={processingId === operation.id} onClick={() => void handleCancel(operation.id)} className="px-3 py-2 rounded-xl bg-red-500/10 text-red-400 text-[7px] font-black uppercase disabled:opacity-50 flex items-center gap-1"><Ban size={11} /> Cancelar</button>}
                 </div>
               </article>
