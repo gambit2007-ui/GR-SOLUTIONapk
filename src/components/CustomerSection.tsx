@@ -1,5 +1,5 @@
 ﻿import React, { useState } from 'react';
-import { Plus, Search, User, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, Plus, Search, User, UserPlus, Trash2, Edit2, Camera, FileText, X, Paperclip, Star, AlertTriangle } from 'lucide-react';
 import { getDownloadURL, ref, uploadBytes, type FirebaseStorage } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { Customer, Loan, CustomerDocument, type DataLoadStatus } from '../types';
@@ -28,6 +28,36 @@ interface CustomerSectionProps {
   onUpdateCustomer: (c: Customer) => Promise<void> | void;
   onDeleteCustomer: (id: string) => Promise<void> | void;
 }
+
+const customerInputClass = 'w-full rounded-xl border border-zinc-800 bg-black px-4 py-3 text-[10px] text-white outline-none transition-colors placeholder:text-zinc-700 focus:border-[#BF953F]';
+const customerLabelClass = 'mb-1.5 block text-[8px] font-black uppercase tracking-[0.18em] text-zinc-500';
+
+const addressFields = [
+  'addressStreet',
+  'addressNumber',
+  'addressNeighborhood',
+  'addressCity',
+  'addressState',
+  'addressZipCode',
+] as const;
+
+const buildAddress = (customer: Partial<Customer>) => {
+  const street = String(customer.addressStreet || '').trim();
+  const number = String(customer.addressNumber || '').trim();
+  const neighborhood = String(customer.addressNeighborhood || '').trim();
+  const city = String(customer.addressCity || '').trim();
+  const state = String(customer.addressState || '').trim().toUpperCase();
+  const zipCode = String(customer.addressZipCode || '').replace(/\D/g, '');
+
+  const firstLine = [street, number].filter(Boolean).join(', ');
+  const cityAndState = [city, state].filter(Boolean).join('/');
+  const secondLine = [neighborhood, cityAndState].filter(Boolean).join(', ');
+  const formattedZipCode = zipCode.length === 8 ? `${zipCode.slice(0, 5)}-${zipCode.slice(5)}` : zipCode;
+
+  return [firstLine, secondLine, formattedZipCode ? `CEP ${formattedZipCode}` : '']
+    .filter(Boolean)
+    .join(' - ');
+};
 
 const CustomerSection: React.FC<CustomerSectionProps> = ({
   customers,
@@ -477,10 +507,35 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       return;
     }
 
+    const hasAddressFields = addressFields.some((field) => String(formData[field] || '').trim());
+    const hasCompleteAddress = addressFields.every((field) => String(formData[field] || '').trim());
+    const cleanZipCode = String(formData.addressZipCode || '').replace(/\D/g, '');
+    const cleanState = String(formData.addressState || '').trim().toUpperCase();
+
+    if (hasAddressFields && !hasCompleteAddress) {
+      alert('Preencha Rua, Numero, Bairro, Cidade, UF e CEP para salvar o endereco.');
+      return;
+    }
+
+    if (hasAddressFields && cleanZipCode.length !== 8) {
+      alert('O CEP deve conter 8 digitos.');
+      return;
+    }
+
+    if (hasAddressFields && !/^[A-Z]{2}$/.test(cleanState)) {
+      alert('Informe a UF com duas letras, por exemplo: RJ.');
+      return;
+    }
+
+    const address = hasAddressFields ? buildAddress({ ...formData, addressZipCode: cleanZipCode, addressState: cleanState }) : formData.address || '';
+
     const payload = {
       ...formData,
       cpf: cleanDocument,
       phone: cleanPhone,
+      address,
+      addressState: cleanState,
+      addressZipCode: cleanZipCode,
       notes: (formData as any).notes ?? (formData as any).observations ?? '',
       observations: (formData as any).observations ?? (formData as any).notes ?? '',
       avatar: (formData as any).avatar ?? (formData as any).photoUrl ?? '',
@@ -504,6 +559,303 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       setIsSaving(false);
     }
   };
+
+  if (isModalOpen) {
+    return (
+      <section className="mx-auto max-w-6xl pb-10">
+        <button
+          type="button"
+          onClick={() => setIsModalOpen(false)}
+          className="mb-5 inline-flex items-center gap-2 text-[9px] font-black uppercase tracking-widest text-zinc-500 transition-colors hover:text-white"
+        >
+          <ArrowLeft size={14} /> Voltar para clientes
+        </button>
+
+        <div className="rounded-[2rem] border border-zinc-900 bg-[#050505] p-5 sm:p-8">
+          <div className="mb-8 flex items-start gap-3">
+            <div className="rounded-2xl border border-[#BF953F]/25 bg-[#BF953F]/10 p-3 text-[#F5D77B]">
+              <UserPlus size={20} />
+            </div>
+            <div>
+              <p className="text-[8px] font-black uppercase tracking-[0.24em] text-[#BF953F]">Clientes / Cadastro</p>
+              <h1 className="mt-2 text-xl font-black uppercase tracking-tight text-white">
+                {editingCustomer ? 'Editar cliente' : 'Novo cliente'}
+              </h1>
+              <p className="mt-2 max-w-2xl text-[9px] uppercase leading-relaxed tracking-wider text-zinc-500">
+                Dados cadastrais, foto e documentos armazenados com seguranca no sistema GR Solutions.
+              </p>
+            </div>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-8">
+            <fieldset className="space-y-4">
+              <legend className="mb-4 text-[10px] font-black uppercase tracking-[0.2em] text-[#F5D77B]">Dados pessoais</legend>
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-[180px_minmax(0,1fr)]">
+                <div className="rounded-2xl border border-zinc-900 bg-black/40 p-4">
+                  <span className={customerLabelClass}>Foto de perfil</span>
+                  <div className="mt-3 flex flex-col items-center gap-3">
+                    <div className="group relative">
+                      <div className="flex h-32 w-32 items-center justify-center overflow-hidden rounded-3xl border-2 border-dashed border-zinc-800 bg-zinc-900 transition-colors group-hover:border-[#BF953F]">
+                        {(formData.avatar || formData.photoUrl) ? (
+                          <img
+                            src={(formData.avatar || formData.photoUrl) as string}
+                            alt="Pre-visualizacao do cliente"
+                            className="h-full w-full object-cover"
+                            onError={(event) =>
+                              handleImageLoadError(
+                                event,
+                                formData.photoUrl && formData.photoUrl !== formData.avatar ? formData.photoUrl : undefined,
+                              )
+                            }
+                          />
+                        ) : (
+                          <Camera size={32} className="text-zinc-700 transition-colors group-hover:text-[#BF953F]" />
+                        )}
+                      </div>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        aria-label="Selecionar foto do cliente"
+                        className="absolute inset-0 cursor-pointer opacity-0"
+                        onChange={(event) => {
+                          const file = event.target.files?.[0];
+                          if (file) void handleFileUpload(file, 'PHOTO');
+                          event.currentTarget.value = '';
+                        }}
+                      />
+                      {(formData.avatar || formData.photoUrl) && (
+                        <button
+                          type="button"
+                          aria-label="Remover foto do cliente"
+                          onClick={() => setFormData({ ...formData, photoUrl: undefined, avatar: undefined })}
+                          className="absolute -right-2 -top-2 rounded-full bg-red-500 p-1.5 text-white shadow-lg"
+                        >
+                          <X size={12} />
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-center text-[7px] font-bold uppercase tracking-widest text-zinc-600">JPG ou PNG, ate 5 MB</p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <label>
+                    <span className={customerLabelClass}>Nome completo</span>
+                    <input
+                      type="text"
+                      required
+                      autoComplete="name"
+                      className={customerInputClass}
+                      value={formData.name || ''}
+                      onChange={(event) => setFormData({ ...formData, name: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span className={customerLabelClass}>CPF ou CNPJ</span>
+                    <input
+                      type="text"
+                      required
+                      maxLength={14}
+                      inputMode="numeric"
+                      autoComplete="off"
+                      className={customerInputClass}
+                      value={formData.cpf || ''}
+                      onChange={(event) => {
+                        const value = event.target.value.replace(/\D/g, '');
+                        if (value.length <= 14) setFormData({ ...formData, cpf: value });
+                      }}
+                    />
+                  </label>
+                  <label>
+                    <span className={customerLabelClass}>Data de nascimento</span>
+                    <input
+                      type="date"
+                      className={customerInputClass}
+                      value={formData.birthDate || ''}
+                      onChange={(event) => setFormData({ ...formData, birthDate: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span className={customerLabelClass}>E-mail</span>
+                    <input
+                      type="email"
+                      autoComplete="email"
+                      className={customerInputClass}
+                      value={formData.email || ''}
+                      onChange={(event) => setFormData({ ...formData, email: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span className={customerLabelClass}>Telefone com DDD</span>
+                    <input
+                      type="text"
+                      required
+                      inputMode="tel"
+                      autoComplete="tel"
+                      className={customerInputClass}
+                      value={formData.phone || ''}
+                      onChange={(event) => setFormData({ ...formData, phone: event.target.value })}
+                    />
+                  </label>
+                  <label>
+                    <span className={customerLabelClass}>RG</span>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      className={customerInputClass}
+                      value={formData.rg || ''}
+                      onChange={(event) => setFormData({ ...formData, rg: event.target.value })}
+                    />
+                  </label>
+                </div>
+              </div>
+            </fieldset>
+
+            <fieldset className="space-y-4 border-t border-zinc-900 pt-7">
+              <legend className="text-[10px] font-black uppercase tracking-[0.2em] text-[#F5D77B]">Endereco</legend>
+              {editingCustomer?.address && !addressFields.some((field) => formData[field]) && (
+                <p className="rounded-xl border border-zinc-800 bg-black/40 px-4 py-3 text-[9px] leading-relaxed text-zinc-500">
+                  Endereco anterior: <span className="text-zinc-300">{editingCustomer.address}</span>
+                </p>
+              )}
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-6">
+                <label className="md:col-span-4">
+                  <span className={customerLabelClass}>Rua</span>
+                  <input
+                    type="text"
+                    autoComplete="street-address"
+                    className={customerInputClass}
+                    value={formData.addressStreet || ''}
+                    onChange={(event) => setFormData({ ...formData, addressStreet: event.target.value })}
+                  />
+                </label>
+                <label className="md:col-span-2">
+                  <span className={customerLabelClass}>Numero</span>
+                  <input
+                    type="text"
+                    autoComplete="address-line2"
+                    className={customerInputClass}
+                    value={formData.addressNumber || ''}
+                    onChange={(event) => setFormData({ ...formData, addressNumber: event.target.value })}
+                  />
+                </label>
+                <label className="md:col-span-3">
+                  <span className={customerLabelClass}>Bairro</span>
+                  <input
+                    type="text"
+                    autoComplete="address-level3"
+                    className={customerInputClass}
+                    value={formData.addressNeighborhood || ''}
+                    onChange={(event) => setFormData({ ...formData, addressNeighborhood: event.target.value })}
+                  />
+                </label>
+                <label className="md:col-span-2">
+                  <span className={customerLabelClass}>Cidade</span>
+                  <input
+                    type="text"
+                    autoComplete="address-level2"
+                    className={customerInputClass}
+                    value={formData.addressCity || ''}
+                    onChange={(event) => setFormData({ ...formData, addressCity: event.target.value })}
+                  />
+                </label>
+                <label>
+                  <span className={customerLabelClass}>UF</span>
+                  <input
+                    type="text"
+                    maxLength={2}
+                    autoComplete="address-level1"
+                    className={customerInputClass}
+                    value={formData.addressState || ''}
+                    onChange={(event) => setFormData({ ...formData, addressState: event.target.value.replace(/[^a-z]/gi, '').toUpperCase() })}
+                  />
+                </label>
+                <label className="md:col-span-2">
+                  <span className={customerLabelClass}>CEP</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={9}
+                    autoComplete="postal-code"
+                    className={customerInputClass}
+                    value={String(formData.addressZipCode || '').replace(/(\d{5})(\d)/, '$1-$2')}
+                    onChange={(event) => setFormData({ ...formData, addressZipCode: event.target.value.replace(/\D/g, '').slice(0, 8) })}
+                  />
+                </label>
+              </div>
+            </fieldset>
+
+            <fieldset className="space-y-5 border-t border-zinc-900 pt-7">
+              <legend className="text-[10px] font-black uppercase tracking-[0.2em] text-[#F5D77B]">Observacoes e documentos</legend>
+              <label>
+                <span className={customerLabelClass}>Observacoes</span>
+                <textarea
+                  rows={4}
+                  className={`${customerInputClass} resize-none`}
+                  value={formData.observations ?? formData.notes ?? ''}
+                  onChange={(event) => setFormData({ ...formData, observations: event.target.value, notes: event.target.value })}
+                />
+              </label>
+
+              <div className="space-y-3">
+                <span className={customerLabelClass}>Documentos (PDF, JPG, PNG)</span>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {(formData.documents || []).map((document) => (
+                    <div key={document.id || document.name} className="flex items-center justify-between rounded-xl border border-zinc-800 bg-black px-4 py-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <FileText size={14} className="shrink-0 text-[#BF953F]" />
+                        <span className="truncate text-[10px] text-zinc-400">{document.name}</span>
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Remover ${document.name}`}
+                        onClick={() => removeDocument(document.id || document.name)}
+                        className="text-zinc-600 transition-colors hover:text-red-500"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  <label className="group flex cursor-pointer items-center justify-center gap-2 rounded-xl border-2 border-dashed border-zinc-800 bg-black px-4 py-3 transition-colors hover:border-[#BF953F]">
+                    <Paperclip size={14} className="text-zinc-600 transition-colors group-hover:text-[#BF953F]" />
+                    <span className="text-[9px] font-black uppercase tracking-widest text-zinc-600 transition-colors group-hover:text-[#BF953F]">Anexar arquivo</span>
+                    <input
+                      type="file"
+                      accept=".pdf,.jpg,.jpeg,.png,image/png,image/jpeg,application/pdf"
+                      className="hidden"
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        if (file) void handleFileUpload(file, 'DOCUMENT');
+                        event.currentTarget.value = '';
+                      }}
+                    />
+                  </label>
+                </div>
+              </div>
+            </fieldset>
+
+            <div className="flex flex-col-reverse gap-3 border-t border-zinc-900 pt-6 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setIsModalOpen(false)}
+                className="rounded-xl border border-zinc-800 px-6 py-3 text-[9px] font-black uppercase tracking-widest text-zinc-400 transition-colors hover:border-zinc-700 hover:text-white"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={isUploading || isSaving}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#BF953F] via-[#FCF6BA] to-[#B38728] px-7 py-3 text-[9px] font-black uppercase tracking-widest text-black disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <UserPlus size={14} />
+                {isUploading ? 'Enviando arquivos...' : isSaving ? 'Salvando...' : editingCustomer ? 'Salvar alteracoes' : 'Cadastrar cliente'}
+              </button>
+            </div>
+          </form>
+        </div>
+      </section>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -679,173 +1031,6 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
         </>
       )}
 
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/80 backdrop-blur-sm overflow-y-auto">
-          <div className="bg-[#050505] border border-zinc-900 w-full max-w-2xl rounded-[2.5rem] p-5 sm:p-8 relative my-4 sm:my-8 max-h-[92dvh] overflow-y-auto">
-            <button onClick={() => setIsModalOpen(false)} className="absolute top-6 right-6 text-zinc-500 hover:text-white">
-              <X size={24} />
-            </button>
-            <h2 className="text-xl font-black gold-text uppercase tracking-tighter mb-8">
-              {editingCustomer ? 'Editar Cliente' : 'Novo Cliente'}
-            </h2>
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="flex flex-col md:flex-row gap-8">
-                {/* Photo Upload */}
-                <div className="flex flex-col items-center gap-4">
-                  <div className="relative group">
-                    <div className="w-32 h-32 bg-zinc-900 rounded-3xl border-2 border-dashed border-zinc-800 flex items-center justify-center overflow-hidden group-hover:border-[#BF953F] transition-all">
-                      {(formData as any).avatar || (formData as any).photoUrl ? (
-                        <img
-                          src={((formData as any).avatar || (formData as any).photoUrl) as string}
-                          alt="Pre-visualizacao"
-                          className="w-full h-full object-cover"
-                          onError={(event) =>
-                            handleImageLoadError(
-                              event,
-                              (formData as any).photoUrl && (formData as any).photoUrl !== (formData as any).avatar
-                                ? (formData as any).photoUrl
-                                : undefined,
-                            )
-                          }
-                        />
-                      ) : (
-                        <Camera size={32} className="text-zinc-700 group-hover:text-[#BF953F]" />
-                      )}
-                    </div>
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      className="absolute inset-0 opacity-0 cursor-pointer" 
-                      onChange={(e) => {
-                        const file = e.target.files?.[0];
-                        if (file) {
-                          void handleFileUpload(file, 'PHOTO');
-                        }
-                        e.currentTarget.value = '';
-                      }}
-                    />
-                    {((formData as any).avatar || (formData as any).photoUrl) && (
-                      <button 
-                        type="button"
-                        onClick={() => setFormData({ ...formData, photoUrl: undefined, avatar: undefined } as any)}
-                        className="absolute -top-2 -right-2 p-1.5 bg-red-500 text-white rounded-full shadow-lg"
-                      >
-                        <X size={12} />
-                      </button>
-                    )}
-                  </div>
-                  <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Foto de Perfil</span>
-                </div>
-
-                <div className="flex-1 space-y-4">
-                  <input
-                    type="text" placeholder="NOME COMPLETO" required
-                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
-                    value={formData.name || ''}
-                    onChange={e => setFormData({ ...formData, name: e.target.value })}
-                  />
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <input
-                      type="text" placeholder="CPF OU CNPJ (SO NUMEROS)" required
-                      maxLength={14}
-                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
-                      value={formData.cpf || ''}
-                      onChange={e => {
-                        const value = e.target.value.replace(/\D/g, '');
-                        if (value.length <= 14) {
-                          setFormData({ ...formData, cpf: value });
-                        }
-                      }}
-                    />
-                    <input
-                      type="text" placeholder="RG"
-                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
-                      value={formData.rg || ''}
-                      onChange={e => setFormData({ ...formData, rg: e.target.value })}
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <input
-                      type="date" placeholder="DATA DE NASCIMENTO"
-                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
-                      value={(formData as any).birthDate || ''}
-                      onChange={e => setFormData({ ...formData, birthDate: e.target.value } as any)}
-                    />
-                    <input
-                      type="text" placeholder="TELEFONE (SO NUMEROS)" required
-                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
-                      value={formData.phone || ''}
-                      onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                    />
-                  </div>
-                  <input
-                    type="email" placeholder="E-MAIL"
-                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
-                    value={formData.email || ''}
-                    onChange={e => setFormData({ ...formData, email: e.target.value })}
-                  />
-                  <input
-                    type="text" placeholder="ENDERECO"
-                    className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs"
-                    value={formData.address || ''}
-                    onChange={e => setFormData({ ...formData, address: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <textarea
-                  placeholder="OBSERVACOES"
-                  rows={3}
-                  className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs resize-none"
-                  value={(formData as any).observations ?? formData.notes ?? ''}
-                  onChange={e => setFormData({ ...formData, observations: e.target.value, notes: e.target.value } as any)}
-                />
-
-                <div className="space-y-2">
-                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Documentos (PDF, JPG, PNG)</label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {((formData.documents || []) as any[]).map((doc: any) => (
-                      <div key={doc.id || doc.name} className="flex items-center justify-between p-3 bg-zinc-900 rounded-xl border border-zinc-800">
-                        <div className="flex items-center gap-2 overflow-hidden">
-                          <FileText size={14} className="text-[#BF953F] shrink-0" />
-                          <span className="text-[10px] text-zinc-400 truncate">{doc.name}</span>
-                        </div>
-                        <button type="button" onClick={() => removeDocument(doc.id || doc.name)} className="text-zinc-600 hover:text-red-500">
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                    <label className="flex items-center justify-center gap-2 p-3 bg-[#000000] border-2 border-dashed border-zinc-800 rounded-xl cursor-pointer hover:border-[#BF953F] transition-all group">
-                      <Paperclip size={14} className="text-zinc-600 group-hover:text-[#BF953F]" />
-                      <span className="text-[9px] font-black text-zinc-600 uppercase tracking-widest group-hover:text-[#BF953F]">Anexar Arquivo</span>
-                      <input 
-                        type="file" 
-                        accept=".pdf,.jpg,.jpeg,.png,image/png,image/jpeg,application/pdf"
-                        className="hidden" 
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (file) {
-                            void handleFileUpload(file, 'DOCUMENT');
-                          }
-                          e.currentTarget.value = '';
-                        }}
-                      />
-                    </label>
-                  </div>
-                </div>
-              </div>
-
-              <button 
-                disabled={isUploading || isSaving}
-                className={`w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4 flex items-center justify-center gap-2 ${(isUploading || isSaving) ? 'opacity-50 cursor-not-allowed' : ''}`}
-              >
-                {isUploading ? 'Enviando Arquivos...' : isSaving ? 'Salvando...' : (editingCustomer ? 'Salvar Alteracoes' : 'Cadastrar Cliente')}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
       {viewingDetails && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-4 bg-[#000000]/90 backdrop-blur-md overflow-y-auto">
           <div className="bg-[#050505] border border-zinc-900 w-full max-w-4xl rounded-[2.5rem] p-5 sm:p-8 relative my-4 sm:my-8 max-h-[92dvh] overflow-y-auto">

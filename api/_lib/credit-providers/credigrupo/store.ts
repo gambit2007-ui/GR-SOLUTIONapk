@@ -6,8 +6,12 @@ import type {
   CredigrupoOperationSummary,
   CredigrupoSimulationRequest,
   CredigrupoSimulationResult,
+  CredigrupoAccountMode,
   FundingSourceType,
 } from '../../../../src/lib/creditProviders/types.js';
+import { CREDIGRUPO_ACCOUNT_MODE, CREDIGRUPO_OWN_INVESTOR_NAME } from '../../env.js';
+import type { SafeCredigrupoProviderError } from './providerError.js';
+import type { SafeCredigrupoCreateSuccess, SafeCredigrupoFundingPix } from './createSuccess.js';
 
 export interface StoredCredigrupoOperation {
   formalizationType?: 'BANCARIZED';
@@ -16,7 +20,10 @@ export interface StoredCredigrupoOperation {
   customerName: string;
   customerPhone?: string;
   borrowerId: string;
-  investorId: string;
+  accountMode?: CredigrupoAccountMode;
+  investorType?: 'GR';
+  investorId?: string;
+  externalInvestorId?: string;
   investorName: string;
   fundingSource: FundingSourceType;
   amountCents: number;
@@ -28,11 +35,29 @@ export interface StoredCredigrupoOperation {
   simulation: CredigrupoSimulationResult['simulation'];
   simulationExternalId: string;
   status: string;
+  failureClassification?: 'DETERMINISTIC' | 'AMBIGUOUS';
+  lastErrorCode?: string;
+  providerError?: SafeCredigrupoProviderError;
   externalStatus?: string;
+  formalizationStatus?: string;
+  internalStatus?: string;
+  unknownProviderStatus?: boolean;
+  providerSuccess?: SafeCredigrupoCreateSuccess;
   proposalId?: string;
   requestId?: string;
   localLoanId?: string;
-  pix?: Record<string, unknown>;
+  pix?: SafeCredigrupoFundingPix;
+  testPayStatus?: 'REQUESTING' | 'SUCCEEDED' | 'FAILED';
+  testPayRequestedAt?: Timestamp;
+  testPayCompletedAt?: Timestamp;
+  testPayResult?: {
+    httpStatus: number;
+    requestId?: string;
+    proposalId?: string;
+    status?: string;
+    formalizationStatus?: string;
+    message?: string;
+  };
   borrowerSignUrl?: string;
   investorSignUrl?: string;
   ccbUrl?: string;
@@ -48,7 +73,10 @@ export interface StoredCredigrupoSimulation {
   customerName: string;
   customerPhone?: string;
   borrowerId: string;
-  investorId: string;
+  accountMode?: CredigrupoAccountMode;
+  investorType?: 'GR';
+  investorId?: string;
+  externalInvestorId?: string;
   request: CredigrupoSimulationRequest;
   response: Omit<CredigrupoSimulationResult, 'simulationId'>;
   createdByUid: string;
@@ -69,8 +97,8 @@ export const removeUndefined = <T>(value: T): T => {
   return value;
 };
 
-export const borrowerLinkId = (customerId: string, investorId: string) =>
-  `${customerId}__${investorId}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+export const borrowerLinkId = (customerId: string, scope: string) =>
+  `${customerId}__${scope}`.replace(/[^a-zA-Z0-9_-]/g, '_');
 
 export const findOperationByProposalId = async (proposalId: string) => {
   const snapshot = await adminDb.collection('creditOperations').where('proposalId', '==', proposalId).limit(1).get();
@@ -120,21 +148,22 @@ export const reserveCredigrupoOperation = async (
     }
     if (simulation.usedByOperationId) throw new ApiError(409, 'SIMULATION_ALREADY_USED', 'Simulacao ja utilizada.');
     if (simulation.expiresAt.toMillis() < Date.now()) throw new ApiError(409, 'SIMULATION_EXPIRED', 'A simulacao expirou.');
-    const investorSnapshot = await transaction.get(adminDb.doc(`creditInvestors/${simulation.investorId}`));
-    if (!investorSnapshot.exists || investorSnapshot.data()?.kycStatus !== 'approved') {
-      throw new ApiError(409, 'INVESTOR_NOT_APPROVED', 'Investidor nao encontrado ou ainda nao aprovado.');
+    if (request.fundingSource !== simulation.request.fundingSource) {
+      throw new ApiError(409, 'FUNDING_SOURCE_CHANGED', 'A origem do capital mudou. Gere uma nova simulacao.');
     }
-    const investorName = String(investorSnapshot.data()?.name || '').trim();
-    if (!investorName) throw new ApiError(409, 'INVESTOR_NAME_UNAVAILABLE', 'Nome do investidor indisponivel. Sincronize novamente.');
+    if (request.fundingSource !== 'GR' || simulation.accountMode !== CREDIGRUPO_ACCOUNT_MODE) {
+      throw new ApiError(409, 'ACCOUNT_MODE_CHANGED', 'A conta Credigrupo mudou. Gere uma nova simulacao.');
+    }
 
     const operation: StoredCredigrupoOperation = {
       customerId: simulation.customerId,
       customerName: simulation.customerName,
       customerPhone: simulation.customerPhone,
       borrowerId: simulation.borrowerId,
-      investorId: simulation.investorId,
-      investorName,
-      fundingSource: request.fundingSource,
+      accountMode: CREDIGRUPO_ACCOUNT_MODE,
+      investorType: 'GR',
+      investorName: CREDIGRUPO_OWN_INVESTOR_NAME,
+      fundingSource: 'GR',
       amountCents: simulation.request.amountCents,
       installments: simulation.request.installments,
       interestRate: simulation.request.interestRate,
@@ -169,16 +198,19 @@ export const toOperationSummary = (id: string, operation: StoredCredigrupoOperat
   customerId: operation.customerId,
   customerName: operation.customerName,
   investorId: operation.investorId,
-  investorName: operation.investorName,
+  investorName: operation.investorName || CREDIGRUPO_OWN_INVESTOR_NAME,
   fundingSource: operation.fundingSource,
   proposalId: operation.proposalId,
   localLoanId: operation.localLoanId,
   status: operation.status,
   externalStatus: operation.externalStatus,
+  formalizationStatus: operation.formalizationStatus,
+  unknownProviderStatus: operation.unknownProviderStatus,
   amountCents: operation.amountCents,
   installments: operation.installments,
   createdAt: operation.createdAt?.toDate().toISOString(),
   pix: operation.pix as CredigrupoOperationSummary['pix'],
+  testPayStatus: operation.testPayStatus,
   borrowerSignUrl: operation.borrowerSignUrl,
   investorSignUrl: operation.investorSignUrl,
   ccbUrl: operation.ccbUrl,

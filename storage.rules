@@ -19,6 +19,16 @@ service firebase.storage {
       );
     }
 
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.admin == true ||
+        (
+          firestore.exists(/databases/(default)/documents/authorizedUsers/$(request.auth.uid)) &&
+          firestore.get(/databases/(default)/documents/authorizedUsers/$(request.auth.uid)).data.role == 'ADMIN'
+        )
+      );
+    }
+
     function validCustomerAsset() {
       return request.resource.size < 15 * 1024 * 1024 &&
         request.resource.contentType != null && (
@@ -28,10 +38,26 @@ service firebase.storage {
         );
     }
 
+    function validCredigrupoKycAsset() {
+      return request.resource.size <= 8 * 1024 * 1024 &&
+        request.resource.contentType != null && (
+          request.resource.contentType == 'image/jpeg' ||
+          request.resource.contentType == 'image/png' ||
+          request.resource.contentType == 'image/webp' ||
+          request.resource.contentType == 'application/pdf'
+        );
+    }
+
     match /clientes/{customerId}/{allPaths=**} {
       allow read: if isAuthorized();
       allow create, update: if isAuthorized() && validCustomerAsset();
       allow delete: if false;
+    }
+
+    match /credigrupo-kyc/{uid}/{uploadId}/{fileName} {
+      allow read: if false;
+      allow create, update: if isAdmin() && request.auth.uid == uid && validCredigrupoKycAsset();
+      allow delete: if isAdmin() && request.auth.uid == uid;
     }
 
     match /{allPaths=**} {

@@ -2,6 +2,8 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { FieldValue } from 'firebase-admin/firestore';
 import { requireAuthorizedActor } from '../_lib/auth.js';
 import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
+import { requireCredigrupoProposalId } from '../_lib/credit-providers/credigrupo/operationGuards.js';
+import { isCredigrupoLoanCancelable } from '../../src/lib/creditProviders/loanStatus.js';
 import type { StoredCredigrupoOperation } from '../_lib/credit-providers/credigrupo/store.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http.js';
@@ -17,19 +19,26 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const operationSnapshot = await operationRef.get();
     if (!operationSnapshot.exists) throw new ApiError(404, 'OPERATION_NOT_FOUND', 'Operacao nao encontrada.');
     const operation = operationSnapshot.data() as StoredCredigrupoOperation;
-    if (!operation.proposalId) throw new ApiError(409, 'PROPOSAL_NOT_AVAILABLE', 'Proposta ainda nao identificada.');
+    const proposalId = requireCredigrupoProposalId(operation);
     if (operation.status === 'FUNDED' || operation.status === 'SIGNED') {
       throw new ApiError(409, 'CANCELLATION_NOT_ALLOWED', 'A operacao nao pode mais ser cancelada pela API.');
     }
 
-    await new CredigrupoClient({ allowWhenDisabled: true }).cancelLoan(operation.proposalId);
+    const client = new CredigrupoClient({ allowWhenDisabled: true });
+    const remote = await client.getLoan(proposalId);
+    if (!isCredigrupoLoanCancelable(remote.data.status)) {
+      throw new ApiError(409, 'CANCELLATION_NOT_ALLOWED', 'O status atual da Credigrupo nao permite cancelamento.');
+    }
+    await client.cancelLoan(proposalId);
     await operationRef.set({
       status: 'CANCELLATION_REQUESTED',
+      externalStatus: remote.data.status,
+      formalizationStatus: remote.data.formalization_status,
       cancellationRequestedByUid: actor.uid,
       cancellationRequestedAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
-    return sendJson(response, 200, { cancelled: true });
+    return sendJson(response, 200, { cancellationRequested: true, cancelled: false });
   } catch (error) {
     return handleApiError(response, error);
   }

@@ -19,7 +19,7 @@ describe('normalizacao de contratos', () => {
       interestRate: 10, frequency: 'MENSAL', interestType: 'SIMPLES',
       startDate: '2026-01-01', status: 'ATIVO', formalizationType: 'BANCARIZED',
       provider: 'CREDIGRUPO', funding: { source: 'EXTERNAL', investorId: 'investor-1', investorName: 'Investidor' },
-      credigrupo: { proposalId: 'proposal-1', externalStatus: 'funded' },
+      credigrupo: { proposalId: 'proposal-1', status: 'funded', formalizationStatus: 'completed' },
       installments: [{ number: 1, amount: 110, dueDate: '2026-02-01', status: 'PENDENTE', credigrupo: { installmentId: 'external-1', pixBrcode: '000201', pixQrCode: 'https://api.woovi.com/qr.png', pixCorrelationId: 'correlation-1', amountCents: 11000, totalCents: 12000, serviceFee: 1000 } }],
     });
 
@@ -27,7 +27,7 @@ describe('normalizacao de contratos', () => {
       formalizationType: 'BANCARIZED',
       provider: 'CREDIGRUPO',
       funding: { source: 'EXTERNAL', investorId: 'investor-1' },
-      credigrupo: { proposalId: 'proposal-1', externalStatus: 'funded' },
+      credigrupo: { proposalId: 'proposal-1', status: 'funded', formalizationStatus: 'completed' },
     });
     expect(loan.installments[0].credigrupo).toMatchObject({
       installmentId: 'external-1',

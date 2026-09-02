@@ -1,16 +1,17 @@
 import React, { useState } from 'react';
-import { CheckCircle, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
-import type { Customer, FundingSourceType } from '../../types';
+import { CheckCircle, Loader2, ShieldCheck } from 'lucide-react';
+import type { Customer } from '../../types';
 import type {
   CredigrupoBorrowerState,
-  CredigrupoInvestorSummary,
   CredigrupoKycData,
   CredigrupoSimulationResult,
 } from '../../lib/creditProviders/types';
+import { getBorrowerEligibilityPresentation } from '../../lib/creditProviders/borrowerEligibility';
 import {
+  CredigrupoServiceError,
   ensureCredigrupoBorrower,
+  getStoredCredigrupoBorrower,
   simulateCredigrupoLoan,
-  syncCredigrupoInvestors,
 } from '../../services/credigrupoService';
 
 export interface BancarizationTerms {
@@ -23,9 +24,7 @@ export interface BancarizationTerms {
 }
 
 export interface BancarizationDraft {
-  fundingSource: FundingSourceType;
-  investorId: string;
-  investorName: string;
+  fundingSource: 'GR';
   email: string;
   phone: string;
   document: string;
@@ -37,8 +36,6 @@ export interface BancarizationDraft {
 
 export const createDefaultBancarizationDraft = (customer?: Customer): BancarizationDraft => ({
   fundingSource: 'GR',
-  investorId: '',
-  investorName: '',
   email: customer?.email || '',
   phone: customer?.phone || '',
   document: customer?.cpf || '',
@@ -81,41 +78,43 @@ const currencyFromCents = (value: number) =>
   (Number(value || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, terms, value, onChange, showToast }) => {
-  const [investors, setInvestors] = useState<CredigrupoInvestorSummary[]>([]);
-  const [loadingInvestors, setLoadingInvestors] = useState(false);
+  const [loadingBorrower, setLoadingBorrower] = useState(false);
   const [syncingBorrower, setSyncingBorrower] = useState(false);
   const [simulating, setSimulating] = useState(false);
 
   const patch = (fields: Partial<BancarizationDraft>) => onChange({ ...value, ...fields });
   const patchKyc = (fields: Partial<CredigrupoKycData>) => patch({ kycData: { ...value.kycData, ...fields }, simulation: undefined });
-
-  const loadInvestors = async () => {
-    setLoadingInvestors(true);
-    try {
-      const result = await syncCredigrupoInvestors();
-      setInvestors(result);
-      showToast(`${result.length} investidor(es) sincronizado(s)`, 'success');
-    } catch (error) {
-      showToast(error instanceof Error ? error.message : 'Nao foi possivel carregar investidores', 'error');
-    } finally {
-      setLoadingInvestors(false);
-    }
-  };
+  const eligibility = getBorrowerEligibilityPresentation(value.borrower);
 
   React.useEffect(() => {
-    void loadInvestors();
-  }, []);
+    let cancelled = false;
+    if (!customer) return () => { cancelled = true; };
+    setLoadingBorrower(true);
+    void getStoredCredigrupoBorrower(customer.id)
+      .then((borrower) => {
+        if (!cancelled) onChange({ ...value, borrower, simulation: undefined });
+      })
+      .catch((error) => {
+        if (!cancelled && (!(error instanceof CredigrupoServiceError) || error.code !== 'BORROWER_NOT_SYNCED')) {
+          showToast(error instanceof Error ? error.message : 'Nao foi possivel carregar o tomador', 'error');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingBorrower(false);
+      });
+    return () => { cancelled = true; };
+  }, [customer?.id]);
 
   const handleBorrowerSync = async () => {
-    if (!customer || !value.investorId) {
-      showToast('Selecione o cliente e o investidor', 'error');
+    if (!customer) {
+      showToast('Selecione o cliente', 'error');
       return;
     }
     setSyncingBorrower(true);
     try {
       const borrower = await ensureCredigrupoBorrower({
         customerId: customer.id,
-        investorId: value.investorId,
+        fundingSource: 'GR',
         email: value.email,
         displayName: customer.name,
         phone: value.phone,
@@ -136,12 +135,12 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
   };
 
   const handleSimulation = async () => {
-    if (!customer || !value.investorId || value.borrower?.kycStatus !== 'approved') {
+    if (!customer || value.borrower?.kycStatus !== 'approved') {
       showToast('O KYC do tomador precisa estar aprovado', 'error');
       return;
     }
-    if (value.borrower.ccbEligible === false) {
-      showToast(value.borrower.eligibilityErrors?.join(' ') || 'Tomador nao elegivel para CCB', 'error');
+    if (!eligibility.canSimulate) {
+      showToast(eligibility.details.join(' ') || eligibility.title, 'error');
       return;
     }
     if (terms.frequency !== 'MONTHLY' && terms.frequency !== 'WEEKLY') {
@@ -156,7 +155,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
     try {
       const simulation = await simulateCredigrupoLoan({
         customerId: customer.id,
-        investorId: value.investorId,
+        fundingSource: 'GR',
         amountCents: Math.round(Number(terms.amount || 0) * 100),
         installments: Math.trunc(Number(terms.installments || 0)),
         interestRate: Number(terms.interestRate || 0),
@@ -175,7 +174,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
 
   return (
     <div className="space-y-4 rounded-2xl border border-[#BF953F]/25 bg-[#BF953F]/5 p-4">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <ShieldCheck size={16} className="text-[#BF953F]" />
           <div>
@@ -183,37 +182,16 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
             <p className="text-[7px] text-zinc-500 uppercase mt-1">Nenhuma operacao real sera executada</p>
           </div>
         </div>
-        <button type="button" onClick={() => void loadInvestors()} disabled={loadingInvestors} className="p-2 rounded-lg border border-zinc-800 text-zinc-400 disabled:opacity-50" title="Sincronizar investidores">
-          <RefreshCw size={13} className={loadingInvestors ? 'animate-spin' : ''} />
-        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div className="space-y-1">
-          <label className={labelClass}>Origem do capital</label>
-          <select value={value.fundingSource} onChange={(event) => patch({ fundingSource: event.target.value as FundingSourceType, simulation: undefined })} className={inputClass}>
-            <option value="GR">GR SOLUTION</option>
-            <option value="EXTERNAL">INVESTIDOR EXTERNO</option>
-          </select>
+        <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3">
+          <p className={labelClass}>Investidor</p>
+          <p className="mt-2 text-[9px] font-black uppercase tracking-wider text-emerald-400">GR SOLUTION</p>
         </div>
-        <div className="space-y-1">
-          <label className={labelClass}>Investidor</label>
-          <select
-            required
-            value={value.investorId}
-            onChange={(event) => {
-              const investor = investors.find((item) => item.id === event.target.value);
-              patch({ investorId: event.target.value, investorName: investor?.name || '', borrower: undefined, simulation: undefined });
-            }}
-            className={inputClass}
-          >
-            <option value="">SELECIONE</option>
-            {investors.map((investor) => (
-              <option key={investor.id} value={investor.id} disabled={investor.kycStatus !== 'approved'}>
-                {investor.name.toUpperCase()} - {investor.kycStatus.toUpperCase()}
-              </option>
-            ))}
-          </select>
+        <div className="rounded-xl border border-[#BF953F]/25 bg-black/40 p-3">
+          <p className={labelClass}>Origem</p>
+          <p className="mt-2 text-[9px] font-black uppercase tracking-wider text-[#F5D77B]">Capital proprio</p>
         </div>
       </div>
 
@@ -253,19 +231,47 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
         </div>
       </div>
 
-      <button type="button" onClick={() => void handleBorrowerSync()} disabled={syncingBorrower || !value.investorId} className="w-full py-3 rounded-xl border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
-        {syncingBorrower && <Loader2 size={12} className="animate-spin" />}
-        {value.borrower ? 'Atualizar status e elegibilidade' : 'Cadastrar tomador e iniciar KYC'}
+      <button type="button" onClick={() => void handleBorrowerSync()} disabled={loadingBorrower || syncingBorrower || !customer} className="w-full py-3 rounded-xl border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
+        {(loadingBorrower || syncingBorrower) && <Loader2 size={12} className="animate-spin" />}
+        {loadingBorrower ? 'Carregando tomador existente' : value.borrower ? 'Atualizar status e elegibilidade' : 'Cadastrar tomador e iniciar KYC'}
       </button>
 
       {value.borrower && (
-        <div className="rounded-xl border border-zinc-800 bg-black/50 p-3 flex items-center justify-between gap-3">
-          <div><p className="text-[8px] font-black text-zinc-400 uppercase">KYC: {value.borrower.kycStatus}</p><p className="text-[7px] text-zinc-600 mt-1 break-all">ID: {value.borrower.borrowerId}</p></div>
-          {value.borrower.kycStatus === 'approved' && <CheckCircle size={17} className="text-emerald-500" />}
+        <div className="space-y-3">
+          <div className="rounded-xl border border-zinc-800 bg-black/50 p-3 flex items-center justify-between gap-3">
+            <div><p className="text-[8px] font-black text-zinc-400 uppercase">KYC: {value.borrower.kycStatus}</p><p className="text-[7px] text-zinc-600 mt-1 break-all">ID: {value.borrower.borrowerId}</p></div>
+            {value.borrower.kycStatus === 'approved' && <CheckCircle size={17} className="text-emerald-500" />}
+          </div>
+          <div className={`rounded-xl border p-3 ${
+            eligibility.status === 'ELIGIBLE'
+              ? 'border-emerald-500/25 bg-emerald-500/5'
+              : eligibility.status === 'INELIGIBLE'
+                ? 'border-red-500/25 bg-red-500/5'
+                : 'border-amber-500/25 bg-amber-500/5'
+          }`}>
+            <p className={`text-[8px] font-black uppercase tracking-widest ${
+              eligibility.status === 'ELIGIBLE'
+                ? 'text-emerald-400'
+                : eligibility.status === 'INELIGIBLE'
+                  ? 'text-red-400'
+                  : 'text-amber-400'
+            }`}>{eligibility.title}</p>
+            {eligibility.details.length > 0 && (
+              <div className="mt-2 space-y-1">
+                <p className="text-[7px] font-black uppercase text-zinc-500">Motivos:</p>
+                {eligibility.details.map((message) => (
+                  <p key={message} className="text-[8px] leading-relaxed text-zinc-400">- {message}</p>
+                ))}
+              </div>
+            )}
+            {value.borrower.eligibilityCachedAt && (
+              <p className="mt-2 text-[7px] uppercase text-zinc-600">Consulta: {value.borrower.eligibilityCachedAt}</p>
+            )}
+          </div>
         </div>
       )}
 
-      <button type="button" onClick={() => void handleSimulation()} disabled={simulating || value.borrower?.kycStatus !== 'approved'} className="w-full py-3 rounded-xl bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
+      <button type="button" onClick={() => void handleSimulation()} disabled={simulating || !eligibility.canSimulate} className="w-full py-3 rounded-xl bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
         {simulating && <Loader2 size={12} className="animate-spin" />} Simular oficialmente
       </button>
 

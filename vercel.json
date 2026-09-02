@@ -5,6 +5,8 @@
     }
   },
   "rewrites": [
+    { "source": "/api/credigrupo/gr-investor", "destination": "/api/credigrupo/investors?route=gr-investor" },
+    { "source": "/api/credigrupo/investor-documents", "destination": "/api/credigrupo/investors?route=investor-documents" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

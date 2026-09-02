@@ -1,29 +1,79 @@
 import { ApiError } from '../../http.js';
-import { getCredigrupoServerConfig } from '../../env.js';
+import { CREDIGRUPO_ACCOUNT_MODE, getCredigrupoServerConfig } from '../../env.js';
 import type {
+  CreateCredigrupoInvestorRequest,
+  CredigrupoInvestorDocumentType,
   CredigrupoInstallmentPixResult,
   CredigrupoKycData,
   CredigrupoSimulationInstallment,
   CredigrupoSimulationValues,
 } from '../../../../src/lib/creditProviders/types.js';
+import { sanitizeCredigrupoProviderError } from './providerError.js';
 
-interface CredigrupoInvestorResponse {
+export interface CredigrupoInvestorResponse {
   id: string;
   name: string;
   email?: string;
+  document?: string;
+  phone?: string;
+  birth_date?: string;
   kyc_status: string;
+  created_at?: string;
 }
+
+export interface CredigrupoCreateInvestorResponse {
+  investorId: string;
+  status: string;
+  message?: string;
+}
+
+type CredigrupoInvestorDocumentsPayload = Partial<Record<CredigrupoInvestorDocumentType, string>>;
 
 interface CredigrupoBorrowerResponse {
   data: {
     id: string;
+    name?: string;
     kyc_status: string;
     ccb_eligible?: boolean;
     ccb_eligible_errors?: string[];
   };
 }
 
-interface CredigrupoLoanDetailsResponse {
+interface CredigrupoUpdateBorrowerResponse {
+  success: boolean;
+  borrowerId: string;
+}
+
+export interface CredigrupoBorrowerEligibilityResponse {
+  eligible?: boolean;
+  errors?: string[];
+  cachedAt?: string;
+}
+
+const asRecord = (value: unknown): Record<string, unknown> | undefined => (
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined
+);
+
+export const parseBorrowerEligibilityResponse = (payload: unknown): CredigrupoBorrowerEligibilityResponse => {
+  const root = asRecord(payload) || {};
+  const nested = asRecord(root.data);
+  const source = typeof root.eligible === 'boolean' || Object.hasOwn(root, 'errors') || Object.hasOwn(root, 'cachedAt')
+    ? root
+    : nested || {};
+
+  return {
+    eligible: typeof source.eligible === 'boolean' ? source.eligible : undefined,
+    errors: Array.isArray(source.errors)
+      ? source.errors.filter((item): item is string => typeof item === 'string')
+      : undefined,
+    cachedAt: typeof source.cachedAt === 'string' ? source.cachedAt : undefined,
+  };
+};
+
+export interface CredigrupoLoanDetailsResponse {
+  httpStatus: number;
   data: {
     id: string;
     status: string;
@@ -33,6 +83,12 @@ interface CredigrupoLoanDetailsResponse {
     borrower_signature_link?: string | null;
     lender_signature_link?: string | null;
   };
+}
+
+export interface CredigrupoLoanListResponse {
+  httpStatus: number;
+  data: unknown[];
+  total: number;
 }
 
 export interface CredigrupoExternalInstallment {
@@ -46,15 +102,18 @@ export interface CredigrupoExternalInstallment {
 }
 
 export interface CredigrupoCreateLoanResponse {
-  requestId: string;
-  proposalId: string;
-  status: string;
-  pix: {
-    brcode: string;
-    qrCodeImage: string;
-    expiresAt: string;
-    amountCents: number;
-    correlationId: string;
+  httpStatus: number;
+  requestId?: string;
+  proposalId?: string;
+  status?: string;
+  formalization_status?: string;
+  correlationId?: string;
+  pix?: {
+    brcode?: string;
+    qrCodeImage?: string;
+    expiresAt?: string;
+    amountCents?: number;
+    correlationId?: string;
   };
 }
 
@@ -82,7 +141,11 @@ export class CredigrupoClient {
     this.config = getCredigrupoServerConfig(options);
   }
 
-  private async request<T>(path: string, init?: RequestInit): Promise<T> {
+  private async request<T>(
+    path: string,
+    init?: RequestInit,
+    options?: { onSuccessStatus?: (status: number, requestId?: string) => void },
+  ): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 25_000);
     try {
@@ -99,18 +162,23 @@ export class CredigrupoClient {
       const payload = await response.json().catch(() => ({})) as Record<string, unknown>;
 
       if (!response.ok) {
+        const providerError = sanitizeCredigrupoProviderError({
+          httpStatus: response.status,
+          payload,
+          requestId,
+        });
         console.warn('[Credigrupo]', {
           operation: `${init?.method || 'GET'} ${path}`,
           status: response.status,
-          requestId,
+          providerError,
           timestamp: new Date().toISOString(),
         });
         throw new ApiError(response.status, `CREDIGRUPO_HTTP_${response.status}`, toFriendlyMessage(response.status), {
-          requestId,
-          retryAfterSeconds: payload.retryAfterSeconds,
+          providerError,
         });
       }
 
+      options?.onSuccessStatus?.(response.status, requestId);
       return payload as T;
     } catch (error) {
       if (error instanceof ApiError) throw error;
@@ -123,7 +191,18 @@ export class CredigrupoClient {
     }
   }
 
+  private assertInvestorManagementAvailable() {
+    if (this.config.accountMode === CREDIGRUPO_ACCOUNT_MODE) {
+      throw new ApiError(
+        403,
+        'ACCOUNT_MODE_NOT_APPLICABLE',
+        'A chave propria da GR ja representa a investidora Credigrupo.',
+      );
+    }
+  }
+
   async listInvestors(): Promise<CredigrupoInvestorResponse[]> {
+    this.assertInvestorManagementAvailable();
     const first = await this.request<{ data: CredigrupoInvestorResponse[]; total: number }>('/investors?page=1&pageSize=50');
     const investors = [...first.data];
     const pages = Math.ceil(first.total / 50);
@@ -134,8 +213,33 @@ export class CredigrupoClient {
     return investors;
   }
 
+  createInvestor(payload: CreateCredigrupoInvestorRequest) {
+    this.assertInvestorManagementAvailable();
+    return this.request<CredigrupoCreateInvestorResponse>('/investors', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  getInvestor(investorId: string) {
+    this.assertInvestorManagementAvailable();
+    return this.request<{ data: CredigrupoInvestorResponse }>(
+      `/investors/${encodeURIComponent(investorId)}`,
+    );
+  }
+
+  uploadInvestorDocuments(investorId: string, payload: CredigrupoInvestorDocumentsPayload) {
+    this.assertInvestorManagementAvailable();
+    return this.request<{ success: boolean; kyc_documents: Record<string, string> }>(
+      `/investors/${encodeURIComponent(investorId)}/documents`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
   registerBorrower(payload: {
-    investorId: string;
     email: string;
     display_name: string;
     phone: string;
@@ -153,14 +257,21 @@ export class CredigrupoClient {
     return this.request<CredigrupoBorrowerResponse>(`/borrowers/${encodeURIComponent(borrowerId)}`);
   }
 
-  getBorrowerEligibility(borrowerId: string) {
-    return this.request<{ eligible: boolean; errors: string[]; cachedAt: string }>(
+  updateBorrowerDisplayName(borrowerId: string, displayName: string) {
+    return this.request<CredigrupoUpdateBorrowerResponse>(`/borrowers/${encodeURIComponent(borrowerId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ display_name: displayName }),
+    });
+  }
+
+  async getBorrowerEligibility(borrowerId: string): Promise<CredigrupoBorrowerEligibilityResponse> {
+    const payload = await this.request<unknown>(
       `/borrowers/${encodeURIComponent(borrowerId)}/ccb-eligibility`,
     );
+    return parseBorrowerEligibilityResponse(payload);
   }
 
   simulateLoan(payload: {
-    investorId: string;
     borrowerId: string;
     amountCents: number;
     installments: number;
@@ -175,8 +286,7 @@ export class CredigrupoClient {
     });
   }
 
-  createLoan(payload: {
-    investorId: string;
+  async createLoan(payload: {
     borrowerId: string;
     amountCents: number;
     installments: number;
@@ -187,14 +297,36 @@ export class CredigrupoClient {
     interestType: 'simple' | 'compound';
     notes?: string;
   }) {
-    return this.request<CredigrupoCreateLoanResponse>('/loans', {
+    let httpStatus = 0;
+    const response = await this.request<Omit<CredigrupoCreateLoanResponse, 'httpStatus'>>('/loans', {
       method: 'POST',
       body: JSON.stringify(payload),
-    });
+    }, { onSuccessStatus: (status) => { httpStatus = status; } });
+    return { ...response, httpStatus };
   }
 
-  getLoan(proposalId: string) {
-    return this.request<CredigrupoLoanDetailsResponse>(`/loans/${encodeURIComponent(proposalId)}`);
+  async listLoansPage(): Promise<CredigrupoLoanListResponse> {
+    let httpStatus = 0;
+    const response = await this.request<Omit<CredigrupoLoanListResponse, 'httpStatus'>>(
+      '/loans?page=1&pageSize=50',
+      undefined,
+      { onSuccessStatus: (status) => { httpStatus = status; } },
+    );
+    return {
+      httpStatus,
+      data: Array.isArray(response.data) ? response.data : [],
+      total: Number.isFinite(Number(response.total)) ? Number(response.total) : 0,
+    };
+  }
+
+  async getLoan(proposalId: string): Promise<CredigrupoLoanDetailsResponse> {
+    let httpStatus = 0;
+    const response = await this.request<Omit<CredigrupoLoanDetailsResponse, 'httpStatus'>>(
+      `/loans/${encodeURIComponent(proposalId)}`,
+      undefined,
+      { onSuccessStatus: (status) => { httpStatus = status; } },
+    );
+    return { ...response, httpStatus };
   }
 
   listInstallments(proposalId: string) {
@@ -210,10 +342,18 @@ export class CredigrupoClient {
     );
   }
 
-  testPayLoan(proposalId: string) {
-    return this.request<Record<string, unknown>>(`/loans/${encodeURIComponent(proposalId)}/test-pay`, {
+  async testPayLoan(proposalId: string) {
+    let httpStatus = 0;
+    let headerRequestId: string | undefined;
+    const response = await this.request<Record<string, unknown>>(`/loans/${encodeURIComponent(proposalId)}/test-pay`, {
       method: 'POST',
+    }, {
+      onSuccessStatus: (status, requestId) => {
+        httpStatus = status;
+        headerRequestId = requestId;
+      },
     });
+    return { ...response, httpStatus, requestId: response.requestId || headerRequestId };
   }
 
   testPayInstallment(proposalId: string, installmentId: string) {

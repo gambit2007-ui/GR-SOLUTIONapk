@@ -1,5 +1,5 @@
 import { getApps, deleteApp } from 'firebase-admin/app';
-import type { Firestore } from 'firebase-admin/firestore';
+import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { CredigrupoWebhookEvent } from '../../api/_lib/credit-providers/credigrupo/webhook';
 
@@ -7,15 +7,21 @@ const PROJECT_ID = 'demo-gr-solution-credigrupo';
 let db: Firestore;
 let processStoredCredigrupoEvent: typeof import('../../api/_lib/credit-providers/credigrupo/webhookProcessor').processStoredCredigrupoEvent;
 let registerCredigrupoWebhookEvent: typeof import('../../api/_lib/credit-providers/credigrupo/webhookProcessor').registerCredigrupoWebhookEvent;
+let resolveCredigrupoFundingInvestor: typeof import('../../api/_lib/credit-providers/credigrupo/grInvestorSettings').resolveCredigrupoFundingInvestor;
+let reserveCredigrupoOperation: typeof import('../../api/_lib/credit-providers/credigrupo/store').reserveCredigrupoOperation;
 
 beforeAll(async () => {
   await Promise.all(getApps().map((app) => deleteApp(app)));
   process.env.FIREBASE_PROJECT_ID = PROJECT_ID;
   const firebase = await import('../../api/_lib/firebaseAdmin');
   const processor = await import('../../api/_lib/credit-providers/credigrupo/webhookProcessor');
+  const settings = await import('../../api/_lib/credit-providers/credigrupo/grInvestorSettings');
+  const store = await import('../../api/_lib/credit-providers/credigrupo/store');
   db = firebase.adminDb;
   processStoredCredigrupoEvent = processor.processStoredCredigrupoEvent;
   registerCredigrupoWebhookEvent = processor.registerCredigrupoWebhookEvent;
+  resolveCredigrupoFundingInvestor = settings.resolveCredigrupoFundingInvestor;
+  reserveCredigrupoOperation = store.reserveCredigrupoOperation;
 });
 
 beforeEach(async () => {
@@ -40,7 +46,7 @@ const paidEvent: CredigrupoWebhookEvent = {
     installmentNumber: 1,
     amountCents: 11000,
     dueDate: '2026-09-25',
-    paidAt: '2026-08-25T12:00:00.000Z',
+    paidAt: '2026-08-25T14:30:00.000Z',
   },
 };
 
@@ -48,14 +54,30 @@ const seedOperation = async (id = 'operation-1', overrides: Record<string, unkno
   await db.doc(`creditOperations/${id}`).set({
     formalizationType: 'BANCARIZED', provider: 'CREDIGRUPO', proposalId: 'proposal-1',
     customerId: 'customer-1', customerName: 'Cliente', customerPhone: '21999999999',
-    borrowerId: 'borrower-1', investorId: 'investor-1', investorName: 'Investidor',
+    borrowerId: 'borrower-1', investorId: 'investor-local-1', externalInvestorId: 'investor-external-1', investorName: 'Investidor',
     fundingSource: 'EXTERNAL', amountCents: 10000, installments: 1, interestRate: 10,
     firstPaymentDate: '2026-09-25', frequency: 'monthly', interestType: 'simple',
     simulation: {
       netAmount: 10000, grossAmount: 11000, totalAmount: 11000, totalInterest: 1000, totalIof: 0, totalFee: 0,
       installments: [{ installmentNumber: 1, amount: 11000, dueDate: '2026-09-25', interest: 1000, principal: 10000, outstandingBalance: 0 }],
     },
-    simulationExternalId: 'simulation-1', status: 'AWAITING_SIGNATURES', createdByUid: 'admin-1',
+    simulationExternalId: 'simulation-1', status: 'AWAITING_SIGNATURES', externalStatus: 'accepted', createdByUid: 'admin-1',
+    ...overrides,
+  });
+};
+
+const seedOwnInvestorOperation = async (id: string, overrides: Record<string, unknown> = {}) => {
+  await db.doc(`creditOperations/${id}`).set({
+    formalizationType: 'BANCARIZED', provider: 'CREDIGRUPO', proposalId: 'proposal-gr',
+    customerId: 'customer-1', customerName: 'Cliente', customerPhone: '21999999999',
+    borrowerId: 'borrower-1', accountMode: 'OWN_INVESTOR_KEY', investorType: 'GR', investorName: 'GR SOLUTION',
+    fundingSource: 'GR', amountCents: 10000, installments: 1, interestRate: 10,
+    firstPaymentDate: '2026-09-25', frequency: 'monthly', interestType: 'simple',
+    simulation: {
+      netAmount: 10000, grossAmount: 11000, totalAmount: 11000, totalInterest: 1000, totalIof: 0, totalFee: 0,
+      installments: [{ installmentNumber: 1, amount: 11000, dueDate: '2026-09-25', interest: 1000, principal: 10000, outstandingBalance: 0 }],
+    },
+    simulationExternalId: 'simulation-1', status: 'AWAITING_SIGNATURES', externalStatus: 'accepted', createdByUid: 'admin-1',
     ...overrides,
   });
 };
@@ -78,12 +100,60 @@ const runEvent = async (id: string, event: CredigrupoWebhookEvent) => {
 };
 
 describe('processamento financeiro do webhook Credigrupo', () => {
+  it('resolve capital GR somente pelo vinculo configurado e preserva externo', async () => {
+    await db.doc('creditInvestors/gr-local-1').set({
+      externalId: 'gr-external-1', provider: 'CREDIGRUPO', capitalOrigin: 'GR', name: 'GR Solution', kycStatus: 'approved', active: true,
+    });
+    await db.doc('creditInvestors/external-local-1').set({
+      externalId: 'external-1', provider: 'CREDIGRUPO', capitalOrigin: 'EXTERNAL', name: 'Investidor Externo', kycStatus: 'approved', active: true,
+    });
+    await db.doc('creditProviderSettings/credigrupo').set({
+      grInvestorConfigured: true, grInvestorInternalId: 'gr-local-1', grInvestorId: 'gr-external-1', grInvestorName: 'GR Solution',
+    });
+
+    await expect(resolveCredigrupoFundingInvestor('GR', 'external-local-1')).resolves.toMatchObject({
+      internalId: 'gr-local-1', externalId: 'gr-external-1', name: 'GR Solution',
+    });
+    await expect(resolveCredigrupoFundingInvestor('EXTERNAL', 'external-local-1')).resolves.toMatchObject({
+      internalId: 'external-local-1', externalId: 'external-1', name: 'Investidor Externo',
+    });
+  });
+
+  it('bloqueia capital GR sem configuracao', async () => {
+    await expect(resolveCredigrupoFundingInvestor('GR')).rejects.toMatchObject({ code: 'GR_INVESTOR_NOT_CONFIGURED' });
+  });
+
+  it('reserva BANCARIZED com a GR sem criar investorId ficticio', async () => {
+    await db.doc('creditSimulations/simulation-gr').set({
+      customerId: 'customer-1', customerName: 'Cliente', borrowerId: 'borrower-1', accountMode: 'OWN_INVESTOR_KEY', investorType: 'GR',
+      request: { customerId: 'customer-1', fundingSource: 'GR', amountCents: 10000, installments: 1, interestRate: 10, firstPaymentDate: '2026-09-25', frequency: 'monthly', interestType: 'simple' },
+      response: { externalId: 'simulation-external-1', interestRate: 10, simulation: { netAmount: 10000, grossAmount: 11000, totalAmount: 11000, totalInterest: 1000, totalIof: 0, totalFee: 0, installments: [] } },
+      createdByUid: 'admin-1', createdAt: Timestamp.now(), expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
+    });
+
+    const result = await reserveCredigrupoOperation(
+      { operationId: 'operation-gr', simulationId: 'simulation-gr', fundingSource: 'GR' },
+      { uid: 'admin-1', name: 'Admin', admin: true },
+    );
+    expect(result).toMatchObject({
+      duplicate: false,
+      operation: { accountMode: 'OWN_INVESTOR_KEY', investorType: 'GR', investorName: 'GR SOLUTION', fundingSource: 'GR' },
+    });
+    expect(result.operation.investorId).toBeUndefined();
+    expect(result.operation.externalInvestorId).toBeUndefined();
+    expect((await db.doc('creditOperations/operation-gr').get()).data()).toMatchObject({
+      formalizationType: 'BANCARIZED', provider: 'CREDIGRUPO', fundingSource: 'GR',
+    });
+  });
+
   it('registra entrega na inbox e ignora evento ja processado', async () => {
     const first = await registerCredigrupoWebhookEvent('incoming-event', paidEvent);
     expect(first.shouldProcess).toBe(true);
     expect((await first.eventRef.get()).data()).toMatchObject({
       eventId: 'incoming-event',
       eventType: 'installment.paid',
+      timestamp: paidEvent.timestamp,
+      partnerId: paidEvent.partnerId,
       status: 'RECEIVED',
     });
     await first.eventRef.set({ status: 'PROCESSED' }, { merge: true });
@@ -112,6 +182,13 @@ describe('processamento financeiro do webhook Credigrupo', () => {
     expect(ledger.size).toBe(1);
     expect(duplicate.data()?.duplicateFinancialEffect).toBe(true);
     expect(duplicate.data()?.status).toBe('PROCESSED');
+    const paidLedger = ledger.docs[0].data();
+    expect(paidLedger).toMatchObject({
+      installmentNumber: 1,
+      dueDate: '2026-09-25',
+      paidAt: '2026-08-25T14:30:00.000Z',
+      occurredAt: '2026-08-25T14:30:00.000Z',
+    });
   });
 
   it('mantem evento sem proposal local como FAILED para reprocessamento', async () => {
@@ -125,23 +202,47 @@ describe('processamento financeiro do webhook Credigrupo', () => {
 
   it('processa aprovacao e rejeicao KYC sem misturar identificadores', async () => {
     await db.doc('creditBorrowers/link-1').set({ borrowerId: 'borrower-1', customerId: 'customer-1', investorId: 'investor-1' });
+    await db.doc('creditInvestors/investor-local-1').set({ externalId: 'borrower-1', kycStatus: 'pending_approval', active: false });
     await db.doc('clientes/customer-1').set({ name: 'Cliente' });
     const approved = { event: 'kyc.approved', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { userId: 'borrower-1', role: 'borrower', reason: null } };
     const rejected = { event: 'kyc.rejected', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { userId: 'borrower-1', role: 'borrower', reason: 'Documento ilegivel' } };
     await runEvent('kyc-approved', approved);
     expect((await db.doc('creditBorrowers/link-1').get()).data()?.kycStatus).toBe('approved');
+    expect((await db.doc('creditInvestors/investor-local-1').get()).data()?.kycStatus).toBe('pending_approval');
     await runEvent('kyc-rejected', rejected);
     expect((await db.doc('creditBorrowers/link-1').get()).data()?.kycStatus).toBe('rejected');
+  });
+
+  it('ativa e desativa investidor pelo KYC com role user sem alterar tomador', async () => {
+    await db.doc('creditInvestors/investor-local-1').set({ externalId: 'investor-external-1', kycStatus: 'pending_approval', active: false });
+    await db.doc('creditBorrowers/link-1').set({ borrowerId: 'investor-external-1', kycStatus: 'pending_approval' });
+    await runEvent('investor-approved', { event: 'kyc.approved', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { userId: 'investor-external-1', role: 'user' } });
+    expect((await db.doc('creditInvestors/investor-local-1').get()).data()).toMatchObject({ kycStatus: 'approved', active: true });
+    expect((await db.doc('creditBorrowers/link-1').get()).data()?.kycStatus).toBe('pending_approval');
+    await runEvent('investor-rejected', { event: 'kyc.rejected', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { userId: 'investor-external-1', role: 'user', reason: 'Documento invalido' } });
+    expect((await db.doc('creditInvestors/investor-local-1').get()).data()).toMatchObject({ kycStatus: 'rejected', active: false });
+  });
+
+  it('nao reativa investidor desativado manualmente ao receber KYC aprovado', async () => {
+    await db.doc('creditInvestors/investor-local-1').set({ externalId: 'investor-external-1', manuallyDisabled: true, active: false });
+    await runEvent('investor-approved-disabled', { event: 'kyc.approved', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { userId: 'investor-external-1', role: 'user' } });
+    expect((await db.doc('creditInvestors/investor-local-1').get()).data()).toMatchObject({ kycStatus: 'approved', active: false });
   });
 
   it('processa CCB, assinatura e cancelamento no estado externo da operacao', async () => {
     await seedOperation();
     await runEvent('ccb-ready', { event: 'ccb_ready_for_signature', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { proposalId: 'proposal-1', borrowerSignUrl: 'https://app.zapsign.com.br/a', investorSignUrl: 'https://app.zapsign.com.br/b' } });
-    expect((await db.doc('creditOperations/operation-1').get()).data()?.status).toBe('AWAITING_SIGNATURES');
+    expect((await db.doc('creditOperations/operation-1').get()).data()).toMatchObject({
+      status: 'AWAITING_SIGNATURES',
+      externalStatus: 'accepted',
+      borrowerSignUrl: 'https://app.zapsign.com.br/a',
+      investorSignUrl: 'https://app.zapsign.com.br/b',
+    });
     await runEvent('loan-signed', { event: 'loan.signed', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { proposalId: 'proposal-1', requestId: 'request-1', signedAt: paidEvent.timestamp } });
     expect((await db.doc('creditOperations/operation-1').get()).data()?.status).toBe('SIGNED');
     await runEvent('loan-cancelled', { event: 'loan.cancelled', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { proposalId: 'proposal-1', requestId: 'request-1', cancelledAt: paidEvent.timestamp } });
     expect((await db.doc('creditOperations/operation-1').get()).data()?.status).toBe('CANCELLED');
+    expect((await db.doc('creditOperations/operation-1').get()).data()?.externalStatus).toBe('completed');
   });
 
   it('cria contrato bancarizado uma unica vez ao receber loan.funded', async () => {
@@ -155,7 +256,37 @@ describe('processamento financeiro do webhook Credigrupo', () => {
     ]);
     expect(loan.exists).toBe(true);
     expect(loan.data()?.formalizationType).toBe('BANCARIZED');
+    expect(loan.data()?.funding.investorId).toBe('investor-local-1');
+    expect(loan.data()?.credigrupo.investorId).toBe('investor-external-1');
+    expect(loan.data()?.credigrupo.status).toBe('funded');
+    expect((await db.doc('creditOperations/operation-1').get()).data()?.externalStatus).toBe('funded');
     expect(loans.size).toBe(1);
+    expect((await db.collection('cashMovement').get()).size).toBe(0);
+  });
+
+  it('reduz o caixa uma unica vez no funding com capital GR', async () => {
+    await seedOwnInvestorOperation('operation-gr');
+    await db.doc('settings/caixa').set({ value: 500 });
+    const funded = { event: 'loan.funded', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { proposalId: 'proposal-gr', amountCents: 10000, borrowerId: 'borrower-1' } };
+    await runEvent('loan-funded-gr-1', funded);
+    await runEvent('loan-funded-gr-2', funded);
+
+    const [cash, movements, loans] = await Promise.all([
+      db.doc('settings/caixa').get(),
+      db.collection('cashMovement').get(),
+      db.collection('loans').get(),
+    ]);
+    expect(cash.data()?.value).toBe(400);
+    expect(movements.size).toBe(1);
+    expect(movements.docs[0].data()).toMatchObject({ type: 'RETIRADA', amount: 100, loanId: 'operation-gr' });
+    expect(loans.size).toBe(1);
+    expect(loans.docs[0].data()).toMatchObject({
+      fundingSource: 'GR',
+      funding: { source: 'GR', investorName: 'GR SOLUTION' },
+      credigrupo: { accountMode: 'OWN_INVESTOR_KEY', investorType: 'GR', investorName: 'GR SOLUTION' },
+    });
+    expect(loans.docs[0].data()?.investorInternalId).toBeUndefined();
+    expect(loans.docs[0].data()?.credigrupo.investorId).toBeUndefined();
   });
 
   it('salva PIX criado sem marcar a parcela como paga', async () => {
@@ -175,5 +306,18 @@ describe('processamento financeiro do webhook Credigrupo', () => {
     await runEvent('repaid-2', repaid);
     expect((await db.collection('creditInvestorLedger').where('type', '==', 'INVESTOR_REPAID').get()).size).toBe(1);
     expect((await db.collection('cashMovement').get()).size).toBe(0);
+  });
+
+  it('credita o repasse da GR uma unica vez sem duplicar ledger ou caixa', async () => {
+    await seedOwnInvestorOperation('operation-gr', { localLoanId: 'loan-1' });
+    await seedLoan();
+    await db.doc('settings/caixa').set({ value: 400 });
+    const repaid = { event: 'installment.investor_repaid', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { proposalId: 'proposal-gr', installmentId: 'installment-1', amountCents: 11000 } };
+    await runEvent('repaid-gr-1', repaid);
+    await runEvent('repaid-gr-2', repaid);
+
+    expect((await db.doc('settings/caixa').get()).data()?.value).toBe(510);
+    expect((await db.collection('creditInvestorLedger').where('type', '==', 'INVESTOR_REPAID').get()).size).toBe(1);
+    expect((await db.collection('cashMovement').get()).size).toBe(1);
   });
 });

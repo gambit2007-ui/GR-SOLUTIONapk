@@ -248,10 +248,16 @@ describe('firestore.rules', () => {
   it('mantem as colecoes Credigrupo acessiveis somente pelo backend', async () => {
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'creditOperations', 'operation-1'), { status: 'FUNDED' });
+      await setDoc(doc(context.firestore(), 'creditInvestors', 'investor-1'), { active: true });
+      await setDoc(doc(context.firestore(), 'creditProviderSettings', 'credigrupo'), { grInvestorConfigured: true });
     });
 
     const db = testEnvironment.authenticatedContext('admin-1').firestore();
     await assertFails(getDoc(doc(db, 'creditOperations', 'operation-1')));
+    await assertFails(getDoc(doc(db, 'creditInvestors', 'investor-1')));
+    await assertFails(getDoc(doc(db, 'creditProviderSettings', 'credigrupo')));
+    await assertFails(setDoc(doc(db, 'creditInvestors', 'investor-2'), { active: true }));
+    await assertFails(setDoc(doc(db, 'creditProviderSettings', 'credigrupo'), { grInvestorConfigured: false }));
     await assertFails(setDoc(doc(db, 'creditInvestorLedger', 'ledger-1'), { amount: 100 }));
   });
 });

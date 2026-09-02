@@ -43,6 +43,7 @@ import BancarizationFields, {
 import BancarizationOperations from './BancarizationOperations';
 import BancarizedInstallmentActions from './BancarizedInstallmentActions';
 import { createBancarizedLoan, getCredigrupoStatus, reconcileCredigrupoOperation } from '../../services/credigrupoService';
+import { formatCredigrupoFormalizationStatus } from '../../lib/creditProviders/loanStatus';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -101,6 +102,19 @@ interface InterestOnlyRenewalModalState {
   notes: string;
 }
 
+const describeCredigrupoConfigurationIssues = (issues?: readonly string[]) => {
+  if (!issues?.length) return '';
+  const descriptions: Record<string, string> = {
+    CREDIGRUPO_API_KEY_MISSING: 'Chave da API ausente.',
+    CREDIGRUPO_SANDBOX_KEY_REQUIRED: 'A chave da API nao e uma chave sandbox wl_test_.',
+    CREDIGRUPO_LIVE_KEY_BLOCKED: 'Chave live bloqueada neste ambiente.',
+    CREDIGRUPO_ENV_INVALID: 'Ambiente diferente de sandbox.',
+    CREDIGRUPO_ACCOUNT_MODE_INVALID: 'Modo da conta deve ser OWN_INVESTOR_KEY.',
+    CREDIGRUPO_WEBHOOK_SECRET_MISSING: 'Segredo do webhook ausente.',
+  };
+  return issues.map((issue) => descriptions[issue] || 'Configuracao Credigrupo invalida.').join(' ');
+};
+
 const LoanSection: React.FC<LoanSectionProps> = ({ 
   customers, 
   loans, 
@@ -152,6 +166,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [formalizationFilter, setFormalizationFilter] = useState<'ALL' | 'DIRECT' | 'BANCARIZED'>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [credigrupoEnabled, setCredigrupoEnabled] = useState(false);
+  const [credigrupoStatusLoaded, setCredigrupoStatusLoaded] = useState(false);
+  const [credigrupoStatusMessage, setCredigrupoStatusMessage] = useState('');
   const [credigrupoIsAdmin, setCredigrupoIsAdmin] = useState(false);
   const [credigrupoEnvironment, setCredigrupoEnvironment] = useState<'sandbox'>('sandbox');
   const [hasCredigrupoOperations, setHasCredigrupoOperations] = useState(false);
@@ -169,8 +185,16 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         setHasCredigrupoOperations(Boolean(status.hasExistingOperations));
         setCredigrupoIsAdmin(Boolean(status.isAdmin));
         setCredigrupoEnvironment(status.environment);
+        const configurationMessage = describeCredigrupoConfigurationIssues(status.configurationIssues);
+        setCredigrupoStatusMessage(status.enabled ? '' : (configurationMessage || status.message || 'Integracao Credigrupo indisponivel.'));
+        setCredigrupoStatusLoaded(true);
       })
-      .catch(() => { if (active) setCredigrupoEnabled(false); });
+      .catch(() => {
+        if (!active) return;
+        setCredigrupoEnabled(false);
+        setCredigrupoStatusMessage('Nao foi possivel verificar a integracao Credigrupo.');
+        setCredigrupoStatusLoaded(true);
+      });
     return () => { active = false; };
   }, []);
 
@@ -840,9 +864,6 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       if (editingLoanId) return showToast('Bancarizacao nao pode ser aplicada por edicao', 'error');
       if (!credigrupoEnabled) return showToast('Integracao Credigrupo desativada', 'error');
       if (!bancarizationDraft.simulation) return showToast('Realize e confirme a simulacao oficial', 'error');
-      if (!bancarizationDraft.investorId || !bancarizationDraft.investorName) {
-        return showToast('Selecione o investidor', 'error');
-      }
       if (creatingBancarized) return;
 
       const simulationId = bancarizationDraft.simulation.simulationId;
@@ -856,7 +877,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         await createBancarizedLoan({
           operationId,
           simulationId,
-          fundingSource: bancarizationDraft.fundingSource,
+          fundingSource: 'GR',
         });
         delete pendingBancarizationOperationIdsRef.current[simulationId];
         setIsModalOpen(false);
@@ -920,6 +941,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       installments,
       formalizationType: 'DIRECT',
       provider: 'GR',
+      fundingSource: 'GR',
+      investorInternalId: 'GR-SOLUTION',
       funding: {
         source: 'GR',
         investorId: 'GR-SOLUTION',
@@ -1347,7 +1370,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                    <div className="flex items-center gap-2">
                      <p className="text-[10px] font-black text-white uppercase break-words">{loan.customerName}</p>
                      <span className={`text-[7px] font-black uppercase px-2 py-0.5 rounded-full ${isBancarized ? 'bg-blue-500/10 text-blue-400' : 'bg-[#BF953F]/10 text-[#F5D77B]'}`}>
-                       {isBancarized ? 'CCB' : 'GR'}
+                       {isBancarized
+                         ? `Bancarizado • ${(loan.funding?.source || loan.fundingSource) === 'EXTERNAL' ? 'Investidor Externo' : 'Capital GR'}`
+                         : 'GR'}
                      </span>
                    </div>
                   <p className="text-[9px] text-zinc-500 uppercase tracking-widest break-all">Contrato: {loan.id}</p>
@@ -1504,7 +1529,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-[8px]">
                       <p className="text-zinc-500">Investidor<br /><strong className="text-white">{loan.funding?.investorName || 'Nao informado'}</strong></p>
                       <p className="text-zinc-500">Capital<br /><strong className="text-white">{loan.funding?.source === 'EXTERNAL' ? 'Externo' : 'GR Solution'}</strong></p>
-                      <p className="text-zinc-500">Status externo<br /><strong className="text-white">{loan.credigrupo?.externalStatus || 'funded'}</strong></p>
+                      <p className="text-zinc-500">Status Credigrupo<br /><strong className="text-white">{loan.credigrupo?.status || loan.credigrupo?.externalStatus || 'funded'}</strong></p>
+                      <p className="text-zinc-500">Formalizacao<br /><strong className="text-white">{formatCredigrupoFormalizationStatus(loan.credigrupo?.formalizationStatus || 'completed')}</strong></p>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                       {loan.credigrupo?.borrowerSignUrl && <button type="button" onClick={() => openCredigrupoUrl(loan.credigrupo?.borrowerSignUrl)} className="px-3 py-2 rounded-xl bg-blue-500/10 text-blue-400 text-[7px] font-black uppercase">Assinatura cliente</button>}
@@ -2171,7 +2197,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             </button>
             <h2 className="text-xl font-black gold-text uppercase tracking-tighter mb-8">{editingLoanId ? 'Editar Contrato' : 'Novo Emprestimo'}</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
-              {!editingLoanId && credigrupoEnabled && (
+              {!editingLoanId && (
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Forma de formalizacao</label>
                   <select
@@ -2189,9 +2215,17 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                     }}
                     className="w-full bg-black border border-[#BF953F]/30 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
                   >
-                    <option value="DIRECT">GR SOLUTION</option>
-                    <option value="BANCARIZED">BANCARIZADO / CCB</option>
+                    <option value="DIRECT">GR SOLUTION - CONTRATO PROPRIO</option>
+                    <option value="BANCARIZED" disabled={!credigrupoEnabled}>
+                      CREDIGRUPO - BANCARIZADO{!credigrupoStatusLoaded ? ' (VERIFICANDO...)' : !credigrupoEnabled ? ' (INDISPONIVEL)' : ''}
+                    </option>
                   </select>
+                  {!credigrupoStatusLoaded && (
+                    <p className="px-1 text-[8px] font-bold uppercase tracking-wider text-zinc-600">Verificando integracao Credigrupo...</p>
+                  )}
+                  {credigrupoStatusLoaded && !credigrupoEnabled && (
+                    <p className="px-1 text-[8px] font-bold uppercase tracking-wider text-amber-500">{credigrupoStatusMessage}</p>
+                  )}
                 </div>
               )}
               <div className="space-y-1">

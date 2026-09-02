@@ -55,6 +55,21 @@ describe('webhook Credigrupo', () => {
     expect(isSupportedCredigrupoWebhookEvent(parsed.event)).toBe(false);
   });
 
+  it('aceita timestamp, partnerId e campos extras legitimos no envelope', () => {
+    const payload = {
+      ...documentedPayloads[2],
+      deliveryId: 'delivery-1',
+      apiVersion: '2026-08',
+    };
+    const parsed = parseCredigrupoWebhookEvent(Buffer.from(JSON.stringify(payload)));
+    expect(parsed.timestamp).toBe('2026-08-25T12:00:00.000Z');
+    expect(parsed.partnerId).toBe('partner-1');
+    expect(parsed.data).toMatchObject({
+      borrowerSignUrl: 'https://app.zapsign.com.br/a',
+      investorSignUrl: 'https://app.zapsign.com.br/b',
+    });
+  });
+
   it('aceita installment.pix_created legado com proposalId nulo para diagnostico', () => {
     const payload = { ...documentedPayloads[6], data: { ...documentedPayloads[6].data, proposalId: null } };
     expect(parseCredigrupoWebhookEvent(Buffer.from(JSON.stringify(payload))).event).toBe('installment.pix_created');

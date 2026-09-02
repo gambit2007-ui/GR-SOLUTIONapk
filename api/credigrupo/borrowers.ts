@@ -2,8 +2,14 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { EnsureCredigrupoBorrowerRequest } from '../../src/lib/creditProviders/types.js';
 import { requireAuthorizedActor } from '../_lib/auth.js';
+import {
+  createBorrowerPersistencePayload,
+  createSafeBorrowerState,
+  normalizeBorrowerDisplayName,
+} from '../_lib/credit-providers/credigrupo/borrowerState.js';
 import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
 import { borrowerLinkId, removeUndefined } from '../_lib/credit-providers/credigrupo/store.js';
+import { CREDIGRUPO_ACCOUNT_MODE } from '../_lib/env.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http.js';
 
@@ -15,29 +21,43 @@ const requiredText = (value: unknown, field: string): string => {
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
-    if (request.method !== 'POST') return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
-    const actor = await requireAuthorizedActor(request);
+    if (!['GET', 'POST'].includes(request.method || '')) return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
+    await requireAuthorizedActor(request);
+    if (request.method === 'GET') {
+      const customerId = requiredText(request.query.customerId, 'customerId');
+      const linkSnapshot = await adminDb
+        .doc(`creditBorrowers/${borrowerLinkId(customerId, CREDIGRUPO_ACCOUNT_MODE)}`)
+        .get();
+      if (!linkSnapshot.exists) {
+        throw new ApiError(404, 'BORROWER_NOT_SYNCED', 'Tomador ainda nao sincronizado.');
+      }
+      const link = linkSnapshot.data() || {};
+      return sendJson(response, 200, createSafeBorrowerState({
+        borrowerId: link.borrowerId,
+        kycStatus: link.kycStatus,
+        ccbEligible: link.ccbEligible,
+        eligibilityErrors: link.eligibilityErrors,
+        eligibilityCachedAt: link.eligibilityCachedAt,
+      }));
+    }
     const input = parseJsonBody<EnsureCredigrupoBorrowerRequest>(request);
     const customerId = requiredText(input.customerId, 'customerId');
-    const investorId = requiredText(input.investorId, 'investorId');
+    if (input.fundingSource !== 'GR') {
+      throw new ApiError(400, 'INVALID_FUNDING_SOURCE', 'A chave propria Credigrupo aceita somente capital da GR.');
+    }
     const customerRef = adminDb.doc(`clientes/${customerId}`);
-    const investorRef = adminDb.doc(`creditInvestors/${investorId}`);
-    const linkRef = adminDb.doc(`creditBorrowers/${borrowerLinkId(customerId, investorId)}`);
-    const [customerSnapshot, investorSnapshot, linkSnapshot] = await Promise.all([
+    const linkRef = adminDb.doc(`creditBorrowers/${borrowerLinkId(customerId, CREDIGRUPO_ACCOUNT_MODE)}`);
+    const [customerSnapshot, linkSnapshot] = await Promise.all([
       customerRef.get(),
-      investorRef.get(),
       linkRef.get(),
     ]);
     if (!customerSnapshot.exists) throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Cliente nao encontrado.');
-    if (!investorSnapshot.exists || investorSnapshot.data()?.kycStatus !== 'approved') {
-      throw new ApiError(409, 'INVESTOR_NOT_APPROVED', 'Sincronize e selecione um investidor aprovado.');
-    }
-
     const client = new CredigrupoClient();
     let borrowerId = String(linkSnapshot.data()?.borrowerId || '').trim();
     let kycStatus = String(linkSnapshot.data()?.kycStatus || '').trim();
     let ccbEligible: boolean | undefined;
     let eligibilityErrors: string[] | undefined;
+    let eligibilityCachedAt: string | undefined;
 
     if (!borrowerId) {
       const kycData = input.kycData;
@@ -48,7 +68,6 @@ export default async function handler(request: VercelRequest, response: VercelRe
       }
 
       const created = await client.registerBorrower({
-        investorId,
         email: requiredText(input.email, 'email'),
         display_name: requiredText(input.displayName, 'displayName'),
         phone: requiredText(input.phone, 'phone'),
@@ -72,8 +91,23 @@ export default async function handler(request: VercelRequest, response: VercelRe
       });
       borrowerId = created.borrowerId;
       kycStatus = created.status;
+      if (kycStatus === 'approved') {
+        const eligibility = await client.getBorrowerEligibility(borrowerId);
+        ccbEligible = eligibility.eligible;
+        eligibilityErrors = eligibility.errors;
+        eligibilityCachedAt = eligibility.cachedAt;
+      }
     } else {
-      const remote = await client.getBorrower(borrowerId);
+      let remote = await client.getBorrower(borrowerId);
+      const displayName = normalizeBorrowerDisplayName(input.displayName);
+      const remoteDisplayName = String(remote.data.name || '').trim();
+      if (displayName && displayName !== remoteDisplayName) {
+        const updated = await client.updateBorrowerDisplayName(borrowerId, displayName);
+        if (!updated.success || updated.borrowerId !== borrowerId) {
+          throw new ApiError(502, 'BORROWER_UPDATE_MISMATCH', 'A Credigrupo nao confirmou a atualizacao do tomador.');
+        }
+        remote = await client.getBorrower(borrowerId);
+      }
       kycStatus = remote.data.kyc_status;
       ccbEligible = remote.data.ccb_eligible;
       eligibilityErrors = remote.data.ccb_eligible_errors;
@@ -81,25 +115,35 @@ export default async function handler(request: VercelRequest, response: VercelRe
         const eligibility = await client.getBorrowerEligibility(borrowerId);
         ccbEligible = eligibility.eligible;
         eligibilityErrors = eligibility.errors;
+        eligibilityCachedAt = eligibility.cachedAt;
       }
     }
 
-    const sharedStatus = removeUndefined({
+    const safeState = createSafeBorrowerState({
       borrowerId,
-      investorId,
       kycStatus,
       ccbEligible,
       eligibilityErrors,
-      provider: 'CREDIGRUPO',
-      updatedAt: FieldValue.serverTimestamp(),
-      updatedByUid: actor.uid,
+      eligibilityCachedAt,
     });
+    const sharedStatus = createBorrowerPersistencePayload(safeState, FieldValue.serverTimestamp());
+
+    console.info('[Credigrupo borrower eligibility]', {
+      borrowerId,
+      kycStatus,
+      eligibilityReturned: safeState.ccbEligible !== null,
+      eligible: safeState.ccbEligible,
+      errorsCount: safeState.eligibilityErrors.length,
+      cachedAtPresent: Boolean(safeState.eligibilityCachedAt),
+      httpStatus: 200,
+    });
+
     await Promise.all([
       linkRef.set({ ...sharedStatus, customerId }, { merge: true }),
       customerRef.set({ credigrupo: sharedStatus }, { merge: true }),
     ]);
 
-    return sendJson(response, 200, { borrowerId, investorId, kycStatus, ccbEligible, eligibilityErrors });
+    return sendJson(response, 200, safeState);
   } catch (error) {
     return handleApiError(response, error);
   }

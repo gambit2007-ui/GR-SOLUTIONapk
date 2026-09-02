@@ -1,5 +1,6 @@
-import type { FundingSourceType } from '../../types';
-export type { FundingSourceType } from '../../types';
+import type { CredigrupoLoanStatus, FundingSourceType } from '../../types';
+export type { CredigrupoLoanStatus, FundingSourceType } from '../../types';
+export type CredigrupoAccountMode = 'OWN_INVESTOR_KEY';
 
 export type CredigrupoKycStatus =
   | 'pending_kyc'
@@ -13,6 +14,8 @@ export interface CredigrupoIntegrationStatus {
   enabled: boolean;
   configured: boolean;
   environment: 'sandbox';
+  accountMode: CredigrupoAccountMode;
+  investor: 'GR SOLUTION';
   provider: 'CREDIGRUPO';
   message?: string;
   hasExistingOperations?: boolean;
@@ -22,8 +25,8 @@ export interface CredigrupoIntegrationStatus {
     | 'CREDIGRUPO_SANDBOX_KEY_REQUIRED'
     | 'CREDIGRUPO_LIVE_KEY_BLOCKED'
     | 'CREDIGRUPO_ENV_INVALID'
+    | 'CREDIGRUPO_ACCOUNT_MODE_INVALID'
     | 'CREDIGRUPO_WEBHOOK_SECRET_MISSING'
-    | 'CREDIGRUPO_WEBHOOK_SECRET_TOO_SHORT'
   >;
 }
 
@@ -35,8 +38,8 @@ export interface CredigrupoRuntimeDiagnostics {
   enabledPresent: boolean;
   integrationEnabled: boolean;
   webhookSecretPresent: boolean;
-  webhookSecretValidLength: boolean;
-  webhookSecretLength: number;
+  accountMode: CredigrupoAccountMode | null;
+  investor: 'GR SOLUTION';
 }
 
 export interface CredigrupoInstallmentPixResult {
@@ -50,9 +53,99 @@ export interface CredigrupoInstallmentPixResult {
 
 export interface CredigrupoInvestorSummary {
   id: string;
+  externalId: string;
   name: string;
-  email?: string;
+  emailMasked?: string;
+  documentMasked?: string;
   kycStatus: CredigrupoKycStatus;
+  externalStatus: string;
+  provider: 'CREDIGRUPO';
+  capitalOrigin: FundingSourceType;
+  active: boolean;
+  documentsSubmitted?: CredigrupoInvestorDocumentType[];
+  documentsComplete?: boolean;
+  documentsSubmittedAt?: string;
+  createdAt?: string;
+  syncedAt?: string;
+}
+
+export type CredigrupoInvestorDocumentType =
+  | 'selfie'
+  | 'idFront'
+  | 'idBack'
+  | 'proofOfResidence';
+
+export interface CredigrupoInvestorDocumentReference {
+  type: CredigrupoInvestorDocumentType;
+  storagePath: string;
+}
+
+export interface UploadCredigrupoInvestorDocumentsRequest {
+  investorId: string;
+  documents: CredigrupoInvestorDocumentReference[];
+}
+
+export interface CredigrupoInvestorStatistics {
+  operationsFinanced: number;
+  capitalAllocated: number;
+  activeContracts: number;
+  completedContracts: number;
+  amountRepaid: number;
+}
+
+export interface CredigrupoInvestorDetails extends CredigrupoInvestorSummary {
+  statistics: CredigrupoInvestorStatistics;
+}
+
+export interface CredigrupoGrInvestorSettings {
+  configured: boolean;
+  investorInternalId?: string;
+  investorIdMasked?: string;
+  investorName?: string;
+  kycStatus?: CredigrupoKycStatus;
+  syncedAt?: string;
+  updatedAt?: string;
+}
+
+export interface UpdateCredigrupoGrInvestorRequest {
+  investorInternalId: string;
+}
+
+export interface CredigrupoInvestorKycData {
+  address_street: string;
+  address_number: string;
+  address_neighborhood: string;
+  address_city: string;
+  address_state: string;
+  address_zip: string;
+  maritalStatus: 'SINGLE' | 'MARRIED' | 'DIVORCED' | 'WIDOWED';
+  monthlyIncome: number;
+  bankCode: string;
+  bankAgency: string;
+  bankAccount: string;
+  pixKey: string;
+  pixKeyType: 'CPF' | 'CNPJ' | 'EMAIL' | 'PHONE' | 'RANDOM';
+}
+
+export interface CreateCredigrupoInvestorRequest {
+  email: string;
+  display_name: string;
+  phone: string;
+  document: string;
+  birth_date: string;
+  kyc_data: CredigrupoInvestorKycData;
+}
+
+export interface CreateCredigrupoInvestorResult {
+  investor: CredigrupoInvestorSummary;
+  message?: string;
+}
+
+export type CredigrupoInvestorAction = 'SYNC' | 'ACTIVATE' | 'DEACTIVATE';
+
+export interface UpdateCredigrupoInvestorRequest {
+  id: string;
+  action: CredigrupoInvestorAction;
 }
 
 export interface CredigrupoKycData {
@@ -82,7 +175,7 @@ export interface CredigrupoKycData {
 
 export interface EnsureCredigrupoBorrowerRequest {
   customerId: string;
-  investorId: string;
+  fundingSource: 'GR';
   email: string;
   displayName: string;
   phone: string;
@@ -93,15 +186,15 @@ export interface EnsureCredigrupoBorrowerRequest {
 
 export interface CredigrupoBorrowerState {
   borrowerId: string;
-  investorId: string;
   kycStatus: CredigrupoKycStatus;
-  ccbEligible?: boolean;
-  eligibilityErrors?: string[];
+  ccbEligible: boolean | null;
+  eligibilityErrors: string[];
+  eligibilityCachedAt: string | null;
 }
 
 export interface CredigrupoSimulationRequest {
   customerId: string;
-  investorId: string;
+  fundingSource: 'GR';
   amountCents: number;
   installments: number;
   interestRate: number;
@@ -139,21 +232,24 @@ export interface CredigrupoSimulationResult {
 export interface CreateBancarizedLoanRequest {
   operationId: string;
   simulationId: string;
-  fundingSource: FundingSourceType;
+  fundingSource: 'GR';
 }
 
 export interface CreateBancarizedLoanResult {
   operationId: string;
   proposalId: string;
-  requestId: string;
+  requestId?: string;
   status: string;
+  internalStatus: string;
+  formalizationStatus?: string;
+  unknownProviderStatus: boolean;
   duplicate: boolean;
-  pix: {
-    brcode: string;
-    qrCodeImage: string;
-    expiresAt: string;
-    amountCents: number;
-    correlationId: string;
+  pix?: {
+    brcode?: string;
+    qrCodeImage?: string;
+    expiresAt?: string;
+    amountCents?: number;
+    correlationId?: string;
   };
 }
 
@@ -161,17 +257,20 @@ export interface CredigrupoOperationSummary {
   id: string;
   customerId: string;
   customerName: string;
-  investorId: string;
+  investorId?: string;
   investorName: string;
   fundingSource: FundingSourceType;
   proposalId?: string;
   localLoanId?: string;
   status: string;
   externalStatus?: string;
+  formalizationStatus?: string;
+  unknownProviderStatus?: boolean;
   amountCents: number;
   installments: number;
   createdAt?: string;
   pix?: CreateBancarizedLoanResult['pix'];
+  testPayStatus?: 'REQUESTING' | 'SUCCEEDED' | 'FAILED';
   borrowerSignUrl?: string;
   investorSignUrl?: string;
   ccbUrl?: string;

@@ -4,6 +4,7 @@ import type { CredigrupoSimulationRequest } from '../../src/lib/creditProviders/
 import { requireAuthorizedActor } from '../_lib/auth.js';
 import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
 import { borrowerLinkId, removeUndefined } from '../_lib/credit-providers/credigrupo/store.js';
+import { CREDIGRUPO_ACCOUNT_MODE } from '../_lib/env.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http.js';
 
@@ -13,27 +14,29 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const actor = await requireAuthorizedActor(request);
     const input = parseJsonBody<CredigrupoSimulationRequest>(request);
     const customerId = String(input.customerId || '').trim();
-    const investorId = String(input.investorId || '').trim();
-    if (!customerId || !investorId) throw new ApiError(400, 'CUSTOMER_AND_INVESTOR_REQUIRED', 'Cliente e investidor obrigatorios.');
+    if (!customerId) throw new ApiError(400, 'CUSTOMER_REQUIRED', 'Cliente obrigatorio.');
     if (!Number.isInteger(input.amountCents) || input.amountCents <= 0) throw new ApiError(400, 'INVALID_AMOUNT', 'Valor invalido.');
     if (!Number.isInteger(input.installments) || input.installments < 1 || input.installments > 60) {
       throw new ApiError(400, 'INVALID_INSTALLMENTS', 'Parcelas devem estar entre 1 e 60.');
     }
 
+    if (input.fundingSource !== 'GR') {
+      throw new ApiError(400, 'INVALID_FUNDING_SOURCE', 'A chave propria Credigrupo aceita somente capital da GR.');
+    }
+
     const [customerSnapshot, borrowerSnapshot] = await Promise.all([
       adminDb.doc(`clientes/${customerId}`).get(),
-      adminDb.doc(`creditBorrowers/${borrowerLinkId(customerId, investorId)}`).get(),
+      adminDb.doc(`creditBorrowers/${borrowerLinkId(customerId, CREDIGRUPO_ACCOUNT_MODE)}`).get(),
     ]);
     if (!customerSnapshot.exists) throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Cliente nao encontrado.');
     if (!borrowerSnapshot.exists) throw new ApiError(409, 'BORROWER_NOT_SYNCED', 'Sincronize o tomador antes de simular.');
     const borrower = borrowerSnapshot.data() || {};
     if (borrower.kycStatus !== 'approved') throw new ApiError(409, 'KYC_NOT_APPROVED', 'KYC ainda nao aprovado.');
-    if (borrower.ccbEligible === false) {
+    if (borrower.ccbEligible !== true) {
       throw new ApiError(409, 'CCB_NOT_ELIGIBLE', 'Tomador nao elegivel para CCB.', borrower.eligibilityErrors);
     }
 
     const remote = await new CredigrupoClient().simulateLoan({
-      investorId,
       borrowerId: String(borrower.borrowerId),
       amountCents: input.amountCents,
       installments: input.installments,
@@ -49,8 +52,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
       customerName: customerSnapshot.data()?.name || 'CLIENTE',
       customerPhone: customerSnapshot.data()?.phone,
       borrowerId: String(borrower.borrowerId),
-      investorId,
-      request: input,
+      accountMode: CREDIGRUPO_ACCOUNT_MODE,
+      investorType: 'GR',
+      request: { ...input, fundingSource: 'GR' },
       response: remote,
       createdByUid: actor.uid,
       createdAt: now,

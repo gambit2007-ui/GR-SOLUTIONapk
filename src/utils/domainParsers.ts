@@ -15,6 +15,7 @@ import type {
 } from '../types';
 import { parseCashOutflowCategory } from './cashCategories.js';
 import { getLocalISODate } from './dateTime.js';
+import { isCredigrupoLoanStatus } from '../lib/creditProviders/loanStatus.js';
 
 const CASH_MOVEMENT_TYPES: readonly CashMovementType[] = [
   'APORTE',
@@ -389,6 +390,8 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
           investorSignUrl: toOptionalString(credigrupo.investorSignUrl),
           ccbUrl: toOptionalString(credigrupo.ccbUrl),
           ccbNumber: toOptionalString(credigrupo.ccbNumber),
+          status: isCredigrupoLoanStatus(credigrupo.status) ? credigrupo.status : undefined,
+          formalizationStatus: toOptionalString(credigrupo.formalizationStatus),
           externalStatus: toOptionalString(credigrupo.externalStatus),
           signedAt: toOptionalString(credigrupo.signedAt),
           fundedAt: toOptionalString(credigrupo.fundedAt),
@@ -436,8 +439,11 @@ export const parseCustomer = (id: string, raw: unknown): Customer => {
           borrowerId: toOptionalString(credigrupo.borrowerId),
           investorId: toOptionalString(credigrupo.investorId),
           kycStatus: toOptionalString(credigrupo.kycStatus),
-          ccbEligible: typeof credigrupo.ccbEligible === 'boolean' ? credigrupo.ccbEligible : undefined,
+          ccbEligible: typeof credigrupo.ccbEligible === 'boolean'
+            ? credigrupo.ccbEligible
+            : credigrupo.ccbEligible === null ? null : undefined,
           eligibilityErrors: parseStringArray(credigrupo.eligibilityErrors),
+          eligibilityCachedAt: toOptionalString(credigrupo.eligibilityCachedAt),
           updatedAt: credigrupo.updatedAt as Customer['credigrupo'] extends { updatedAt?: infer T } ? T : never,
         }
       : undefined,

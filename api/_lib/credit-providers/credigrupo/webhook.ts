@@ -113,9 +113,10 @@ export const parseCredigrupoWebhookEvent = (rawBody: Buffer): CredigrupoWebhookE
 };
 
 export const verifyCredigrupoWebhookSignature = (rawBody: Buffer, secret: string, received: string): boolean => {
-  const expected = `sha256=${crypto.createHmac('sha256', secret).update(rawBody).digest('hex')}`;
-  const expectedBuffer = Buffer.from(expected, 'utf8');
-  const receivedBuffer = Buffer.from(received, 'utf8');
+  const match = /^sha256=([a-f0-9]{64})$/.exec(received);
+  if (!match) return false;
+  const expectedBuffer = crypto.createHmac('sha256', secret).update(rawBody).digest();
+  const receivedBuffer = Buffer.from(match[1], 'hex');
   return expectedBuffer.length === receivedBuffer.length && crypto.timingSafeEqual(expectedBuffer, receivedBuffer);
 };
 

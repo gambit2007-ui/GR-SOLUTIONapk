@@ -14,6 +14,7 @@ export type DataLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type FormalizationType = 'DIRECT' | 'BANCARIZED';
 export type LoanProvider = 'GR' | 'CREDIGRUPO';
 export type FundingSourceType = 'GR' | 'EXTERNAL';
+export type CredigrupoLoanStatus = 'proposed' | 'accepted' | 'rejected' | 'completed' | 'funded';
 
 export type InstallmentStatus = 'PENDENTE' | 'PAGO' | 'ATRASADO' | 'PENDING' | 'PAID' | 'OVERDUE';
 export type PaymentStatus = InstallmentStatus;
@@ -121,6 +122,12 @@ export interface Customer {
   email?: string;
   phone?: string;
   address?: string;
+  addressStreet?: string;
+  addressNumber?: string;
+  addressNeighborhood?: string;
+  addressCity?: string;
+  addressState?: string;
+  addressZipCode?: string;
   notes?: string;
   observations?: string;
   avatar?: string;
@@ -137,8 +144,9 @@ export interface Customer {
     borrowerId?: string;
     investorId?: string;
     kycStatus?: string;
-    ccbEligible?: boolean;
+    ccbEligible?: boolean | null;
     eligibilityErrors?: string[];
+    eligibilityCachedAt?: string;
     updatedAt?: FirestoreTimestampLike | Date | number | string;
   };
 }
@@ -277,15 +285,20 @@ export interface Loan {
   hasFinancialHistory?: boolean;
   formalizationType?: FormalizationType;
   provider?: LoanProvider;
+  fundingSource?: FundingSourceType;
+  investorInternalId?: string;
   funding?: {
     source: FundingSourceType;
-    investorId: string;
+    investorId?: string;
     investorName: string;
   };
   credigrupo?: {
+    accountMode?: 'OWN_INVESTOR_KEY';
+    investorType?: 'GR';
     operationId?: string;
     borrowerId?: string;
     investorId?: string;
+    investorName?: string;
     proposalId?: string;
     requestId?: string;
     kycStatus?: string;
@@ -295,6 +308,8 @@ export interface Loan {
     investorSignUrl?: string;
     ccbUrl?: string;
     ccbNumber?: string;
+    status?: CredigrupoLoanStatus;
+    formalizationStatus?: string;
     externalStatus?: string;
     signedAt?: string;
     fundedAt?: string;

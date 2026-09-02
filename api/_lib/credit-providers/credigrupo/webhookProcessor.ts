@@ -36,6 +36,7 @@ export const registerCredigrupoWebhookEvent = async (
       eventId,
       eventType: event.event,
       partnerId: event.partnerId,
+      timestamp: event.timestamp,
       proposalId: event.data.proposalId || null,
       installmentId: event.data.installmentId || null,
       providerTimestamp: event.timestamp,
