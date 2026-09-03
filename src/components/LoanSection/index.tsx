@@ -1199,8 +1199,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!value) return;
     try {
       const url = new URL(value);
-      const allowedHosts = new Set(['app.zapsign.com.br', 'storage.supabase.co']);
-      if (url.protocol !== 'https:' || !allowedHosts.has(url.hostname.toLowerCase())) {
+      const allowedHosts = new Set(['app.zapsign.com.br', 'sandbox.app.zapsign.com.br', 'storage.supabase.co']);
+      if (url.protocol !== 'https:' || url.username || url.password || url.port || !allowedHosts.has(url.hostname.toLowerCase())) {
         showToast('Link externo bloqueado por seguranca', 'error');
         return;
       }

@@ -194,6 +194,28 @@ export const listCredigrupoOperations = async () => {
   return result.operations;
 };
 
+export interface CredigrupoSigningLinkRecoveryResult {
+  recovered: true;
+  alreadyRecovered: boolean;
+  source: 'EVENT';
+  eventId: string;
+  hmacValidated: true;
+  borrowerHostname: string;
+  investorHostname?: string;
+  investorPreSigned: boolean;
+  borrowerSignUrlPresent: true;
+  investorSignUrlPresent: boolean;
+  status: 'AWAITING_SIGNATURES';
+  externalStatus?: string;
+  formalizationStatus?: string;
+}
+
+export const recoverCredigrupoSigningLinks = (operationId: string) =>
+  request<CredigrupoSigningLinkRecoveryResult>('/api/credigrupo/events/reprocess', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'reprocess_ccb_signing_links', operationId }),
+  });
+
 export const reconcileCredigrupoOperation = (operationId: string) =>
   request<{ reconciled: boolean; externalStatus: string; formalizationStatus: string; installments: number }>('/api/credigrupo/reconcile', {
     method: 'POST',

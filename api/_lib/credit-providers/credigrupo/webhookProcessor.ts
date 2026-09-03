@@ -47,6 +47,8 @@ export const registerCredigrupoWebhookEvent = async (
       lastReceivedAt: FieldValue.serverTimestamp(),
       deliveryAttempts: FieldValue.increment(1),
       payload: event,
+      hmacValidated: true,
+      hmacValidatedAt: snapshot.exists ? undefined : FieldValue.serverTimestamp(),
     }), { merge: true });
     return { eventRef, shouldProcess: true, duplicate };
   });

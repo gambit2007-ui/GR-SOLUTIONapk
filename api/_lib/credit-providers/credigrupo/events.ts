@@ -2,6 +2,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { applyLoanPaymentToCurrentLoan } from '../../../../src/utils/financialEngine.js';
 import { parseLoan } from '../../../../src/utils/domainParsers.js';
 import { resolveBancarizedCashDelta } from '../../../../src/utils/creditFunding.js';
+import { resolveCredigrupoCcbSigningLinks, validateCredigrupoSigningUrl } from '../../../../src/lib/creditProviders/signingUrl.js';
 import type { Installment, Loan } from '../../../../src/types.js';
 import { adminDb } from '../../firebaseAdmin.js';
 import { StoredCredigrupoOperation, findOperationByProposalId, removeUndefined } from './store.js';
@@ -10,7 +11,6 @@ import type { CredigrupoWebhookEvent } from './webhook.js';
 export type { CredigrupoWebhookEvent } from './webhook.js';
 
 const SYSTEM_UID = 'system:credigrupo';
-const allowedSignatureHosts = new Set(['app.zapsign.com.br']);
 const allowedDocumentHosts = new Set(['storage.supabase.co']);
 const allowedPixHosts = new Set(['api.woovi.com']);
 
@@ -23,6 +23,11 @@ const safeUrl = (value: unknown, allowedHosts: Set<string>): string | undefined 
   } catch {
     return undefined;
   }
+};
+
+const safeSigningUrl = (value: unknown): string | undefined => {
+  const validation = validateCredigrupoSigningUrl(value);
+  return validation.valid ? validation.url : undefined;
 };
 
 const asText = (value: unknown): string => String(value || '').trim();
@@ -124,6 +129,7 @@ const activateFundedLoan = async (
           fundingStatus: 'funded',
           borrowerSignUrl: operation.borrowerSignUrl,
           investorSignUrl: operation.investorSignUrl,
+          investorSignaturePreSigned: operation.investorSignaturePreSigned,
           ccbUrl: operation.ccbUrl,
           fundedAt: processingTimestamp,
           updatedAt: processingTimestamp,
@@ -184,10 +190,11 @@ const updateOperationState = async (
   operationDocument: FirebaseFirestore.QueryDocumentSnapshot,
   eventRef: FirebaseFirestore.DocumentReference,
   fields: Record<string, unknown>,
+  eventFields: Record<string, unknown> = {},
 ) => {
   await adminDb.runTransaction(async (transaction) => {
     transaction.set(operationDocument.ref, removeUndefined({ ...fields, updatedAt: FieldValue.serverTimestamp() }), { merge: true });
-    markEvent(transaction, eventRef, { status: 'PROCESSED', processedAt: FieldValue.serverTimestamp() });
+    markEvent(transaction, eventRef, { ...eventFields, status: 'PROCESSED', processedAt: FieldValue.serverTimestamp() });
   });
 };
 
@@ -470,13 +477,18 @@ export const processCredigrupoEvent = async (
   }
 
   switch (event.event) {
-    case 'ccb_ready_for_signature':
+    case 'ccb_ready_for_signature': {
+      const links = resolveCredigrupoCcbSigningLinks(event.data.borrowerSignUrl, event.data.investorSignUrl);
       await updateOperationState(operation, eventRef, {
         status: 'AWAITING_SIGNATURES',
-        borrowerSignUrl: safeUrl(event.data.borrowerSignUrl, allowedSignatureHosts),
-        investorSignUrl: safeUrl(event.data.investorSignUrl, allowedSignatureHosts),
+        borrowerSignUrl: links.borrower?.url,
+        investorSignUrl: links.investor?.url,
+        investorSignaturePreSigned: links.investorPreSigned,
+      }, links.valid ? {} : {
+        signingUrlDiagnostics: links.diagnostics,
       });
       return;
+    }
     case 'loan.signed':
       await updateOperationState(operation, eventRef, {
         status: 'SIGNED',
@@ -526,8 +538,9 @@ export const updateOperationFromRemoteLoan = async (
     formalizationStatus: details.formalizationStatus,
     ccbNumber: details.ccbNumber || undefined,
     ccbUrl: safeUrl(details.ccbUrl, allowedDocumentHosts),
-    borrowerSignUrl: safeUrl(details.borrowerSignUrl, allowedSignatureHosts),
-    investorSignUrl: safeUrl(details.investorSignUrl, allowedSignatureHosts),
+    borrowerSignUrl: safeSigningUrl(details.borrowerSignUrl),
+    investorSignUrl: safeSigningUrl(details.investorSignUrl),
+    investorSignaturePreSigned: details.investorSignUrl === 'pre-signed',
     updatedAt: FieldValue.serverTimestamp(),
   });
   const batch = adminDb.batch();
@@ -539,8 +552,9 @@ export const updateOperationFromRemoteLoan = async (
         formalizationStatus: details.formalizationStatus,
         ccbNumber: details.ccbNumber || undefined,
         ccbUrl: safeUrl(details.ccbUrl, allowedDocumentHosts),
-        borrowerSignUrl: safeUrl(details.borrowerSignUrl, allowedSignatureHosts),
-        investorSignUrl: safeUrl(details.investorSignUrl, allowedSignatureHosts),
+        borrowerSignUrl: safeSigningUrl(details.borrowerSignUrl),
+        investorSignUrl: safeSigningUrl(details.investorSignUrl),
+        investorSignaturePreSigned: details.investorSignUrl === 'pre-signed',
       }),
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });

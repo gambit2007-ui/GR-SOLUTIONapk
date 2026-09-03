@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Ban, CheckCircle, Copy, ExternalLink, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
 import type { CredigrupoOperationSummary } from '../../lib/creditProviders/types';
 import { formatCredigrupoFormalizationStatus } from '../../lib/creditProviders/loanStatus';
+import { validateCredigrupoSigningUrl } from '../../lib/creditProviders/signingUrl';
 import {
   canCancelCredigrupoOperation,
   canConfirmExistingCredigrupoLoan,
@@ -15,6 +16,7 @@ import {
   listCredigrupoOperations,
   reconcileConfirmedCredigrupoLoan,
   reconcileCredigrupoOperation,
+  recoverCredigrupoSigningLinks,
   testPayCredigrupoSandbox,
 } from '../../services/credigrupoService';
 
@@ -51,17 +53,11 @@ const statusLabel = (status: string) => ({
   CREATE_FAILED: 'Falha ao criar',
 }[status] || status.replaceAll('_', ' '));
 
-const allowedExternalHosts = new Set(['app.zapsign.com.br', 'storage.supabase.co']);
-
 const safeOpen = (value?: string) => {
   if (!value) return;
-  try {
-    const url = new URL(value);
-    if (url.protocol === 'https:' && allowedExternalHosts.has(url.hostname.toLowerCase())) {
-      window.open(url.toString(), '_blank', 'noopener,noreferrer');
-    }
-  } catch {
-    // URLs externas invalidas permanecem bloqueadas.
+  const validation = validateCredigrupoSigningUrl(value);
+  if (validation.valid) {
+    window.open(validation.url, '_blank', 'noopener,noreferrer');
   }
 };
 
@@ -98,6 +94,20 @@ const BancarizationOperations: React.FC<BancarizationOperationsProps> = ({ enabl
       await load();
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Falha na conciliacao', 'error');
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  const handleRecoverSigningLinks = async (operationId: string) => {
+    setProcessingId(operationId);
+    try {
+      const result = await recoverCredigrupoSigningLinks(operationId);
+      const investorResult = result.investorPreSigned ? ' Investidor ja pre-assinado.' : '';
+      showToast(`Links de assinatura recuperados.${investorResult}`, 'success');
+      await load();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Falha ao recuperar links de assinatura', 'error');
     } finally {
       setProcessingId(null);
     }
@@ -230,6 +240,8 @@ const BancarizationOperations: React.FC<BancarizationOperationsProps> = ({ enabl
                 <div className="flex flex-wrap gap-2">
                   {operation.borrowerSignUrl && <button type="button" onClick={() => safeOpen(operation.borrowerSignUrl)} className="px-3 py-2 rounded-xl bg-blue-500/10 text-blue-400 text-[7px] font-black uppercase flex items-center gap-1"><ExternalLink size={11} /> Assinar cliente</button>}
                   {operation.investorSignUrl && <button type="button" onClick={() => safeOpen(operation.investorSignUrl)} className="px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 text-[7px] font-black uppercase flex items-center gap-1"><ExternalLink size={11} /> Assinar investidor</button>}
+                  {operation.investorSignaturePreSigned && <span className="px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 text-[7px] font-black uppercase flex items-center gap-1"><CheckCircle size={11} /> Investidor pre-assinado</span>}
+                  {isAdmin && operation.status === 'AWAITING_SIGNATURES' && (!operation.borrowerSignUrl || (!operation.investorSignUrl && !operation.investorSignaturePreSigned)) && <button type="button" disabled={processingId === operation.id} onClick={() => void handleRecoverSigningLinks(operation.id)} className="px-3 py-2 rounded-xl border border-blue-500/30 text-blue-400 text-[7px] font-black uppercase disabled:opacity-50 flex items-center gap-1"><RefreshCw size={11} className={processingId === operation.id ? 'animate-spin' : ''} /> Recuperar links CCB</button>}
                   {operation.localLoanId && operation.status === 'FUNDED' && <button type="button" onClick={() => onOpenLoan(operation.localLoanId || '')} className="px-3 py-2 rounded-xl bg-emerald-500/10 text-emerald-400 text-[7px] font-black uppercase flex items-center gap-1"><CheckCircle size={11} /> Abrir contrato</button>}
                   {canDiscover && <button type="button" disabled={processingId === operation.id} onClick={() => void handleDiscover(operation.id)} className="px-3 py-2 rounded-xl border border-amber-500/30 text-amber-400 text-[7px] font-black uppercase disabled:opacity-50 flex items-center gap-1"><RefreshCw size={11} className={processingId === operation.id ? 'animate-spin' : ''} /> Localizar negociacao</button>}
                   {canConfirm && <button type="button" disabled={processingId === operation.id} onClick={() => openConfirmedReconciliation(operation.id)} className="px-3 py-2 rounded-xl border border-blue-500/30 text-blue-400 text-[7px] font-black uppercase disabled:opacity-50 flex items-center gap-1"><CheckCircle size={11} /> Reconciliar ID confirmado</button>}

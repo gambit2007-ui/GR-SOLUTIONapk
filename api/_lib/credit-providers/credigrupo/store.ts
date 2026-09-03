@@ -60,6 +60,7 @@ export interface StoredCredigrupoOperation {
   };
   borrowerSignUrl?: string;
   investorSignUrl?: string;
+  investorSignaturePreSigned?: boolean;
   ccbUrl?: string;
   createdByUid: string;
   createdByEmail?: string;
@@ -213,5 +214,6 @@ export const toOperationSummary = (id: string, operation: StoredCredigrupoOperat
   testPayStatus: operation.testPayStatus,
   borrowerSignUrl: operation.borrowerSignUrl,
   investorSignUrl: operation.investorSignUrl,
+  investorSignaturePreSigned: operation.investorSignaturePreSigned,
   ccbUrl: operation.ccbUrl,
 });

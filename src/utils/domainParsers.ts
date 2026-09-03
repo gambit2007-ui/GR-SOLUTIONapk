@@ -388,6 +388,7 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
           fundingStatus: toOptionalString(credigrupo.fundingStatus),
           borrowerSignUrl: toOptionalString(credigrupo.borrowerSignUrl),
           investorSignUrl: toOptionalString(credigrupo.investorSignUrl),
+          investorSignaturePreSigned: credigrupo.investorSignaturePreSigned === true ? true : undefined,
           ccbUrl: toOptionalString(credigrupo.ccbUrl),
           ccbNumber: toOptionalString(credigrupo.ccbNumber),
           status: isCredigrupoLoanStatus(credigrupo.status) ? credigrupo.status : undefined,

@@ -7,6 +7,7 @@ const PROJECT_ID = 'demo-gr-solution-credigrupo';
 let db: Firestore;
 let processStoredCredigrupoEvent: typeof import('../../api/_lib/credit-providers/credigrupo/webhookProcessor').processStoredCredigrupoEvent;
 let registerCredigrupoWebhookEvent: typeof import('../../api/_lib/credit-providers/credigrupo/webhookProcessor').registerCredigrupoWebhookEvent;
+let recoverCredigrupoCcbSigningLinksFromInbox: typeof import('../../api/_lib/credit-providers/credigrupo/signingLinkRecovery').recoverCredigrupoCcbSigningLinksFromInbox;
 let resolveCredigrupoFundingInvestor: typeof import('../../api/_lib/credit-providers/credigrupo/grInvestorSettings').resolveCredigrupoFundingInvestor;
 let reserveCredigrupoOperation: typeof import('../../api/_lib/credit-providers/credigrupo/store').reserveCredigrupoOperation;
 
@@ -17,11 +18,13 @@ beforeAll(async () => {
   const processor = await import('../../api/_lib/credit-providers/credigrupo/webhookProcessor');
   const settings = await import('../../api/_lib/credit-providers/credigrupo/grInvestorSettings');
   const store = await import('../../api/_lib/credit-providers/credigrupo/store');
+  const signingLinkRecovery = await import('../../api/_lib/credit-providers/credigrupo/signingLinkRecovery');
   db = firebase.adminDb;
   processStoredCredigrupoEvent = processor.processStoredCredigrupoEvent;
   registerCredigrupoWebhookEvent = processor.registerCredigrupoWebhookEvent;
   resolveCredigrupoFundingInvestor = settings.resolveCredigrupoFundingInvestor;
   reserveCredigrupoOperation = store.reserveCredigrupoOperation;
+  recoverCredigrupoCcbSigningLinksFromInbox = signingLinkRecovery.recoverCredigrupoCcbSigningLinksFromInbox;
 });
 
 beforeEach(async () => {
@@ -155,6 +158,7 @@ describe('processamento financeiro do webhook Credigrupo', () => {
       timestamp: paidEvent.timestamp,
       partnerId: paidEvent.partnerId,
       status: 'RECEIVED',
+      hmacValidated: true,
     });
     await first.eventRef.set({ status: 'PROCESSED' }, { merge: true });
     const duplicate = await registerCredigrupoWebhookEvent('incoming-event', paidEvent);
@@ -243,6 +247,124 @@ describe('processamento financeiro do webhook Credigrupo', () => {
     await runEvent('loan-cancelled', { event: 'loan.cancelled', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { proposalId: 'proposal-1', requestId: 'request-1', cancelledAt: paidEvent.timestamp } });
     expect((await db.doc('creditOperations/operation-1').get()).data()?.status).toBe('CANCELLED');
     expect((await db.doc('creditOperations/operation-1').get()).data()?.externalStatus).toBe('completed');
+  });
+
+  it('persiste links oficiais de sandbox e preserva diagnostico sem tokens', async () => {
+    await seedOperation();
+    const eventRef = await runEvent('ccb-ready-sandbox', {
+      event: 'ccb_ready_for_signature',
+      partnerId: 'partner-1',
+      timestamp: paidEvent.timestamp,
+      data: {
+        proposalId: 'proposal-1',
+        borrowerSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/borrower-token',
+        investorSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/investor-token',
+      },
+    });
+    expect((await db.doc('creditOperations/operation-1').get()).data()).toMatchObject({
+      status: 'AWAITING_SIGNATURES',
+      borrowerSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/borrower-token',
+      investorSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/investor-token',
+    });
+    expect(JSON.stringify(eventRef.data()?.signingUrlDiagnostics || {})).not.toContain('token');
+  });
+
+  it('nao persiste URL maliciosa e registra somente diagnostico sanitizado', async () => {
+    await seedOperation();
+    const eventRef = await runEvent('ccb-ready-malicious', {
+      event: 'ccb_ready_for_signature',
+      partnerId: 'partner-1',
+      timestamp: paidEvent.timestamp,
+      data: {
+        proposalId: 'proposal-1',
+        borrowerSignUrl: 'https://app.zapsign.com.br.evil.example/verificar/TOKEN-BORROWER?auth=SECRET',
+        investorSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/investor-token',
+      },
+    });
+    const operation = (await db.doc('creditOperations/operation-1').get()).data();
+    expect(operation?.borrowerSignUrl).toBeUndefined();
+    expect(operation?.investorSignUrl).toBe('https://sandbox.app.zapsign.com.br/verificar/investor-token');
+    const diagnostic = JSON.stringify(eventRef.data()?.signingUrlDiagnostics);
+    expect(diagnostic).toContain('HOST_NOT_ALLOWED');
+    expect(diagnostic).not.toContain('TOKEN-BORROWER');
+    expect(diagnostic).not.toContain('SECRET');
+    expect(diagnostic).not.toContain('/verificar/');
+  });
+
+  it('reprocessa somente links de evento CCB validado e permanece idempotente sem efeitos financeiros', async () => {
+    await seedOwnInvestorOperation('operation-gr', {
+      proposalId: 'proposal-gr',
+      status: 'AWAITING_SIGNATURES',
+      externalStatus: 'accepted',
+      formalizationStatus: 'awaiting_lender_payment',
+      testPayStatus: 'SUCCEEDED',
+    });
+    const event = {
+      event: 'ccb_ready_for_signature',
+      partnerId: 'partner-1',
+      timestamp: paidEvent.timestamp,
+      data: {
+        proposalId: 'proposal-gr',
+        borrowerSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/borrower-token',
+        investorSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/investor-token',
+      },
+    };
+    await db.doc('creditWebhookEvents/ccb-event').set({
+      eventId: 'ccb-event',
+      eventType: 'ccb_ready_for_signature',
+      proposalId: 'proposal-gr',
+      status: 'PROCESSED',
+      hmacValidated: true,
+      receivedAt: Timestamp.now(),
+      payload: event,
+    });
+
+    const first = await recoverCredigrupoCcbSigningLinksFromInbox('operation-gr');
+    const second = await recoverCredigrupoCcbSigningLinksFromInbox('operation-gr');
+    expect(first).toMatchObject({ recovered: true, alreadyRecovered: false, source: 'EVENT', hmacValidated: true });
+    expect(second).toMatchObject({ recovered: true, alreadyRecovered: true });
+    expect((await db.doc('creditOperations/operation-gr').get()).data()).toMatchObject({
+      status: 'AWAITING_SIGNATURES',
+      externalStatus: 'accepted',
+      formalizationStatus: 'awaiting_lender_payment',
+      testPayStatus: 'SUCCEEDED',
+      borrowerSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/borrower-token',
+      investorSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/investor-token',
+    });
+    expect((await db.doc('creditWebhookEvents/ccb-event').get()).data()).toMatchObject({
+      status: 'PROCESSED',
+      signingLinkRecovery: {
+        status: 'PROCESSED',
+        borrowerHostname: 'sandbox.app.zapsign.com.br',
+        investorHostname: 'sandbox.app.zapsign.com.br',
+      },
+    });
+    expect((await db.collection('creditInvestorLedger').get()).size).toBe(0);
+    expect((await db.collection('cashMovement').get()).size).toBe(0);
+    expect((await db.collection('loans').get()).size).toBe(0);
+  });
+
+  it('bloqueia reprocessamento de evento sem evidencia de HMAC validado', async () => {
+    await seedOperation();
+    await db.doc('creditWebhookEvents/ccb-unverified').set({
+      eventType: 'ccb_ready_for_signature',
+      proposalId: 'proposal-1',
+      status: 'PROCESSED',
+      payload: {
+        event: 'ccb_ready_for_signature',
+        partnerId: 'partner-1',
+        timestamp: paidEvent.timestamp,
+        data: {
+          proposalId: 'proposal-1',
+          borrowerSignUrl: 'https://app.zapsign.com.br/verificar/a',
+          investorSignUrl: 'https://app.zapsign.com.br/verificar/b',
+        },
+      },
+    });
+    await expect(recoverCredigrupoCcbSigningLinksFromInbox('operation-1')).rejects.toMatchObject({
+      code: 'CREDIGRUPO_EVENT_HMAC_NOT_VALIDATED',
+    });
+    expect((await db.doc('creditOperations/operation-1').get()).data()?.borrowerSignUrl).toBeUndefined();
   });
 
   it('cria contrato bancarizado uma unica vez ao receber loan.funded', async () => {

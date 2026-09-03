@@ -280,6 +280,7 @@ export interface CredigrupoOperationSummary {
   testPayStatus?: 'REQUESTING' | 'SUCCEEDED' | 'FAILED';
   borrowerSignUrl?: string;
   investorSignUrl?: string;
+  investorSignaturePreSigned?: boolean;
   ccbUrl?: string;
 }
 

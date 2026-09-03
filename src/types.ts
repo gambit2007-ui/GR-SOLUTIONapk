@@ -306,6 +306,7 @@ export interface Loan {
     fundingStatus?: string;
     borrowerSignUrl?: string;
     investorSignUrl?: string;
+    investorSignaturePreSigned?: boolean;
     ccbUrl?: string;
     ccbNumber?: string;
     status?: CredigrupoLoanStatus;
