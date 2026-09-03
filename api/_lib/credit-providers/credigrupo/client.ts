@@ -27,6 +27,13 @@ export interface CredigrupoCreateInvestorResponse {
   message?: string;
 }
 
+export interface CredigrupoWebhookConfigurationResponse {
+  data: {
+    webhookUrl: string;
+    hasSecret: boolean;
+  };
+}
+
 type CredigrupoInvestorDocumentsPayload = Partial<Record<CredigrupoInvestorDocumentType, string>>;
 
 interface CredigrupoBorrowerResponse {
@@ -369,6 +376,10 @@ export class CredigrupoClient {
 
   getEarnings() {
     return this.request<{ totalPartnerFeeCents: number; totalAgencyFeeCents: number; subAccountBalanceCents: number }>('/earnings');
+  }
+
+  getWebhookConfiguration() {
+    return this.request<CredigrupoWebhookConfigurationResponse>('/webhooks');
   }
 }
 

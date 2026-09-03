@@ -179,12 +179,19 @@ describe('HTTP webhook Credigrupo com raw body', () => {
 
   it('aceita exclusivamente o prefixo e digest no formato oficial', async () => {
     const rawBody = Buffer.from(JSON.stringify(payload));
-    const context = createDependencies();
     const digest = sign(rawBody).slice('sha256='.length);
+    const malformedSignatures = [
+      `SHA256=${digest}`,
+      digest,
+      `sha256=${digest.slice(1)}`,
+      `sha256=${'g'.repeat(64)}`,
+    ];
 
-    const response = await invokeWebhook(rawBody, context.dependencies, `SHA256=${digest}`);
-
-    expect(response.status).toBe(401);
-    expect(context.registerEvent).not.toHaveBeenCalled();
+    for (const malformedSignature of malformedSignatures) {
+      const context = createDependencies();
+      const response = await invokeWebhook(rawBody, context.dependencies, malformedSignature);
+      expect(response.status).toBe(401);
+      expect(context.registerEvent).not.toHaveBeenCalled();
+    }
   });
 });

@@ -38,6 +38,13 @@ export interface CredigrupoRuntimeDiagnostics {
   enabledPresent: boolean;
   integrationEnabled: boolean;
   webhookSecretPresent: boolean;
+  webhookSecretLength: number;
+  webhookSecretFingerprint: string | null;
+  webhookConfigurationAvailable: boolean;
+  webhookUrl: string | null;
+  webhookUrlMatchesExpected: boolean;
+  webhookSecretConfigured: boolean | null;
+  webhookConfigurationError: string | null;
   accountMode: CredigrupoAccountMode | null;
   investor: 'GR SOLUTION';
 }

@@ -84,6 +84,29 @@ describe('client Credigrupo de investidores', () => {
 });
 
 describe('contrato oficial de operacoes Credigrupo', () => {
+  it('consulta a configuracao do webhook somente por GET e preserva apenas URL e hasSecret', async () => {
+    configureSandbox();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      data: {
+        webhookUrl: 'https://gr-solutionapk.vercel.app/api/webhooks/credigrupo',
+        hasSecret: true,
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    const response = await new CredigrupoClient().getWebhookConfiguration();
+
+    expect(response).toEqual({
+      data: {
+        webhookUrl: 'https://gr-solutionapk.vercel.app/api/webhooks/credigrupo',
+        hasSecret: true,
+      },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('/webhooks');
+    expect(fetchMock.mock.calls[0][1]?.method).toBeUndefined();
+    expect(fetchMock.mock.calls[0][1]?.body).toBeUndefined();
+  });
+
   it('descobre negociacoes somente com GET na primeira pagina e consulta individual', async () => {
     configureSandbox();
     const fetchMock = vi.spyOn(globalThis, 'fetch')
