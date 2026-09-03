@@ -104,7 +104,10 @@ const BancarizationOperations: React.FC<BancarizationOperationsProps> = ({ enabl
     try {
       const result = await recoverCredigrupoSigningLinks(operationId);
       const investorResult = result.investorPreSigned ? ' Investidor ja pre-assinado.' : '';
-      showToast(`Links de assinatura recuperados.${investorResult}`, 'success');
+      const signingHosts = result.investorHostname && result.investorHostname !== result.borrowerHostname
+        ? `${result.borrowerHostname} / ${result.investorHostname}`
+        : result.borrowerHostname;
+      showToast(`Links de assinatura recuperados (${signingHosts}).${investorResult}`, 'success');
       await load();
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'Falha ao recuperar links de assinatura', 'error');
