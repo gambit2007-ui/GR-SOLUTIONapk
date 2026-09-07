@@ -366,9 +366,7 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     lastOperationByUid: toOptionalString(payload.lastOperationByUid),
     lastOperationByEmail: toOptionalString(payload.lastOperationByEmail),
     lastOperationByName: toOptionalString(payload.lastOperationByName),
-    hasFinancialHistory: typeof payload.hasFinancialHistory === 'boolean'
-      ? payload.hasFinancialHistory
-      : undefined,
+    hasFinancialHistory: payload.hasFinancialHistory === true,
     formalizationType,
     provider,
     funding: funding && toOptionalString(funding.investorId)

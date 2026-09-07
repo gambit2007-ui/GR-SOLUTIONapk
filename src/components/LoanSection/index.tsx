@@ -12,7 +12,7 @@ import {
   PaymentApplyMode,
   DataLoadStatus,
 } from '../../types';
-import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown, ExternalLink, ShieldCheck, Trash2 } from 'lucide-react';
+import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown, ExternalLink, ShieldCheck } from 'lucide-react';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -58,7 +58,6 @@ interface LoanSectionProps {
   onAddLoan: (draft: LoanDraft) => Promise<CreatedLoanResult>;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onCancelLoan: (loanId: string, reason: string) => Promise<void>;
-  onDeleteLoan: (loanId: string) => Promise<void>;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   initialExpandedLoanId?: string | null;
   currentActor?: {
@@ -129,7 +128,6 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   onAddLoan, 
   onUpdateLoan,
   onCancelLoan,
-  onDeleteLoan,
   showToast, 
   initialExpandedLoanId,
   currentActor,
@@ -619,45 +617,6 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       await onCancelLoan(loan.id, reason.trim());
     } catch (error) {
       showToast('Erro ao cancelar contrato', 'error');
-    }
-  };
-
-  const handleDeleteLoan = async (loan: Loan) => {
-    const installments = Array.isArray(loan.installments) ? loan.installments : [];
-    const hasReceipts =
-      loan.hasFinancialHistory === true ||
-      Number(loan.paidAmount || 0) > 0 ||
-      (Array.isArray(loan.fiscalPaymentEntries) && loan.fiscalPaymentEntries.length > 0) ||
-      installments.some((installment) => (
-        installmentPaidAmount(installment) > 0 ||
-        Boolean(installment.paymentBreakdown) ||
-        (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
-      ));
-    if (hasReceipts) {
-      showToast('Contrato com recebimentos nao pode ser excluido', 'error');
-      return;
-    }
-    if (loan.hasFinancialHistory !== false) {
-      showToast('Historico financeiro do contrato nao esta confirmado para exclusao', 'error');
-      return;
-    }
-    if (loan.formalizationType === 'BANCARIZED' || loan.provider === 'CREDIGRUPO') {
-      showToast('Contrato bancarizado deve ser tratado pela Credigrupo', 'error');
-      return;
-    }
-    if (effectiveLoanStatus(loan) === 'COMPLETED') {
-      showToast('Contrato quitado nao pode ser excluido', 'error');
-      return;
-    }
-    const loanAmount = Number(loan.amount || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
-    if (!window.confirm(
-      `Excluir definitivamente o contrato ${loan.contractNumber || loan.id}? A retirada de R$ ${loanAmount} sera removida e o valor voltara ao caixa. Esta acao nao pode ser desfeita.`,
-    )) return;
-
-    try {
-      await onDeleteLoan(loan.id);
-    } catch {
-      // O App exibe a mensagem de erro detalhada.
     }
   };
 
@@ -1357,16 +1316,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           const isBancarized = loan.formalizationType === 'BANCARIZED' || loan.provider === 'CREDIGRUPO';
           const resolvedLoanStatus = effectiveLoanStatus(loan);
           const paidInstallmentsCount = loanInstallments.filter((inst) => normalizeInstallmentStatus(inst.status) === 'PAID').length;
-          const hasFinancialHistory =
-            loan.hasFinancialHistory === true ||
-            Number(loan.paidAmount || 0) > 0 ||
-            (Array.isArray(loan.fiscalPaymentEntries) && loan.fiscalPaymentEntries.length > 0) ||
-            loanInstallments.some((installment) => (
-              installmentPaidAmount(installment) > 0 ||
-              Boolean(installment.paymentBreakdown) ||
-              (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
-            ));
-          const canDeleteLoan = !isBancarized && loan.hasFinancialHistory === false && !hasFinancialHistory && resolvedLoanStatus !== 'COMPLETED';
+          const hasFinancialHistory = loanInstallments.some((installment) => (
+            installmentPaidAmount(installment) > 0 ||
+            Boolean(installment.paymentBreakdown) ||
+            (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
+          ));
           const totalInstallmentsCount = loanInstallmentsCount(loan);
           const totalReceivableAmount = resolveLoanTotalReceivable(loan);
           const totalRemainingLoanAmount = Number(
@@ -1543,26 +1497,6 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   disabled={resolvedLoanStatus !== 'ACTIVE' || isBancarized}
                 >
                   <Ban size={16} />
-                </button>
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleDeleteLoan(loan);
-                  }}
-                  disabled={!canDeleteLoan}
-                  className="h-[42px] w-[42px] shrink-0 bg-red-500/10 text-red-500 rounded-xl hover:bg-red-500 hover:text-black transition-all flex items-center justify-center disabled:bg-zinc-900 disabled:text-zinc-700 disabled:cursor-not-allowed"
-                  title={isBancarized
-                    ? 'Contrato bancarizado deve ser tratado pela Credigrupo'
-                    : hasFinancialHistory
-                      ? 'Contrato com recebimentos nao pode ser excluido'
-                      : loan.hasFinancialHistory !== false
-                        ? 'Historico financeiro nao confirmado para exclusao'
-                      : resolvedLoanStatus === 'COMPLETED'
-                        ? 'Contrato quitado nao pode ser excluido'
-                        : 'Excluir contrato sem recebimentos e devolver a retirada ao caixa'}
-                  aria-label="Excluir contrato sem recebimentos"
-                >
-                  <Trash2 size={16} />
                 </button>
                 <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase ${
                   resolvedLoanStatus === 'ACTIVE' 

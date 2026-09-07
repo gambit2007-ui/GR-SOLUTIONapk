@@ -85,49 +85,6 @@ service cloud.firestore {
         data.get('fiscalPaymentEntries', []).size() > 0;
     }
 
-    function isEligibleForPhysicalLoanDeletion(data) {
-      return data.get('formalizationType', 'DIRECT') != 'BANCARIZED' &&
-        data.get('provider', 'GR') != 'CREDIGRUPO' &&
-        data.get('hasFinancialHistory', true) == false &&
-        !hasPaymentHistory(data) &&
-        data.status in ['ATIVO', 'ATRASADO', 'CANCELADO', 'ACTIVE', 'CANCELLED'];
-    }
-
-    function validLoanDeletion(loanId) {
-      let movementId = 'loan-created-' + loanId;
-      let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
-      let cashPath = /databases/$(database)/documents/settings/caixa;
-      return isEligibleForPhysicalLoanDeletion(resource.data) &&
-        exists(movementPath) &&
-        !existsAfter(movementPath) &&
-        get(movementPath).data.loanId == loanId &&
-        get(movementPath).data.operationId == movementId &&
-        get(movementPath).data.type == 'RETIRADA' &&
-        get(movementPath).data.amount == resource.data.amount &&
-        existsAfter(cashPath) &&
-        getAfter(cashPath).data.get('lastDeletedMovementId', '') == movementId &&
-        getAfter(cashPath).data.updatedByUid == request.auth.uid &&
-        getAfter(cashPath).data.updatedAt == request.time;
-    }
-
-    function validLoanOriginWithdrawalDeletion(movementId) {
-      let loanId = resource.data.get('loanId', '');
-      let loanPath = /databases/$(database)/documents/loans/$(loanId);
-      let cashPath = /databases/$(database)/documents/settings/caixa;
-      return loanId is string &&
-        movementId == 'loan-created-' + loanId &&
-        resource.data.operationId == movementId &&
-        resource.data.type == 'RETIRADA' &&
-        exists(loanPath) &&
-        !existsAfter(loanPath) &&
-        isEligibleForPhysicalLoanDeletion(get(loanPath).data) &&
-        resource.data.amount == get(loanPath).data.amount &&
-        existsAfter(cashPath) &&
-        getAfter(cashPath).data.get('lastDeletedMovementId', '') == movementId &&
-        getAfter(cashPath).data.updatedByUid == request.auth.uid &&
-        getAfter(cashPath).data.updatedAt == request.time;
-    }
-
     function validContractEdit(previousData, nextData) {
       return nextData.lastOperationType == 'CONTRACT_EDIT' &&
         !hasPaymentHistory(previousData);
@@ -185,35 +142,12 @@ service cloud.firestore {
       let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
       return movementId is string &&
         existsAfter(movementPath) &&
-        request.resource.data.get('lastDeletedMovementId', '') ==
-          (resource == null ? '' : resource.data.get('lastDeletedMovementId', '')) &&
         getAfter(movementPath).data.createdByUid == request.auth.uid &&
         request.resource.data.updatedByUid == request.auth.uid &&
         request.resource.data.updatedAt == request.time &&
         request.resource.data.value is number &&
         request.resource.data.value >= previousCashValue() + cashMovementDelta(getAfter(movementPath).data) - 0.001 &&
         request.resource.data.value <= previousCashValue() + cashMovementDelta(getAfter(movementPath).data) + 0.001;
-    }
-
-    function validLoanWithdrawalDeletionCashUpdate() {
-      let movementId = request.resource.data.get('lastDeletedMovementId', '');
-      let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
-      let loanId = get(movementPath).data.get('loanId', '');
-      let loanPath = /databases/$(database)/documents/loans/$(loanId);
-      return movementId is string &&
-        exists(movementPath) &&
-        !existsAfter(movementPath) &&
-        get(movementPath).data.operationId == movementId &&
-        get(movementPath).data.type == 'RETIRADA' &&
-        exists(loanPath) &&
-        !existsAfter(loanPath) &&
-        isEligibleForPhysicalLoanDeletion(get(loanPath).data) &&
-        get(movementPath).data.amount == get(loanPath).data.amount &&
-        request.resource.data.updatedByUid == request.auth.uid &&
-        request.resource.data.updatedAt == request.time &&
-        request.resource.data.value is number &&
-        request.resource.data.value >= previousCashValue() + get(movementPath).data.amount - 0.001 &&
-        request.resource.data.value <= previousCashValue() + get(movementPath).data.amount + 0.001;
     }
 
     function validAdminCashReconciliation() {
@@ -270,7 +204,7 @@ service cloud.firestore {
         request.resource.data.lastOperationType == 'LOAN_CREATED' &&
         hasLinkedCashMovement(request.resource.data, loanId);
       allow update: if isAuthorized() && validLoanUpdate(resource.data, request.resource.data, loanId);
-      allow delete: if isAdmin() && validLoanDeletion(loanId);
+      allow delete: if false;
     }
 
     match /cashMovement/{movementId} {
@@ -285,7 +219,7 @@ service cloud.firestore {
           )
         );
       allow update: if false;
-      allow delete: if isAdmin() && validLoanOriginWithdrawalDeletion(movementId);
+      allow delete: if false;
     }
 
     match /settings/accessControl {
@@ -298,7 +232,7 @@ service cloud.firestore {
     match /settings/{documentId} {
       allow read: if isAuthorized();
       allow write: if documentId == 'caixa' && isAuthorized() &&
-        (validLedgerCashUpdate() || (isAdmin() && validLoanWithdrawalDeletionCashUpdate()) || validAdminCashReconciliation());
+        (validLedgerCashUpdate() || validAdminCashReconciliation());
       allow write: if documentId == 'contractCounter' && isAuthorized() && validContractCounterUpdate();
       allow write: if documentId == 'fees' && isAdmin();
     }
