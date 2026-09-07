@@ -8,6 +8,7 @@ import {
   normalizeBorrowerDisplayName,
 } from '../_lib/credit-providers/credigrupo/borrowerState.js';
 import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
+import { requireSandboxTestCustomer } from '../_lib/credit-providers/credigrupo/dataScope.js';
 import { borrowerLinkId, removeUndefined } from '../_lib/credit-providers/credigrupo/store.js';
 import { CREDIGRUPO_ACCOUNT_MODE } from '../_lib/env.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
@@ -52,6 +53,10 @@ export default async function handler(request: VercelRequest, response: VercelRe
       linkRef.get(),
     ]);
     if (!customerSnapshot.exists) throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Cliente nao encontrado.');
+    requireSandboxTestCustomer(customerSnapshot.data() || {});
+    if (linkSnapshot.exists && linkSnapshot.data()?.environment !== 'sandbox') {
+      throw new ApiError(409, 'BORROWER_ENVIRONMENT_UNCONFIRMED', 'Confirme o ambiente do vinculo existente antes de utiliza-lo.');
+    }
     const client = new CredigrupoClient();
     let borrowerId = String(linkSnapshot.data()?.borrowerId || '').trim();
     let kycStatus = String(linkSnapshot.data()?.kycStatus || '').trim();
@@ -139,7 +144,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     });
 
     await Promise.all([
-      linkRef.set({ ...sharedStatus, customerId }, { merge: true }),
+      linkRef.set({ ...sharedStatus, customerId, environment: 'sandbox', testData: true }, { merge: true }),
       customerRef.set({ credigrupo: sharedStatus }, { merge: true }),
     ]);
 

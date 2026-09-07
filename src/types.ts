@@ -115,6 +115,8 @@ export interface CustomerDocument {
 }
 
 export interface Customer {
+  environment?: 'sandbox' | 'production';
+  testData?: boolean;
   id: string;
   name: string;
   cpf?: string;

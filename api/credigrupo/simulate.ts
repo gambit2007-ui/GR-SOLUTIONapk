@@ -3,6 +3,7 @@ import { Timestamp } from 'firebase-admin/firestore';
 import type { CredigrupoSimulationRequest } from '../../src/lib/creditProviders/types.js';
 import { requireAuthorizedActor } from '../_lib/auth.js';
 import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
+import { requireSandboxTestCustomer } from '../_lib/credit-providers/credigrupo/dataScope.js';
 import { borrowerLinkId, removeUndefined } from '../_lib/credit-providers/credigrupo/store.js';
 import { CREDIGRUPO_ACCOUNT_MODE } from '../_lib/env.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
@@ -29,8 +30,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
       adminDb.doc(`creditBorrowers/${borrowerLinkId(customerId, CREDIGRUPO_ACCOUNT_MODE)}`).get(),
     ]);
     if (!customerSnapshot.exists) throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Cliente nao encontrado.');
+    requireSandboxTestCustomer(customerSnapshot.data() || {});
     if (!borrowerSnapshot.exists) throw new ApiError(409, 'BORROWER_NOT_SYNCED', 'Sincronize o tomador antes de simular.');
     const borrower = borrowerSnapshot.data() || {};
+    if (borrower.environment !== 'sandbox' || borrower.testData !== true || borrower.archived) {
+      throw new ApiError(409, 'BORROWER_ENVIRONMENT_UNCONFIRMED', 'Vinculo do tomador nao confirmado para sandbox.');
+    }
     if (borrower.kycStatus !== 'approved') throw new ApiError(409, 'KYC_NOT_APPROVED', 'KYC ainda nao aprovado.');
     if (borrower.ccbEligible !== true) {
       throw new ApiError(409, 'CCB_NOT_ELIGIBLE', 'Tomador nao elegivel para CCB.', borrower.eligibilityErrors);
@@ -48,6 +53,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const simulationRef = adminDb.collection('creditSimulations').doc();
     const now = Timestamp.now();
     await simulationRef.set(removeUndefined({
+      environment: 'sandbox',
+      testData: true,
       customerId,
       customerName: customerSnapshot.data()?.name || 'CLIENTE',
       customerPhone: customerSnapshot.data()?.phone,

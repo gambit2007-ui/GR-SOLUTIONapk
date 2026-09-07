@@ -1,4 +1,5 @@
 import { ApiError } from '../../http.js';
+import { assertSandboxTestPay } from './dataScope.js';
 import { CREDIGRUPO_ACCOUNT_MODE, getCredigrupoServerConfig } from '../../env.js';
 import type {
   CreateCredigrupoInvestorRequest,
@@ -350,6 +351,7 @@ export class CredigrupoClient {
   }
 
   async testPayLoan(proposalId: string) {
+    assertSandboxTestPay(this.config.environment, this.config.apiKey);
     let httpStatus = 0;
     let headerRequestId: string | undefined;
     const response = await this.request<Record<string, unknown>>(`/loans/${encodeURIComponent(proposalId)}/test-pay`, {
@@ -364,6 +366,7 @@ export class CredigrupoClient {
   }
 
   testPayInstallment(proposalId: string, installmentId: string) {
+    assertSandboxTestPay(this.config.environment, this.config.apiKey);
     return this.request<Record<string, unknown>>(
       `/loans/${encodeURIComponent(proposalId)}/installments/${encodeURIComponent(installmentId)}/test-pay`,
       { method: 'POST' },

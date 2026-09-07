@@ -12,8 +12,10 @@ import type {
 import { CREDIGRUPO_ACCOUNT_MODE, CREDIGRUPO_OWN_INVESTOR_NAME } from '../../env.js';
 import type { SafeCredigrupoProviderError } from './providerError.js';
 import type { SafeCredigrupoCreateSuccess, SafeCredigrupoFundingPix } from './createSuccess.js';
+import type { CreditDataScope } from '../../../../src/lib/creditProviders/dataScope.js';
+import { requireSandboxTestCustomer } from './dataScope.js';
 
-export interface StoredCredigrupoOperation {
+export interface StoredCredigrupoOperation extends CreditDataScope {
   formalizationType?: 'BANCARIZED';
   provider?: 'CREDIGRUPO';
   customerId: string;
@@ -69,7 +71,7 @@ export interface StoredCredigrupoOperation {
   updatedAt?: Timestamp;
 }
 
-export interface StoredCredigrupoSimulation {
+export interface StoredCredigrupoSimulation extends CreditDataScope {
   customerId: string;
   customerName: string;
   customerPhone?: string;
@@ -144,6 +146,10 @@ export const reserveCredigrupoOperation = async (
     if (!simulationSnapshot.exists) throw new ApiError(404, 'SIMULATION_NOT_FOUND', 'Simulacao nao encontrada.');
 
     const simulation = simulationSnapshot.data() as StoredCredigrupoSimulation;
+    requireSandboxTestCustomer(simulation);
+    const customerSnapshot = await transaction.get(adminDb.doc(`clientes/${simulation.customerId}`));
+    if (!customerSnapshot.exists) throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Cliente nao encontrado.');
+    requireSandboxTestCustomer(customerSnapshot.data() || {});
     if (simulation.createdByUid !== actor.uid && !actor.admin) {
       throw new ApiError(403, 'SIMULATION_ACCESS_DENIED', 'Simulacao pertence a outro usuario.');
     }
@@ -157,6 +163,8 @@ export const reserveCredigrupoOperation = async (
     }
 
     const operation: StoredCredigrupoOperation = {
+      environment: 'sandbox',
+      testData: true,
       customerId: simulation.customerId,
       customerName: simulation.customerName,
       customerPhone: simulation.customerPhone,

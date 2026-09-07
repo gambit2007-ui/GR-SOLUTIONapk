@@ -1,4 +1,5 @@
 import { FieldValue } from 'firebase-admin/firestore';
+import { permitsRealFinancialEffects } from '../../../../src/lib/creditProviders/dataScope.js';
 import { applyLoanPaymentToCurrentLoan } from '../../../../src/utils/financialEngine.js';
 import { parseLoan } from '../../../../src/utils/domainParsers.js';
 import { resolveBancarizedCashDelta } from '../../../../src/utils/creditFunding.js';
@@ -556,6 +557,39 @@ export const processCredigrupoEvent = async (
   const operation = await findOperationByProposalId(proposalId);
   if (!operation) {
     throw new Error('CREDIGRUPO_OPERATION_NOT_FOUND');
+  }
+
+  if (operation.data().archived || operation.data().archivedAt) {
+    await eventRef.set({ processingResult: 'ARCHIVED_HOMOLOGATION_EVENT' }, { merge: true });
+    return;
+  }
+  const financialEvent = ['loan.funded', 'installment.pix_created', 'installment.paid', 'installment.investor_repaid'].includes(event.event);
+  if (financialEvent && !permitsRealFinancialEffects(operation.data(), process.env.CREDIGRUPO_ENV)) {
+    await adminDb.runTransaction(async (transaction) => {
+      const current = await transaction.get(operation.ref);
+      const data = current.data();
+      if (!data || data.proposalId !== proposalId) throw new Error('CREDIGRUPO_OPERATION_PROPOSAL_MISMATCH');
+      const sandbox = process.env.CREDIGRUPO_ENV === 'sandbox' && data.environment !== 'production';
+      if (sandbox && !data.archived && !data.archivedAt && event.event === 'loan.funded') {
+        const transition = resolveCredigrupoLifecycleTransition(data.status, 'loan.funded');
+        if (transition.outcome === 'ADVANCE') {
+          transaction.update(operation.ref, {
+            status: transition.targetStatus,
+            externalStatus: transition.externalStatus,
+            formalizationStatus: transition.formalizationStatus,
+            environment: 'sandbox', testData: true,
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+        }
+      }
+      markEvent(transaction, eventRef, {
+        status: 'PROCESSED',
+        processedAt: FieldValue.serverTimestamp(),
+        processingResult: sandbox ? 'SANDBOX_FINANCIAL_EVENT_ISOLATED' : 'FINANCIAL_ENVIRONMENT_UNCONFIRMED',
+        financialEffectsApplied: false,
+      });
+    });
+    return;
   }
 
   switch (event.event) {
