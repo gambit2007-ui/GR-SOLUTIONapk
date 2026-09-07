@@ -49,6 +49,51 @@ export interface CredigrupoRuntimeDiagnostics {
   investor: 'GR SOLUTION';
 }
 
+export interface CredigrupoHomologationAuditCustomer {
+  customer: {
+    id: string;
+    name?: string;
+    exists: boolean;
+    environment?: string;
+    testData?: boolean;
+    archived?: boolean;
+  };
+  borrowerLinks: Array<{ id: string; borrowerId?: string }>;
+  simulations: Array<{ id: string; externalId?: string; usedByOperationId?: string }>;
+  operations: Array<{ id: string; proposalId?: string }>;
+  linkedCounts: {
+    contracts: number;
+    cashMovements: number;
+    ledgerEntries: number;
+    realContracts: number;
+    realCashMovements: number;
+    realLedgerEntries: number;
+  };
+}
+
+export interface CredigrupoHomologationAudit {
+  scope: { environment: 'sandbox'; testData: true; readOnly: true };
+  customers: CredigrupoHomologationAuditCustomer[];
+  robsonLeandro: {
+    localCustomerIds: string[];
+    hasSeparateLocalCustomer: boolean;
+    result: 'SEPARATE_LOCAL_CUSTOMER' | 'NO_LOCAL_CUSTOMER_WITH_NAME';
+  };
+  totals: {
+    customerIds: number;
+    borrowerIds: number;
+    simulations: number;
+    operations: number;
+    proposals: number;
+    contractsLinked: number;
+    cashMovementsLinked: number;
+    ledgerEntriesLinked: number;
+    realContractsAffected: number;
+    realCashMovementsAffected: number;
+    realLedgerEntriesAffected: number;
+  };
+}
+
 export interface CredigrupoInstallmentPixResult {
   brCode: string;
   qrCodeImage: string;

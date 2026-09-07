@@ -529,6 +529,7 @@ const App: React.FC = () => {
             cashMovementsStatus={cashMovementsStatus}
             caixa={caixa}
             currentUserUid={user?.uid}
+            isAdmin={accessControl.role?.toUpperCase() === 'ADMIN'}
             onNavigateToLoan={navigateToLoan}
             onDownloadBackup={handleDownloadBackup}
             showToast={showToast}

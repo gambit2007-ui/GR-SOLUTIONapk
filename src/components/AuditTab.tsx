@@ -10,8 +10,8 @@ import {
   listRecentOperationalErrors,
   type OperationalDiagnosticEvent,
 } from '../services/operationalLoggingService';
-import { getCredigrupoRuntimeDiagnostics } from '../services/credigrupoService';
-import type { CredigrupoRuntimeDiagnostics } from '../lib/creditProviders/types';
+import { auditCredigrupoHomologation, getCredigrupoRuntimeDiagnostics } from '../services/credigrupoService';
+import type { CredigrupoHomologationAudit, CredigrupoRuntimeDiagnostics } from '../lib/creditProviders/types';
 import { formatDateTimeBR } from '../utils/dateTime';
 import { resolveCashDelta } from '../utils/domainParsers';
 import { buildFinancialAudit } from '../utils/financialAudit';
@@ -23,6 +23,7 @@ interface AuditTabProps {
   cashMovementsStatus: 'idle' | 'loading' | 'ready' | 'error';
   caixa: number;
   currentUserUid?: string;
+  isAdmin: boolean;
   onNavigateToLoan: (loanId: string) => void;
   onDownloadBackup: () => Promise<void>;
   showToast: (message: string, type?: 'success' | 'error') => void;
@@ -72,6 +73,7 @@ const AuditTab: React.FC<AuditTabProps> = ({
   cashMovementsStatus,
   caixa,
   currentUserUid,
+  isAdmin,
   onNavigateToLoan,
   onDownloadBackup,
   showToast,
@@ -83,6 +85,8 @@ const AuditTab: React.FC<AuditTabProps> = ({
   const [isLoadingDiagnostics, setIsLoadingDiagnostics] = useState(false);
   const [credigrupoDiagnostics, setCredigrupoDiagnostics] = useState<CredigrupoRuntimeDiagnostics | null>(null);
   const [isLoadingCredigrupoDiagnostics, setIsLoadingCredigrupoDiagnostics] = useState(false);
+  const [homologationAudit, setHomologationAudit] = useState<CredigrupoHomologationAudit | null>(null);
+  const [isLoadingHomologationAudit, setIsLoadingHomologationAudit] = useState(false);
   const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
   const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
   const [selectedCashMovement, setSelectedCashMovement] = useState<CashMovement | null>(null);
@@ -150,6 +154,21 @@ const AuditTab: React.FC<AuditTabProps> = ({
       showToast('Somente administradores podem consultar o runtime', 'error');
     } finally {
       setIsLoadingCredigrupoDiagnostics(false);
+    }
+  };
+
+  const handleAuditCredigrupoHomologation = async () => {
+    if (!isAdmin || isLoadingHomologationAudit) return;
+    setIsLoadingHomologationAudit(true);
+    try {
+      const result = await auditCredigrupoHomologation();
+      setHomologationAudit(result.audit);
+      showToast('Auditoria de homologacao concluida sem alteracoes', 'success');
+    } catch (error) {
+      console.error('Falha ao auditar homologacao Credigrupo:', error);
+      showToast('Nao foi possivel consultar a auditoria de homologacao', 'error');
+    } finally {
+      setIsLoadingHomologationAudit(false);
     }
   };
 
@@ -258,14 +277,24 @@ const AuditTab: React.FC<AuditTabProps> = ({
                 ? 'Carregando diagnosticos...'
                 : diagnosticEvents === null ? 'Ver diagnosticos recentes' : 'Ocultar diagnosticos'}
             </button>
-            <button
-              type="button"
-              onClick={() => { void handleLoadCredigrupoDiagnostics(); }}
-              disabled={isLoadingCredigrupoDiagnostics}
-              className="mt-3 ml-4 text-[8px] font-black uppercase tracking-widest text-zinc-500 hover:text-[#BF953F] disabled:opacity-50"
-            >
-              {isLoadingCredigrupoDiagnostics ? 'Verificando runtime...' : 'Diagnosticar runtime Credigrupo'}
-            </button>
+            {isAdmin && <>
+              <button
+                type="button"
+                onClick={() => { void handleLoadCredigrupoDiagnostics(); }}
+                disabled={isLoadingCredigrupoDiagnostics}
+                className="mt-3 ml-4 text-[8px] font-black uppercase tracking-widest text-zinc-500 hover:text-[#BF953F] disabled:opacity-50"
+              >
+                {isLoadingCredigrupoDiagnostics ? 'Verificando runtime...' : 'Diagnosticar runtime Credigrupo'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { void handleAuditCredigrupoHomologation(); }}
+                disabled={isLoadingHomologationAudit}
+                className="mt-3 ml-4 text-[8px] font-black uppercase tracking-widest text-zinc-500 hover:text-[#BF953F] disabled:opacity-50"
+              >
+                {isLoadingHomologationAudit ? 'Auditando homologacao...' : 'Auditar dados de homologacao'}
+              </button>
+            </>}
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 min-w-0 lg:min-w-[520px]">
@@ -327,6 +356,63 @@ const AuditTab: React.FC<AuditTabProps> = ({
           <pre className="mt-4 overflow-x-auto border-t border-zinc-900 pt-4 text-[9px] leading-relaxed text-zinc-400">
             {JSON.stringify(credigrupoDiagnostics, null, 2)}
           </pre>
+        )}
+
+        {homologationAudit && (
+          <div className="mt-4 border-t border-zinc-900 pt-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-[8px] font-black uppercase tracking-widest text-[#BF953F]">Auditoria de homologacao Credigrupo</p>
+                <p className="mt-1 text-[8px] uppercase tracking-wider text-zinc-600">Somente leitura: sandbox e dados de teste explicitamente identificados</p>
+              </div>
+              <p className="text-[8px] font-black uppercase tracking-widest text-zinc-500">
+                Robson Leandro possui outro cliente local: <span className={homologationAudit.robsonLeandro.hasSeparateLocalCustomer ? 'text-red-400' : 'text-emerald-500'}>{homologationAudit.robsonLeandro.hasSeparateLocalCustomer ? 'SIM' : 'NAO'}</span>
+              </p>
+            </div>
+
+            <div className="mt-4 grid grid-cols-2 gap-2 lg:grid-cols-5">
+              {[
+                ['Clientes sandbox', homologationAudit.totals.customerIds],
+                ['Tomadores', homologationAudit.totals.borrowerIds],
+                ['Simulacoes', homologationAudit.totals.simulations],
+                ['Operacoes', homologationAudit.totals.operations],
+                ['Propostas', homologationAudit.totals.proposals],
+                ['Contratos reais', homologationAudit.totals.realContractsAffected],
+                ['Caixa real', homologationAudit.totals.realCashMovementsAffected],
+                ['Ledger real', homologationAudit.totals.realLedgerEntriesAffected],
+              ].map(([label, value]) => (
+                <div key={String(label)} className="rounded-xl border border-zinc-900 bg-black/40 px-3 py-2.5">
+                  <p className="text-[7px] font-black uppercase tracking-widest text-zinc-600">{label}</p>
+                  <p className={`mt-1 text-[11px] font-black ${String(label).includes('reais') || String(label).includes('real') ? Number(value) === 0 ? 'text-emerald-500' : 'text-red-500' : 'text-white'}`}>{value}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {homologationAudit.customers.map((customer) => (
+                <div key={customer.customer.id} className="rounded-2xl border border-zinc-900 bg-black/40 p-4">
+                  <div className="flex flex-col justify-between gap-2 sm:flex-row">
+                    <div>
+                      <p className="text-[9px] font-black uppercase tracking-widest text-white">{customer.customer.name || 'Cliente sem nome disponivel'}</p>
+                      <p className="mt-1 break-all text-[8px] uppercase tracking-wider text-zinc-600">customerId: {customer.customer.id}</p>
+                    </div>
+                    <p className="text-[8px] font-black uppercase tracking-widest text-[#BF953F]">{customer.customer.environment || 'sem ambiente'} / testData: {customer.customer.testData ? 'SIM' : 'NAO'}</p>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-2 text-[8px] uppercase tracking-wider text-zinc-500 md:grid-cols-2">
+                    <p className="break-all">Borrower IDs: {customer.borrowerLinks.map((borrower) => borrower.borrowerId || borrower.id).join(', ') || 'Nenhum'}</p>
+                    <p className="break-all">Simulation IDs: {customer.simulations.map((simulation) => simulation.id).join(', ') || 'Nenhuma'}</p>
+                    <p className="break-all">External IDs: {customer.simulations.map((simulation) => simulation.externalId).filter(Boolean).join(', ') || 'Nenhum'}</p>
+                    <p className="break-all">Operation IDs: {customer.operations.map((operation) => operation.id).join(', ') || 'Nenhuma'}</p>
+                    <p className="break-all">Proposal IDs: {customer.operations.map((operation) => operation.proposalId).filter(Boolean).join(', ') || 'Nenhuma'}</p>
+                    <p>Vinculos: {customer.linkedCounts.contracts} contrato(s), {customer.linkedCounts.cashMovements} movimento(s) de caixa, {customer.linkedCounts.ledgerEntries} registro(s) de ledger</p>
+                  </div>
+                </div>
+              ))}
+              {homologationAudit.customers.length === 0 && (
+                <p className="py-4 text-center text-[8px] font-black uppercase tracking-widest text-zinc-600">Nenhum dado sandbox explicitamente marcado como teste foi encontrado</p>
+              )}
+            </div>
+          </div>
         )}
       </div>
 
