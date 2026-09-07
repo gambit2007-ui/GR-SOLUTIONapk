@@ -177,6 +177,27 @@ describe('HTTP webhook Credigrupo com raw body', () => {
     expect(context.schedule).not.toHaveBeenCalled();
   });
 
+  it('nao processa loan.signed quando o HMAC e invalido', async () => {
+    const rawBody = Buffer.from(JSON.stringify({
+      event: 'loan.signed',
+      partnerId: 'partner-probe',
+      timestamp: '2026-09-03T14:37:09.000Z',
+      data: {
+        proposalId: 'proposal-signed',
+        requestId: 'request-signed',
+        signedAt: '2026-09-03T14:37:09.000Z',
+      },
+    }));
+    const context = createDependencies();
+
+    const response = await invokeWebhook(rawBody, context.dependencies, `sha256=${'0'.repeat(64)}`);
+
+    expect(response.status).toBe(401);
+    expect(context.registerEvent).not.toHaveBeenCalled();
+    expect(context.processEvent).not.toHaveBeenCalled();
+    expect(context.schedule).not.toHaveBeenCalled();
+  });
+
   it('aceita exclusivamente o prefixo e digest no formato oficial', async () => {
     const rawBody = Buffer.from(JSON.stringify(payload));
     const digest = sign(rawBody).slice('sha256='.length);

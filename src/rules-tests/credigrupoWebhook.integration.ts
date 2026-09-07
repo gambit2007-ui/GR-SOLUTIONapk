@@ -1,6 +1,7 @@
 import { getApps, deleteApp } from 'firebase-admin/app';
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { CredigrupoClient } from '../../api/_lib/credit-providers/credigrupo/client';
 import type { CredigrupoWebhookEvent } from '../../api/_lib/credit-providers/credigrupo/webhook';
 
 const PROJECT_ID = 'demo-gr-solution-credigrupo';
@@ -10,6 +11,41 @@ let registerCredigrupoWebhookEvent: typeof import('../../api/_lib/credit-provide
 let recoverCredigrupoCcbSigningLinksFromInbox: typeof import('../../api/_lib/credit-providers/credigrupo/signingLinkRecovery').recoverCredigrupoCcbSigningLinksFromInbox;
 let resolveCredigrupoFundingInvestor: typeof import('../../api/_lib/credit-providers/credigrupo/grInvestorSettings').resolveCredigrupoFundingInvestor;
 let reserveCredigrupoOperation: typeof import('../../api/_lib/credit-providers/credigrupo/store').reserveCredigrupoOperation;
+
+const forbiddenProviderCalls = [
+  vi.spyOn(CredigrupoClient.prototype, 'registerBorrower').mockImplementation(() => {
+    throw new Error('FORBIDDEN_PROVIDER_CALL_IN_POST_SIGNATURE_EVENT');
+  }),
+  vi.spyOn(CredigrupoClient.prototype, 'simulateLoan').mockImplementation(() => {
+    throw new Error('FORBIDDEN_PROVIDER_CALL_IN_POST_SIGNATURE_EVENT');
+  }),
+  vi.spyOn(CredigrupoClient.prototype, 'createLoan').mockImplementation(() => {
+    throw new Error('FORBIDDEN_PROVIDER_CALL_IN_POST_SIGNATURE_EVENT');
+  }),
+  vi.spyOn(CredigrupoClient.prototype, 'createInstallmentPix').mockImplementation(() => {
+    throw new Error('FORBIDDEN_PROVIDER_CALL_IN_POST_SIGNATURE_EVENT');
+  }),
+  vi.spyOn(CredigrupoClient.prototype, 'testPayLoan').mockImplementation(() => {
+    throw new Error('FORBIDDEN_PROVIDER_CALL_IN_POST_SIGNATURE_EVENT');
+  }),
+  vi.spyOn(CredigrupoClient.prototype, 'testPayInstallment').mockImplementation(() => {
+    throw new Error('FORBIDDEN_PROVIDER_CALL_IN_POST_SIGNATURE_EVENT');
+  }),
+];
+
+const expectNoProviderOrFinancialEffects = async () => {
+  forbiddenProviderCalls.forEach((providerCall) => expect(providerCall).not.toHaveBeenCalled());
+  const [operations, loans, cashMovements, ledger] = await Promise.all([
+    db.collection('creditOperations').get(),
+    db.collection('loans').get(),
+    db.collection('cashMovement').get(),
+    db.collection('creditInvestorLedger').get(),
+  ]);
+  expect(operations.size).toBe(1);
+  expect(loans.size).toBe(0);
+  expect(cashMovements.size).toBe(0);
+  expect(ledger.size).toBe(0);
+};
 
 beforeAll(async () => {
   await Promise.all(getApps().map((app) => deleteApp(app)));
@@ -28,6 +64,7 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  forbiddenProviderCalls.forEach((providerCall) => providerCall.mockClear());
   const collections = await db.listCollections();
   await Promise.all(collections.map(async (collection) => {
     const documents = await collection.listDocuments();
@@ -36,6 +73,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  forbiddenProviderCalls.forEach((providerCall) => providerCall.mockRestore());
   await Promise.all(getApps().map((app) => deleteApp(app)));
 });
 
@@ -243,10 +281,150 @@ describe('processamento financeiro do webhook Credigrupo', () => {
       investorSignUrl: 'https://app.zapsign.com.br/b',
     });
     await runEvent('loan-signed', { event: 'loan.signed', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { proposalId: 'proposal-1', requestId: 'request-1', signedAt: paidEvent.timestamp } });
-    expect((await db.doc('creditOperations/operation-1').get()).data()?.status).toBe('SIGNED');
+    expect((await db.doc('creditOperations/operation-1').get()).data()).toMatchObject({
+      status: 'SIGNED',
+      externalStatus: 'accepted',
+      formalizationStatus: 'completed',
+    });
     await runEvent('loan-cancelled', { event: 'loan.cancelled', partnerId: 'partner-1', timestamp: paidEvent.timestamp, data: { proposalId: 'proposal-1', requestId: 'request-1', cancelledAt: paidEvent.timestamp } });
     expect((await db.doc('creditOperations/operation-1').get()).data()?.status).toBe('CANCELLED');
-    expect((await db.doc('creditOperations/operation-1').get()).data()?.externalStatus).toBe('completed');
+    expect((await db.doc('creditOperations/operation-1').get()).data()?.externalStatus).toBe('accepted');
+  });
+
+  it('conclui assinatura do tomador com investidor pre-signed sem acionar provider ou financeiro', async () => {
+    await seedOwnInvestorOperation('operation-gr', {
+      proposalId: 'proposal-gr',
+      requestId: 'request-gr',
+      status: 'AWAITING_SIGNATURES',
+      externalStatus: 'accepted',
+      formalizationStatus: 'awaiting_lender_payment',
+      investorSignaturePreSigned: true,
+      borrowerSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/borrower-token',
+    });
+
+    const event = await runEvent('loan-signed-pre-signed', {
+      event: 'loan.signed',
+      partnerId: 'partner-1',
+      timestamp: paidEvent.timestamp,
+      data: {
+        proposalId: 'proposal-gr',
+        requestId: 'request-gr',
+        signedAt: paidEvent.timestamp,
+        signedCcbUrl: 'https://storage.supabase.co/object/public/ccb/signed.pdf',
+      },
+    });
+
+    expect((await db.doc('creditOperations/operation-gr').get()).data()).toMatchObject({
+      proposalId: 'proposal-gr',
+      requestId: 'request-gr',
+      status: 'SIGNED',
+      externalStatus: 'accepted',
+      formalizationStatus: 'completed',
+      investorSignaturePreSigned: true,
+      signedAt: paidEvent.timestamp,
+      ccbUrl: 'https://storage.supabase.co/object/public/ccb/signed.pdf',
+    });
+    expect((await db.doc('creditOperations/operation-gr').get()).data()?.investorSignUrl).toBeUndefined();
+    expect(event.data()).toMatchObject({
+      status: 'PROCESSED',
+      processingResult: 'LIFECYCLE_ADVANCED',
+      stateBefore: 'AWAITING_SIGNATURES',
+      stateTarget: 'SIGNED',
+    });
+    await expectNoProviderOrFinancialEffects();
+  });
+
+  it('ignora loan.signed duplicado sem repetir efeitos ou alterar a proposta', async () => {
+    await seedOwnInvestorOperation('operation-gr', {
+      proposalId: 'proposal-gr',
+      requestId: 'request-gr',
+      status: 'AWAITING_SIGNATURES',
+      investorSignaturePreSigned: true,
+    });
+    const signedEvent: CredigrupoWebhookEvent = {
+      event: 'loan.signed',
+      partnerId: 'partner-1',
+      timestamp: paidEvent.timestamp,
+      data: { proposalId: 'proposal-gr', requestId: 'request-gr', signedAt: paidEvent.timestamp },
+    };
+
+    await runEvent('loan-signed-first', signedEvent);
+    const duplicate = await runEvent('loan-signed-duplicate', signedEvent);
+
+    expect((await db.doc('creditOperations/operation-gr').get()).data()).toMatchObject({
+      proposalId: 'proposal-gr',
+      status: 'SIGNED',
+      externalStatus: 'accepted',
+      formalizationStatus: 'completed',
+    });
+    expect(duplicate.data()).toMatchObject({
+      status: 'PROCESSED',
+      processingResult: 'IGNORED_DUPLICATE_EVENT',
+      stateBefore: 'SIGNED',
+      stateTarget: 'SIGNED',
+    });
+    await expectNoProviderOrFinancialEffects();
+  });
+
+  it('nao regride SIGNED ao receber CCB antiga fora de ordem', async () => {
+    await seedOwnInvestorOperation('operation-gr', {
+      proposalId: 'proposal-gr',
+      requestId: 'request-gr',
+      status: 'SIGNED',
+      externalStatus: 'accepted',
+      formalizationStatus: 'completed',
+      investorSignaturePreSigned: true,
+    });
+
+    const stale = await runEvent('ccb-ready-stale', {
+      event: 'ccb_ready_for_signature',
+      partnerId: 'partner-1',
+      timestamp: paidEvent.timestamp,
+      data: {
+        proposalId: 'proposal-gr',
+        requestId: 'request-gr',
+        borrowerSignUrl: 'https://sandbox.app.zapsign.com.br/verificar/old-token',
+        investorSignUrl: 'pre-signed',
+      },
+    });
+
+    expect((await db.doc('creditOperations/operation-gr').get()).data()).toMatchObject({
+      proposalId: 'proposal-gr',
+      status: 'SIGNED',
+      externalStatus: 'accepted',
+      formalizationStatus: 'completed',
+      investorSignaturePreSigned: true,
+    });
+    expect(stale.data()).toMatchObject({ processingResult: 'IGNORED_STALE_EVENT' });
+    await expectNoProviderOrFinancialEffects();
+  });
+
+  it('nao regride FUNDED ao receber loan.signed antigo', async () => {
+    await seedOwnInvestorOperation('operation-gr', {
+      proposalId: 'proposal-gr',
+      requestId: 'request-gr',
+      status: 'FUNDED',
+      externalStatus: 'funded',
+      formalizationStatus: 'funded',
+      localLoanId: 'loan-existing',
+    });
+
+    const stale = await runEvent('loan-signed-after-funded', {
+      event: 'loan.signed',
+      partnerId: 'partner-1',
+      timestamp: paidEvent.timestamp,
+      data: { proposalId: 'proposal-gr', requestId: 'request-gr', signedAt: paidEvent.timestamp },
+    });
+
+    expect((await db.doc('creditOperations/operation-gr').get()).data()).toMatchObject({
+      proposalId: 'proposal-gr',
+      status: 'FUNDED',
+      externalStatus: 'funded',
+      formalizationStatus: 'funded',
+      localLoanId: 'loan-existing',
+    });
+    expect(stale.data()).toMatchObject({ processingResult: 'IGNORED_STALE_EVENT' });
+    await expectNoProviderOrFinancialEffects();
   });
 
   it('persiste links oficiais de sandbox e preserva diagnostico sem tokens', async () => {

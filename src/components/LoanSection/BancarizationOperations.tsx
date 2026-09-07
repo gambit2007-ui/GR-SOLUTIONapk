@@ -45,7 +45,7 @@ const statusLabel = (status: string) => ({
   CREATING: 'Criando proposta',
   AWAITING_LENDER_PAYMENT: 'Aguardando funding',
   AWAITING_SIGNATURES: 'Aguardando assinaturas',
-  SIGNED: 'Assinado, desembolsando',
+  SIGNED: 'Assinado, ativando contrato',
   FUNDED: 'Desembolsado',
   CANCELLED: 'Cancelado',
   CANCELLATION_REQUESTED: 'Cancelamento solicitado',

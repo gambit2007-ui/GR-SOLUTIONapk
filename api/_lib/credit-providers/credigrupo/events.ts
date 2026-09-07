@@ -2,6 +2,11 @@ import { FieldValue } from 'firebase-admin/firestore';
 import { applyLoanPaymentToCurrentLoan } from '../../../../src/utils/financialEngine.js';
 import { parseLoan } from '../../../../src/utils/domainParsers.js';
 import { resolveBancarizedCashDelta } from '../../../../src/utils/creditFunding.js';
+import {
+  resolveCredigrupoLifecycleTransition,
+  type CredigrupoLifecycleEventType,
+  type CredigrupoLifecycleTransitionOutcome,
+} from '../../../../src/lib/creditProviders/lifecycleState.js';
 import { resolveCredigrupoCcbSigningLinks, validateCredigrupoSigningUrl } from '../../../../src/lib/creditProviders/signingUrl.js';
 import type { Installment, Loan } from '../../../../src/types.js';
 import { adminDb } from '../../firebaseAdmin.js';
@@ -40,6 +45,10 @@ const markEvent = (transaction: FirebaseFirestore.Transaction, eventRef: Firebas
   transaction.set(eventRef, removeUndefined({ ...fields, updatedAt: FieldValue.serverTimestamp() }), { merge: true });
 };
 
+const lifecycleProcessingResult = (outcome: CredigrupoLifecycleTransitionOutcome) => (
+  outcome === 'ADVANCE' ? 'LIFECYCLE_ADVANCED' : `IGNORED_${outcome}_EVENT`
+);
+
 const findInstallmentIndex = (installments: Installment[], data: Record<string, unknown>): number => {
   const installmentId = asText(data.installmentId);
   const installmentNumber = Number(data.installmentNumber || 0);
@@ -59,6 +68,21 @@ const activateFundedLoan = async (
     const operationSnapshot = await transaction.get(operationRef);
     if (!operationSnapshot.exists) throw new Error('CREDIGRUPO_OPERATION_NOT_FOUND');
     const operation = operationSnapshot.data() as StoredCredigrupoOperation;
+    const proposalId = asText(event.data.proposalId);
+    if (!proposalId || asText(operation.proposalId) !== proposalId) {
+      throw new Error('CREDIGRUPO_OPERATION_PROPOSAL_MISMATCH');
+    }
+    const transition = resolveCredigrupoLifecycleTransition(operation.status, 'loan.funded');
+    if (transition.outcome !== 'ADVANCE') {
+      markEvent(transaction, eventRef, {
+        status: 'PROCESSED',
+        processedAt: FieldValue.serverTimestamp(),
+        processingResult: lifecycleProcessingResult(transition.outcome),
+        stateBefore: operation.status,
+        stateTarget: transition.targetStatus,
+      });
+      return;
+    }
     const loanId = operation.localLoanId || operationRef.id;
     const loanRef = adminDb.doc(`loans/${loanId}`);
     const counterRef = adminDb.doc('settings/contractCounter');
@@ -126,6 +150,7 @@ const activateFundedLoan = async (
           proposalId: operation.proposalId,
           requestId: operation.requestId,
           status: 'funded',
+          formalizationStatus: 'funded',
           fundingStatus: 'funded',
           borrowerSignUrl: operation.borrowerSignUrl,
           investorSignUrl: operation.investorSignUrl,
@@ -179,6 +204,7 @@ const activateFundedLoan = async (
       localLoanId: loanId,
       status: 'FUNDED',
       externalStatus: 'funded',
+      formalizationStatus: 'funded',
       fundedAt: processingTimestamp,
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
@@ -195,6 +221,62 @@ const updateOperationState = async (
   await adminDb.runTransaction(async (transaction) => {
     transaction.set(operationDocument.ref, removeUndefined({ ...fields, updatedAt: FieldValue.serverTimestamp() }), { merge: true });
     markEvent(transaction, eventRef, { ...eventFields, status: 'PROCESSED', processedAt: FieldValue.serverTimestamp() });
+  });
+};
+
+const updateOperationLifecycleState = async (
+  operationDocument: FirebaseFirestore.QueryDocumentSnapshot,
+  eventRef: FirebaseFirestore.DocumentReference,
+  event: CredigrupoWebhookEvent,
+  eventType: CredigrupoLifecycleEventType,
+  fields: Record<string, unknown>,
+  eventFields: Record<string, unknown> = {},
+) => {
+  await adminDb.runTransaction(async (transaction) => {
+    const currentSnapshot = await transaction.get(operationDocument.ref);
+    if (!currentSnapshot.exists) throw new Error('CREDIGRUPO_OPERATION_NOT_FOUND');
+    const currentOperation = currentSnapshot.data() as StoredCredigrupoOperation;
+    const proposalId = asText(event.data.proposalId);
+    if (!proposalId || asText(currentOperation.proposalId) !== proposalId) {
+      throw new Error('CREDIGRUPO_OPERATION_PROPOSAL_MISMATCH');
+    }
+    const requestId = asText(event.data.requestId);
+    if (requestId && currentOperation.requestId && requestId !== currentOperation.requestId) {
+      throw new Error('CREDIGRUPO_OPERATION_REQUEST_MISMATCH');
+    }
+
+    const transition = resolveCredigrupoLifecycleTransition(currentOperation.status, eventType);
+    if (transition.outcome === 'ADVANCE') {
+      transaction.set(operationDocument.ref, removeUndefined({
+        ...fields,
+        status: transition.targetStatus,
+        externalStatus: transition.externalStatus,
+        formalizationStatus: transition.formalizationStatus,
+        updatedAt: FieldValue.serverTimestamp(),
+      }), { merge: true });
+    } else if (transition.outcome === 'DUPLICATE' && eventType === 'ccb_ready_for_signature') {
+      const missingSigningMetadata = removeUndefined({
+        borrowerSignUrl: currentOperation.borrowerSignUrl ? undefined : fields.borrowerSignUrl,
+        investorSignUrl: currentOperation.investorSignUrl ? undefined : fields.investorSignUrl,
+        investorSignaturePreSigned: currentOperation.investorSignaturePreSigned === undefined
+          ? fields.investorSignaturePreSigned
+          : undefined,
+      });
+      if (Object.keys(missingSigningMetadata).length > 0) {
+        transaction.set(operationDocument.ref, {
+          ...missingSigningMetadata,
+          updatedAt: FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+    markEvent(transaction, eventRef, {
+      ...eventFields,
+      status: 'PROCESSED',
+      processedAt: FieldValue.serverTimestamp(),
+      processingResult: lifecycleProcessingResult(transition.outcome),
+      stateBefore: currentOperation.status,
+      stateTarget: transition.targetStatus,
+    });
   });
 };
 
@@ -479,8 +561,7 @@ export const processCredigrupoEvent = async (
   switch (event.event) {
     case 'ccb_ready_for_signature': {
       const links = resolveCredigrupoCcbSigningLinks(event.data.borrowerSignUrl, event.data.investorSignUrl);
-      await updateOperationState(operation, eventRef, {
-        status: 'AWAITING_SIGNATURES',
+      await updateOperationLifecycleState(operation, eventRef, event, 'ccb_ready_for_signature', {
         borrowerSignUrl: links.borrower?.url,
         investorSignUrl: links.investor?.url,
         investorSignaturePreSigned: links.investorPreSigned,
@@ -489,13 +570,17 @@ export const processCredigrupoEvent = async (
       });
       return;
     }
-    case 'loan.signed':
-      await updateOperationState(operation, eventRef, {
-        status: 'SIGNED',
-        externalStatus: 'completed',
+    case 'loan.signed': {
+      const signedCcbUrl = safeUrl(event.data.signedCcbUrl, allowedDocumentHosts);
+      const hasSignedCcbUrl = Boolean(asText(event.data.signedCcbUrl));
+      await updateOperationLifecycleState(operation, eventRef, event, 'loan.signed', {
         signedAt: asText(event.data.signedAt),
-      });
+        ccbUrl: signedCcbUrl,
+      }, hasSignedCcbUrl && !signedCcbUrl ? {
+        signedCcbUrlDiagnostic: { code: 'DOCUMENT_URL_REJECTED' },
+      } : {});
       return;
+    }
     case 'loan.funded':
       await activateFundedLoan(operation, eventRef, event);
       return;
@@ -509,8 +594,7 @@ export const processCredigrupoEvent = async (
       await recordInvestorRepayment(operation, eventRef, event);
       return;
     case 'loan.cancelled':
-      await updateOperationState(operation, eventRef, {
-        status: 'CANCELLED',
+      await updateOperationLifecycleState(operation, eventRef, event, 'loan.cancelled', {
         cancelledAt: asText(event.data.cancelledAt),
       });
       return;
