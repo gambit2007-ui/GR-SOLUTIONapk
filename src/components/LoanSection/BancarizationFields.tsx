@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { isSandboxTestCustomer } from '../../lib/creditProviders/dataScope';
 import { CheckCircle, Loader2, ShieldCheck } from 'lucide-react';
 import type { Customer } from '../../types';
 import type {
@@ -78,6 +79,7 @@ const currencyFromCents = (value: number) =>
   (Number(value || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, terms, value, onChange, showToast }) => {
+  const sandboxCustomerAllowed = Boolean(customer && isSandboxTestCustomer(customer));
   const [loadingBorrower, setLoadingBorrower] = useState(false);
   const [syncingBorrower, setSyncingBorrower] = useState(false);
   const [simulating, setSimulating] = useState(false);
@@ -106,6 +108,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
   }, [customer?.id]);
 
   const handleBorrowerSync = async () => {
+    if (!sandboxCustomerAllowed) return;
     if (!customer) {
       showToast('Selecione o cliente', 'error');
       return;
@@ -135,6 +138,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
   };
 
   const handleSimulation = async () => {
+    if (!sandboxCustomerAllowed) return;
     if (!customer || value.borrower?.kycStatus !== 'approved') {
       showToast('O KYC do tomador precisa estar aprovado', 'error');
       return;
@@ -179,7 +183,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
           <ShieldCheck size={16} className="text-[#BF953F]" />
           <div>
             <p className="text-[9px] font-black text-[#F5D77B] uppercase tracking-widest">Credigrupo - Sandbox</p>
-            <p className="text-[7px] text-zinc-500 uppercase mt-1">Nenhuma operacao real sera executada</p>
+            <p className="text-[9px] text-amber-300 mt-1">Ambiente Credigrupo Sandbox. Não utilizar dados ou operações reais.</p>
           </div>
         </div>
       </div>
@@ -195,7 +199,8 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
         </div>
       </div>
 
-      <div className="pt-3 border-t border-zinc-800">
+      {!sandboxCustomerAllowed && <p role="alert" className="text-[10px] text-amber-300">Selecione um cliente de teste ativo, identificado para sandbox pelo administrador.</p>}
+      <fieldset disabled={!sandboxCustomerAllowed} className="pt-3 border-t border-zinc-800 disabled:opacity-40">
         <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-3">Dados adicionais do tomador</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input className={inputClass} placeholder="E-MAIL" value={value.email} onChange={(e) => patch({ email: e.target.value, borrower: undefined, simulation: undefined })} />
@@ -229,9 +234,9 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
             <option value="CPF">CPF</option><option value="CNPJ">CNPJ</option><option value="EMAIL">E-MAIL</option><option value="PHONE">TELEFONE</option><option value="RANDOM">ALEATORIA</option>
           </select>
         </div>
-      </div>
+      </fieldset>
 
-      <button type="button" onClick={() => void handleBorrowerSync()} disabled={loadingBorrower || syncingBorrower || !customer} className="w-full py-3 rounded-xl border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
+      <button type="button" onClick={() => void handleBorrowerSync()} disabled={!sandboxCustomerAllowed || loadingBorrower || syncingBorrower || !customer} className="w-full py-3 rounded-xl border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
         {(loadingBorrower || syncingBorrower) && <Loader2 size={12} className="animate-spin" />}
         {loadingBorrower ? 'Carregando tomador existente' : value.borrower ? 'Atualizar status e elegibilidade' : 'Cadastrar tomador e iniciar KYC'}
       </button>
@@ -271,7 +276,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
         </div>
       )}
 
-      <button type="button" onClick={() => void handleSimulation()} disabled={simulating || !eligibility.canSimulate} className="w-full py-3 rounded-xl bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
+      <button type="button" onClick={() => void handleSimulation()} disabled={!sandboxCustomerAllowed || simulating || !eligibility.canSimulate} className="w-full py-3 rounded-xl bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
         {simulating && <Loader2 size={12} className="animate-spin" />} Simular oficialmente
       </button>
 

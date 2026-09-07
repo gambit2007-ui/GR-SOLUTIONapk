@@ -366,7 +366,9 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     lastOperationByUid: toOptionalString(payload.lastOperationByUid),
     lastOperationByEmail: toOptionalString(payload.lastOperationByEmail),
     lastOperationByName: toOptionalString(payload.lastOperationByName),
-    hasFinancialHistory: payload.hasFinancialHistory === true,
+    hasFinancialHistory: typeof payload.hasFinancialHistory === 'boolean'
+      ? payload.hasFinancialHistory
+      : undefined,
     formalizationType,
     provider,
     funding: funding && toOptionalString(funding.investorId)
@@ -431,6 +433,8 @@ export const parseCustomer = (id: string, raw: unknown): Customer => {
       : undefined,
     createdAt: toNumber(payload.createdAt, 0) || undefined,
     archived: payload.archived === true,
+    environment: payload.environment === 'sandbox' || payload.environment === 'production' ? payload.environment : undefined,
+    testData: payload.testData === true,
     archivedAt: payload.archivedAt as Customer['archivedAt'],
     archivedByUid: toOptionalString(payload.archivedByUid),
     archivedByEmail: toOptionalString(payload.archivedByEmail),

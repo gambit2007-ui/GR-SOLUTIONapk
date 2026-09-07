@@ -64,6 +64,8 @@ beforeAll(async () => {
 });
 
 beforeEach(async () => {
+  // Production financial fixtures run exclusively inside the emulator.
+  vi.stubEnv('CREDIGRUPO_ENV', 'production');
   forbiddenProviderCalls.forEach((providerCall) => providerCall.mockClear());
   const collections = await db.listCollections();
   await Promise.all(collections.map(async (collection) => {
@@ -73,6 +75,7 @@ beforeEach(async () => {
 });
 
 afterAll(async () => {
+  vi.unstubAllEnvs();
   forbiddenProviderCalls.forEach((providerCall) => providerCall.mockRestore());
   await Promise.all(getApps().map((app) => deleteApp(app)));
 });
@@ -93,6 +96,7 @@ const paidEvent: CredigrupoWebhookEvent = {
 
 const seedOperation = async (id = 'operation-1', overrides: Record<string, unknown> = {}) => {
   await db.doc(`creditOperations/${id}`).set({
+    environment: 'production',
     formalizationType: 'BANCARIZED', provider: 'CREDIGRUPO', proposalId: 'proposal-1',
     customerId: 'customer-1', customerName: 'Cliente', customerPhone: '21999999999',
     borrowerId: 'borrower-1', investorId: 'investor-local-1', externalInvestorId: 'investor-external-1', investorName: 'Investidor',
@@ -109,6 +113,7 @@ const seedOperation = async (id = 'operation-1', overrides: Record<string, unkno
 
 const seedOwnInvestorOperation = async (id: string, overrides: Record<string, unknown> = {}) => {
   await db.doc(`creditOperations/${id}`).set({
+    environment: 'production',
     formalizationType: 'BANCARIZED', provider: 'CREDIGRUPO', proposalId: 'proposal-gr',
     customerId: 'customer-1', customerName: 'Cliente', customerPhone: '21999999999',
     borrowerId: 'borrower-1', accountMode: 'OWN_INVESTOR_KEY', investorType: 'GR', investorName: 'GR SOLUTION',
@@ -141,6 +146,38 @@ const runEvent = async (id: string, event: CredigrupoWebhookEvent) => {
 };
 
 describe('processamento financeiro do webhook Credigrupo', () => {
+  it('isola funding e parcelas sandbox sem criar contrato, caixa ou ledger, inclusive duplicados', async () => {
+    vi.stubEnv('CREDIGRUPO_ENV', 'sandbox');
+    await seedOwnInvestorOperation('sandbox-operation', { environment: 'sandbox', testData: true, proposalId: 'proposal-1' });
+    await db.doc('settings/caixa').set({ value: 1234 });
+    const funded: CredigrupoWebhookEvent = {
+      event: 'loan.funded', partnerId: 'partner-1', timestamp: paidEvent.timestamp,
+      data: { proposalId: 'proposal-1', borrowerId: 'borrower-1', amountCents: 10000 },
+    };
+    await runEvent('sandbox-funded', funded);
+    await runEvent('sandbox-funded-again', funded);
+    await runEvent('sandbox-paid', paidEvent);
+    await runEvent('sandbox-paid-again', paidEvent);
+    await runEvent('sandbox-repaid', { ...paidEvent, event: 'installment.investor_repaid' });
+    expect((await db.doc('creditOperations/sandbox-operation').get()).data()?.status).toBe('FUNDED');
+    expect((await db.doc('settings/caixa').get()).data()?.value).toBe(1234);
+    expect((await db.doc('settings/contractCounter').get()).exists).toBe(false);
+    expect((await db.doc('creditWebhookEvents/sandbox-paid').get()).data()).toMatchObject({
+      status: 'PROCESSED', processingResult: 'SANDBOX_FINANCIAL_EVENT_ISOLATED', financialEffectsApplied: false,
+    });
+    await expectNoProviderOrFinancialEffects();
+  });
+
+  it('quarentena financeira para operacao sem ambiente e preserva arquivadas', async () => {
+    await seedOperation('operation-1', { archived: true });
+    await runEvent('archived-paid', paidEvent);
+    expect((await db.doc('creditWebhookEvents/archived-paid').get()).data()?.processingResult).toBe('ARCHIVED_HOMOLOGATION_EVENT');
+    await db.doc('creditOperations/operation-1').set({ archived: false, environment: null }, { merge: true });
+    await runEvent('unknown-paid', paidEvent);
+    expect((await db.doc('creditWebhookEvents/unknown-paid').get()).data()?.processingResult).toBe('FINANCIAL_ENVIRONMENT_UNCONFIRMED');
+    await expectNoProviderOrFinancialEffects();
+  });
+
   it('resolve capital GR somente pelo vinculo configurado e preserva externo', async () => {
     await db.doc('creditInvestors/gr-local-1').set({
       externalId: 'gr-external-1', provider: 'CREDIGRUPO', capitalOrigin: 'GR', name: 'GR Solution', kycStatus: 'approved', active: true,
@@ -165,7 +202,9 @@ describe('processamento financeiro do webhook Credigrupo', () => {
   });
 
   it('reserva BANCARIZED com a GR sem criar investorId ficticio', async () => {
+    await db.doc('clientes/customer-1').set({ environment: 'sandbox', testData: true, name: 'Fixture' });
     await db.doc('creditSimulations/simulation-gr').set({
+      environment: 'sandbox', testData: true,
       customerId: 'customer-1', customerName: 'Cliente', borrowerId: 'borrower-1', accountMode: 'OWN_INVESTOR_KEY', investorType: 'GR',
       request: { customerId: 'customer-1', fundingSource: 'GR', amountCents: 10000, installments: 1, interestRate: 10, firstPaymentDate: '2026-09-25', frequency: 'monthly', interestType: 'simple' },
       response: { externalId: 'simulation-external-1', interestRate: 10, simulation: { netAmount: 10000, grossAmount: 11000, totalAmount: 11000, totalInterest: 1000, totalIof: 0, totalFee: 0, installments: [] } },

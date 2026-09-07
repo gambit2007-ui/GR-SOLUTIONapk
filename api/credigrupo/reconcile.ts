@@ -14,6 +14,7 @@ import {
   isCredigrupoDiscoveryAlreadyReconciled,
   type CredigrupoConfirmedLoanEvidence,
 } from '../_lib/credit-providers/credigrupo/loanDiscovery.js';
+import { buildHomologationAuditSummary, type HomologationAuditDocument } from '../_lib/credit-providers/credigrupo/homologationAudit.js';
 import { requireCredigrupoProposalId } from '../_lib/credit-providers/credigrupo/operationGuards.js';
 import { syncCredigrupoInstallments } from '../_lib/credit-providers/credigrupo/installments.js';
 import { processStoredCredigrupoEvent } from '../_lib/credit-providers/credigrupo/webhookProcessor.js';
@@ -240,6 +241,55 @@ const reconcileConfirmedLoan = async (
   };
 };
 
+const toAuditDocument = (document: FirebaseFirestore.QueryDocumentSnapshot): HomologationAuditDocument => ({
+  id: document.id,
+  data: document.data(),
+});
+
+const fetchDocumentsByLinkedIds = async (collection: string, field: string, ids: string[]) => {
+  const uniqueIds = [...new Set(ids.filter(Boolean))].slice(0, 30);
+  const batches = Array.from({ length: Math.ceil(uniqueIds.length / 10) }, (_, index) => uniqueIds.slice(index * 10, index * 10 + 10));
+  const snapshots = await Promise.all(batches.map((values) => (
+    adminDb.collection(collection).where(field, 'in', values).limit(50).get()
+  )));
+  return snapshots.flatMap((snapshot) => snapshot.docs);
+};
+
+const auditHomologationOperation = async (operation: StoredCredigrupoOperation) => {
+  const customerRef = adminDb.doc(`clientes/${operation.customerId}`);
+  const [customerSnapshot, borrowerSnapshot, simulationSnapshot, operationSnapshot, loanSnapshot] = await Promise.all([
+    customerRef.get(),
+    adminDb.collection('creditBorrowers').where('customerId', '==', operation.customerId).limit(50).get(),
+    adminDb.collection('creditSimulations').where('customerId', '==', operation.customerId).limit(50).get(),
+    adminDb.collection('creditOperations').where('customerId', '==', operation.customerId).limit(50).get(),
+    adminDb.collection('loans').where('customerId', '==', operation.customerId).limit(50).get(),
+  ]);
+  const operationIds = operationSnapshot.docs.map((document) => document.id);
+  const loanIds = loanSnapshot.docs.map((document) => document.id);
+  const proposalIds = operationSnapshot.docs.map((document) => String(document.data().proposalId || '')).filter(Boolean);
+  const [cashByLoan, cashByOperation, ledgerByLoan, ledgerByOperation, ledgerByProposal] = await Promise.all([
+    fetchDocumentsByLinkedIds('cashMovement', 'loanId', loanIds),
+    fetchDocumentsByLinkedIds('cashMovement', 'operationId', operationIds),
+    fetchDocumentsByLinkedIds('creditInvestorLedger', 'loanId', loanIds),
+    fetchDocumentsByLinkedIds('creditInvestorLedger', 'operationId', operationIds),
+    fetchDocumentsByLinkedIds('creditInvestorLedger', 'proposalId', proposalIds),
+  ]);
+  const uniqueDocuments = (documents: FirebaseFirestore.QueryDocumentSnapshot[]) => (
+    [...new Map(documents.map((document) => [document.ref.path, document])).values()]
+  );
+
+  return buildHomologationAuditSummary({
+    customerId: operation.customerId,
+    customer: customerSnapshot.data(),
+    borrowers: borrowerSnapshot.docs.map(toAuditDocument),
+    simulations: simulationSnapshot.docs.map(toAuditDocument),
+    operations: operationSnapshot.docs.map(toAuditDocument),
+    loans: loanSnapshot.docs.map(toAuditDocument),
+    cashMovements: uniqueDocuments([...cashByLoan, ...cashByOperation]).map(toAuditDocument),
+    ledgerEntries: uniqueDocuments([...ledgerByLoan, ...ledgerByOperation, ...ledgerByProposal]).map(toAuditDocument),
+  });
+};
+
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
@@ -254,6 +304,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const operationSnapshot = await operationRef.get();
     if (!operationSnapshot.exists) throw new ApiError(404, 'OPERATION_NOT_FOUND', 'Operacao nao encontrada.');
     const operation = operationSnapshot.data() as StoredCredigrupoOperation;
+    if (input.action === 'audit_homologation') {
+      return sendJson(response, 200, {
+        action: 'audit_homologation',
+        readOnly: true,
+        audit: await auditHomologationOperation(operation),
+      });
+    }
     if (input.action === 'discover_existing_loan') {
       return sendJson(response, 200, await discoverExistingLoan(operationId, operation, actor));
     }

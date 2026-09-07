@@ -53,6 +53,21 @@ afterAll(async () => {
 });
 
 describe('firestore.rules', () => {
+  it('somente admin pode classificar clientes como dados sandbox', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'settings', 'accessControl'), { enforced: true });
+      await setDoc(doc(db, 'authorizedUsers', 'admin-1'), { role: 'ADMIN' });
+      await setDoc(doc(db, 'authorizedUsers', 'user-1'), { role: 'USER' });
+      await setDoc(doc(db, 'clientes', 'customer-1'), { name: 'Fixture' });
+    });
+    const user = testEnvironment.authenticatedContext('user-1').firestore();
+    const admin = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertFails(updateDoc(doc(user, 'clientes', 'customer-1'), { environment: 'sandbox', testData: true }));
+    await assertFails(setDoc(doc(user, 'clientes', 'customer-2'), { name: 'Fixture', environment: 'sandbox', testData: true }));
+    await assertSucceeds(updateDoc(doc(admin, 'clientes', 'customer-1'), { environment: 'sandbox', testData: true }));
+    await assertSucceeds(updateDoc(doc(user, 'clientes', 'customer-1'), { name: 'Fixture atualizada' }));
+  });
   it('bloqueia leitura sem autenticacao', async () => {
     const db = testEnvironment.unauthenticatedContext().firestore();
     await assertFails(getDoc(doc(db, 'loans', 'loan-1')));
@@ -195,6 +210,132 @@ describe('firestore.rules', () => {
     const db = testEnvironment.authenticatedContext('admin-1').firestore();
     await assertFails(deleteDoc(doc(db, 'clientes', 'customer-1')));
     await assertFails(deleteDoc(doc(db, 'cashMovement', 'movement-1')));
+  });
+
+  it('permite excluir contrato direto sem recebimentos e devolver a retirada ao caixa', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'loans', 'loan-unpaid'), validLoan);
+      await setDoc(doc(db, 'cashMovement', 'loan-created-loan-unpaid'), {
+        type: 'RETIRADA',
+        amount: 100,
+        value: 100,
+        description: 'EMPRESTIMO: CLIENTE TESTE',
+        date: '2026-01-01T12:00:00.000Z',
+        loanId: 'loan-unpaid',
+        operationId: 'loan-created-loan-unpaid',
+        createdByUid: 'admin-1',
+        recordedAt: serverTimestamp(),
+      });
+      await setDoc(doc(db, 'settings', 'caixa'), { value: -100 });
+    });
+
+    const db = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertSucceeds(runTransaction(db, async (tx) => {
+      const loanRef = doc(db, 'loans', 'loan-unpaid');
+      const movementRef = doc(db, 'cashMovement', 'loan-created-loan-unpaid');
+      const cashRef = doc(db, 'settings', 'caixa');
+      await tx.get(loanRef);
+      await tx.get(movementRef);
+      await tx.get(cashRef);
+
+      tx.delete(loanRef);
+      tx.delete(movementRef);
+      tx.set(cashRef, {
+        value: 0,
+        lastDeletedMovementId: movementRef.id,
+        updatedByUid: 'admin-1',
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }));
+  });
+
+  it('impede excluir contrato que ja teve recebimento', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'loans', 'loan-paid'), {
+        ...validLoan,
+        hasFinancialHistory: true,
+        paidAmount: 10,
+      });
+      await setDoc(doc(db, 'cashMovement', 'loan-created-loan-paid'), {
+        type: 'RETIRADA',
+        amount: 100,
+        value: 100,
+        description: 'EMPRESTIMO: CLIENTE TESTE',
+        date: '2026-01-01T12:00:00.000Z',
+        loanId: 'loan-paid',
+        operationId: 'loan-created-loan-paid',
+        createdByUid: 'admin-1',
+        recordedAt: serverTimestamp(),
+      });
+      await setDoc(doc(db, 'settings', 'caixa'), { value: -100 });
+    });
+
+    const db = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertFails(runTransaction(db, async (tx) => {
+      const loanRef = doc(db, 'loans', 'loan-paid');
+      const movementRef = doc(db, 'cashMovement', 'loan-created-loan-paid');
+      const cashRef = doc(db, 'settings', 'caixa');
+      await tx.get(loanRef);
+      await tx.get(movementRef);
+      await tx.get(cashRef);
+
+      tx.delete(loanRef);
+      tx.delete(movementRef);
+      tx.set(cashRef, {
+        value: 0,
+        lastDeletedMovementId: movementRef.id,
+        updatedByUid: 'admin-1',
+        updatedAt: serverTimestamp(),
+      }, { merge: true });
+    }));
+  });
+
+  it('impede exclusao quando o historico financeiro nao foi confirmado', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      const { hasFinancialHistory: _history, ...legacyLoan } = validLoan;
+      await setDoc(doc(db, 'loans', 'loan-history-unknown'), legacyLoan);
+      await setDoc(doc(db, 'cashMovement', 'loan-created-loan-history-unknown'), {
+        type: 'RETIRADA', amount: 100, loanId: 'loan-history-unknown',
+        operationId: 'loan-created-loan-history-unknown', createdByUid: 'admin-1',
+      });
+      await setDoc(doc(db, 'settings', 'caixa'), { value: -100 });
+    });
+    const db = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertFails(runTransaction(db, async (tx) => {
+      const loanRef = doc(db, 'loans', 'loan-history-unknown');
+      const movementRef = doc(db, 'cashMovement', 'loan-created-loan-history-unknown');
+      const cashRef = doc(db, 'settings', 'caixa');
+      await tx.get(loanRef); await tx.get(movementRef); await tx.get(cashRef);
+      tx.delete(loanRef); tx.delete(movementRef);
+      tx.set(cashRef, { value: 0, lastDeletedMovementId: movementRef.id, updatedByUid: 'admin-1', updatedAt: serverTimestamp() }, { merge: true });
+    }));
+  });
+
+  it('impede usuario comum de excluir contrato direto, mesmo sem recebimentos', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'settings', 'accessControl'), { enforced: true });
+      await setDoc(doc(db, 'authorizedUsers', 'admin-1'), { role: 'ADMIN' });
+      await setDoc(doc(db, 'authorizedUsers', 'user-1'), { role: 'USER' });
+      await setDoc(doc(db, 'loans', 'loan-user-delete'), validLoan);
+      await setDoc(doc(db, 'cashMovement', 'loan-created-loan-user-delete'), {
+        type: 'RETIRADA', amount: 100, loanId: 'loan-user-delete',
+        operationId: 'loan-created-loan-user-delete', createdByUid: 'user-1',
+      });
+      await setDoc(doc(db, 'settings', 'caixa'), { value: -100 });
+    });
+    const db = testEnvironment.authenticatedContext('user-1').firestore();
+    await assertFails(runTransaction(db, async (tx) => {
+      const loanRef = doc(db, 'loans', 'loan-user-delete');
+      const movementRef = doc(db, 'cashMovement', 'loan-created-loan-user-delete');
+      const cashRef = doc(db, 'settings', 'caixa');
+      await tx.get(loanRef); await tx.get(movementRef); await tx.get(cashRef);
+      tx.delete(loanRef); tx.delete(movementRef);
+      tx.set(cashRef, { value: 0, lastDeletedMovementId: movementRef.id, updatedByUid: 'user-1', updatedAt: serverTimestamp() }, { merge: true });
+    }));
   });
 
   it('impede que o navegador crie um contrato bancarizado', async () => {
