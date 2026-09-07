@@ -34,7 +34,6 @@ import {
   applyLoanPayment,
   cancelLoan,
   createLoan,
-  deleteUnpaidLoan,
   reverseLoanPayment,
   updateLoan,
   updateLoanAndAddMovement,
@@ -392,24 +391,6 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteLoan = async (loanId: string) => {
-    try {
-      await deleteUnpaidLoan(loanId, movementActor);
-      showToast('Contrato excluido e retirada devolvida ao caixa!', 'success');
-    } catch (error: unknown) {
-      reportAppError('loan.delete', error);
-      const message = error instanceof Error && error.message === 'CONTRATO_COM_RECEBIMENTOS_NAO_PODE_SER_EXCLUIDO'
-        ? 'Contrato com recebimentos nao pode ser excluido'
-        : error instanceof Error && error.message === 'CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO'
-          ? 'Contrato bancarizado nao pode ser excluido pelo aplicativo'
-          : error instanceof Error && error.message === 'HISTORICO_FINANCEIRO_NAO_CONFIRMADO'
-            ? 'Historico financeiro nao confirmado para exclusao'
-          : 'Erro ao excluir contrato';
-      showToast(message, 'error');
-      throw error;
-    }
-  };
-
   const handleReverseLoanPayment = async (loanId: string, request: LoanPaymentReversalRequest) => {
     try {
       return await reverseLoanPayment(loanId, request, movementActor);
@@ -494,7 +475,6 @@ const App: React.FC = () => {
             onAddLoan={handleAddLoan}
             onUpdateLoan={handleUpdateLoan}
             onCancelLoan={handleCancelLoan}
-            onDeleteLoan={handleDeleteLoan}
             showToast={showToast}
             initialExpandedLoanId={selectedLoanId}
             currentActor={movementActor}

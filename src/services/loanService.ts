@@ -31,17 +31,6 @@ export interface LoanMovementPayload {
 
 const round2 = (value: number): number => Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
-const hasRecordedLoanReceipt = (loan: Loan): boolean => (
-  loan.hasFinancialHistory === true ||
-  Number(loan.paidAmount || 0) > 0 ||
-  (Array.isArray(loan.fiscalPaymentEntries) && loan.fiscalPaymentEntries.length > 0) ||
-  loan.installments.some((installment) => (
-    Number(installment.paidAmount || installment.partialPaid || 0) > 0 ||
-    Boolean(installment.paymentBreakdown) ||
-    (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
-  ))
-);
-
 type LoanOperationType = NonNullable<Loan['lastOperationType']>;
 
 const buildLoanOperationAudit = (
@@ -258,61 +247,6 @@ export const cancelLoan = async (
       updatedAt: serverTimestamp(),
       ...buildLoanOperationAudit(`cancellation-${loanId}-${Date.now()}`, 'CANCELLATION', actor),
     }));
-  });
-};
-
-export const deleteUnpaidLoan = async (
-  loanId: string,
-  actor?: MovementActor,
-): Promise<void> => {
-  if (!actor?.uid) throw new Error('USUARIO_NAO_AUTENTICADO');
-
-  await runTransaction(db, async (tx) => {
-    const loanRef = doc(db, 'loans', loanId);
-    const withdrawalId = `loan-created-${loanId}`;
-    const withdrawalRef = doc(db, 'cashMovement', withdrawalId);
-    const cashRef = doc(db, 'settings', 'caixa');
-
-    const loanSnapshot = await tx.get(loanRef);
-    if (!loanSnapshot.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
-
-    const rawLoan = loanSnapshot.data();
-    const currentLoan = parseLoan(loanSnapshot.id, rawLoan);
-    if (currentLoan.formalizationType === 'BANCARIZED' || currentLoan.provider === 'CREDIGRUPO') {
-      throw new Error('CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO');
-    }
-    if (normalizeLoanStatus(currentLoan.status) === 'COMPLETED') {
-      throw new Error('CONTRATO_QUITADO_NAO_PODE_SER_EXCLUIDO');
-    }
-    if (rawLoan.hasFinancialHistory !== false) {
-      throw new Error('HISTORICO_FINANCEIRO_NAO_CONFIRMADO');
-    }
-    if (hasRecordedLoanReceipt(currentLoan)) {
-      throw new Error('CONTRATO_COM_RECEBIMENTOS_NAO_PODE_SER_EXCLUIDO');
-    }
-
-    const withdrawalSnapshot = await tx.get(withdrawalRef);
-    if (!withdrawalSnapshot.exists()) throw new Error('RETIRADA_ORIGINAL_NAO_ENCONTRADA');
-
-    const withdrawalData = withdrawalSnapshot.data();
-    const withdrawalAmount = round2(Number(withdrawalData.amount ?? withdrawalData.value ?? 0));
-    const isOriginalWithdrawal =
-      String(withdrawalData.loanId || '') === loanId &&
-      String(withdrawalData.operationId || '') === withdrawalId &&
-      String(withdrawalData.type || '').trim().toUpperCase() === 'RETIRADA' &&
-      withdrawalAmount > 0 &&
-      withdrawalAmount === round2(Number(currentLoan.amount || 0));
-    if (!isOriginalWithdrawal) throw new Error('RETIRADA_ORIGINAL_INVALIDA');
-
-    const currentCashBalance = await readCashBalanceInTransaction(tx);
-    tx.delete(loanRef);
-    tx.delete(withdrawalRef);
-    tx.set(cashRef, {
-      value: round2(currentCashBalance + withdrawalAmount),
-      lastDeletedMovementId: withdrawalId,
-      updatedByUid: actor.uid,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
   });
 };
 
