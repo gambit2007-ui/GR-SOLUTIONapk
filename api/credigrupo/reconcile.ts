@@ -322,8 +322,12 @@ const auditSandboxHomologation = async () => {
 
 const archiveSandboxHomologation = async (
   customerId: string,
+  sourceOperation: StoredCredigrupoOperation,
   actor: { uid: string; email?: string; name?: string },
 ) => {
+  if (sourceOperation.environment !== 'sandbox' || sourceOperation.testData !== true) {
+    throw new ApiError(409, 'UNCONFIRMED_SANDBOX_RECORD', 'A operacao selecionada nao esta confirmada como sandbox.');
+  }
   const audit = await auditHomologationCustomer(customerId);
   const blocker = getHomologationArchiveBlocker(audit);
   if (blocker === 'CUSTOMER_NOT_FOUND') throw new ApiError(404, blocker, 'Cliente de homologacao nao encontrado.');
@@ -405,7 +409,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     if (input.action === 'archive_homologation') {
       return sendJson(response, 200, {
         action: 'archive_homologation',
-        ...await archiveSandboxHomologation(operation.customerId, actor),
+        ...await archiveSandboxHomologation(operation.customerId, operation, actor),
       });
     }
     if (input.action === 'discover_existing_loan') {

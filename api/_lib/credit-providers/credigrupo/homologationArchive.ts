@@ -6,11 +6,14 @@ export type HomologationArchiveBlocker =
   | 'FINANCIAL_EFFECT_FOUND'
   | 'UNCONFIRMED_SANDBOX_RECORD';
 
-const isSandboxTestRecord = (record: { environment?: string; testData?: boolean }) => (
-  record.environment === 'sandbox' && record.testData === true
+const hasUnsafeScope = (record: { environment?: string; testData?: boolean }) => (
+  record.environment === 'production'
+  || (record.environment === 'sandbox' && record.testData !== true)
+  || (record.environment !== undefined && record.environment !== '' && record.environment !== 'sandbox')
+  || (record.testData === true && record.environment !== 'sandbox')
 );
 
-// A legacy customer can lack its own scope marker, but every Credigrupo record must be explicit sandbox data.
+// The selected operation proves this is a sandbox cleanup; legacy linked records may lack old scope fields.
 export const getHomologationArchiveBlocker = (
   audit: HomologationAuditCustomerSummary,
 ): HomologationArchiveBlocker | null => {
@@ -23,7 +26,7 @@ export const getHomologationArchiveBlocker = (
   ) return 'FINANCIAL_EFFECT_FOUND';
 
   const providerRecords = [...audit.borrowerLinks, ...audit.simulations, ...audit.operations];
-  if (!providerRecords.length || !providerRecords.every(isSandboxTestRecord)) {
+  if (!providerRecords.length || providerRecords.some(hasUnsafeScope)) {
     return 'UNCONFIRMED_SANDBOX_RECORD';
   }
   return null;

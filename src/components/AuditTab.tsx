@@ -13,6 +13,7 @@ import {
 import {
   archiveCredigrupoHomologation,
   auditCredigrupoHomologation,
+  CredigrupoServiceError,
   getCredigrupoRuntimeDiagnostics,
 } from '../services/credigrupoService';
 import type { CredigrupoHomologationAudit, CredigrupoRuntimeDiagnostics } from '../lib/creditProviders/types';
@@ -192,7 +193,16 @@ const AuditTab: React.FC<AuditTabProps> = ({
       showToast(result.alreadyArchived ? 'Dados de homologacao ja estavam arquivados' : 'Dados de homologacao arquivados com seguranca', 'success');
     } catch (error) {
       console.error('Falha ao arquivar homologacao Credigrupo:', error);
-      showToast('Nao foi possivel arquivar a homologacao. Nenhum dado financeiro foi alterado.', 'error');
+      const archiveBlockers: Record<string, string> = {
+        CUSTOMER_NOT_FOUND: 'Arquivamento bloqueado: cliente de homologacao nao encontrado.',
+        NO_CREDIGRUPO_RECORDS: 'Arquivamento bloqueado: nenhum vinculo Credigrupo foi encontrado.',
+        FINANCIAL_EFFECT_FOUND: 'Arquivamento bloqueado: existe vinculo financeiro associado.',
+        UNCONFIRMED_SANDBOX_RECORD: 'Arquivamento bloqueado: a origem sandbox nao foi confirmada.',
+      };
+      const message = error instanceof CredigrupoServiceError
+        ? archiveBlockers[error.code]
+        : undefined;
+      showToast(message || 'Nao foi possivel arquivar a homologacao. Nenhum dado financeiro foi alterado.', 'error');
     } finally {
       setArchivingHomologationOperationId(null);
     }
@@ -416,33 +426,41 @@ const AuditTab: React.FC<AuditTabProps> = ({
 
             <div className="mt-4 space-y-3">
               {homologationAudit.customers.map((customer) => (
-                <div key={customer.customer.id} className="rounded-2xl border border-zinc-900 bg-black/40 p-4">
-                  <div className="flex flex-col justify-between gap-2 sm:flex-row">
-                    <div>
-                      <p className="text-[9px] font-black uppercase tracking-widest text-white">{customer.customer.name || 'Cliente sem nome disponivel'}</p>
-                      <p className="mt-1 break-all text-[8px] uppercase tracking-wider text-zinc-600">customerId: {customer.customer.id}</p>
+                (() => {
+                  const archiveOperation = customer.operations.find((operation) => operation.environment === 'sandbox' && operation.testData === true);
+                  return (
+                    <div key={customer.customer.id} className="rounded-2xl border border-zinc-900 bg-black/40 p-4">
+                      <div className="flex flex-col justify-between gap-2 sm:flex-row">
+                        <div>
+                          <p className="text-[9px] font-black uppercase tracking-widest text-white">{customer.customer.name || 'Cliente sem nome disponivel'}</p>
+                          <p className="mt-1 break-all text-[8px] uppercase tracking-wider text-zinc-600">customerId: {customer.customer.id}</p>
+                        </div>
+                        <p className="text-[8px] font-black uppercase tracking-widest text-[#BF953F]">{customer.customer.environment || 'sem ambiente'} / testData: {customer.customer.testData ? 'SIM' : 'NAO'}</p>
+                      </div>
+                      <div className="mt-3 grid grid-cols-1 gap-2 text-[8px] uppercase tracking-wider text-zinc-500 md:grid-cols-2">
+                        <p className="break-all">Borrower IDs: {customer.borrowerLinks.map((borrower) => borrower.borrowerId || borrower.id).join(', ') || 'Nenhum'}</p>
+                        <p className="break-all">Simulation IDs: {customer.simulations.map((simulation) => simulation.id).join(', ') || 'Nenhuma'}</p>
+                        <p className="break-all">External IDs: {customer.simulations.map((simulation) => simulation.externalId).filter(Boolean).join(', ') || 'Nenhum'}</p>
+                        <p className="break-all">Operation IDs: {customer.operations.map((operation) => operation.id).join(', ') || 'Nenhuma'}</p>
+                        <p className="break-all">Proposal IDs: {customer.operations.map((operation) => operation.proposalId).filter(Boolean).join(', ') || 'Nenhuma'}</p>
+                        <p>Vinculos: {customer.linkedCounts.contracts} contrato(s), {customer.linkedCounts.cashMovements} movimento(s) de caixa, {customer.linkedCounts.ledgerEntries} registro(s) de ledger</p>
+                      </div>
+                      {isAdmin && archiveOperation && (
+                        <button
+                          type="button"
+                          onClick={() => { void handleArchiveCredigrupoHomologation(archiveOperation.id, customer.customer.name || 'este cliente de teste'); }}
+                          disabled={archivingHomologationOperationId !== null}
+                          className="mt-4 rounded-xl border border-amber-500/40 px-3 py-2 text-[8px] font-black uppercase tracking-widest text-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {archivingHomologationOperationId === archiveOperation.id ? 'Arquivando homologacao...' : 'Arquivar dados de homologacao'}
+                        </button>
+                      )}
+                      {isAdmin && !archiveOperation && (
+                        <p className="mt-4 text-[8px] font-black uppercase tracking-widest text-red-400">Arquivamento bloqueado: nenhuma operacao sandbox confirmada</p>
+                      )}
                     </div>
-                    <p className="text-[8px] font-black uppercase tracking-widest text-[#BF953F]">{customer.customer.environment || 'sem ambiente'} / testData: {customer.customer.testData ? 'SIM' : 'NAO'}</p>
-                  </div>
-                  <div className="mt-3 grid grid-cols-1 gap-2 text-[8px] uppercase tracking-wider text-zinc-500 md:grid-cols-2">
-                    <p className="break-all">Borrower IDs: {customer.borrowerLinks.map((borrower) => borrower.borrowerId || borrower.id).join(', ') || 'Nenhum'}</p>
-                    <p className="break-all">Simulation IDs: {customer.simulations.map((simulation) => simulation.id).join(', ') || 'Nenhuma'}</p>
-                    <p className="break-all">External IDs: {customer.simulations.map((simulation) => simulation.externalId).filter(Boolean).join(', ') || 'Nenhum'}</p>
-                    <p className="break-all">Operation IDs: {customer.operations.map((operation) => operation.id).join(', ') || 'Nenhuma'}</p>
-                    <p className="break-all">Proposal IDs: {customer.operations.map((operation) => operation.proposalId).filter(Boolean).join(', ') || 'Nenhuma'}</p>
-                    <p>Vinculos: {customer.linkedCounts.contracts} contrato(s), {customer.linkedCounts.cashMovements} movimento(s) de caixa, {customer.linkedCounts.ledgerEntries} registro(s) de ledger</p>
-                  </div>
-                  {isAdmin && customer.operations.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => { void handleArchiveCredigrupoHomologation(customer.operations[0].id, customer.customer.name || 'este cliente de teste'); }}
-                      disabled={archivingHomologationOperationId !== null}
-                      className="mt-4 rounded-xl border border-amber-500/40 px-3 py-2 text-[8px] font-black uppercase tracking-widest text-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      {archivingHomologationOperationId === customer.operations[0].id ? 'Arquivando homologacao...' : 'Arquivar dados de homologacao'}
-                    </button>
-                  )}
-                </div>
+                  );
+                })()
               ))}
               {homologationAudit.customers.length === 0 && (
                 <p className="py-4 text-center text-[8px] font-black uppercase tracking-widest text-zinc-600">Nenhum dado sandbox explicitamente marcado como teste foi encontrado</p>

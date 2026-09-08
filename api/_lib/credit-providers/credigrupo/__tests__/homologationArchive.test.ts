@@ -29,9 +29,21 @@ describe('getHomologationArchiveBlocker', () => {
     }))).toBe('FINANCIAL_EFFECT_FOUND');
   });
 
-  it('bloqueia registros Credigrupo sem classificacao sandbox explicita', () => {
+  it('permite vinculos legados sem marcador quando a operacao sandbox foi confirmada pelo servidor', () => {
+    expect(getHomologationArchiveBlocker(audit({
+      simulations: [{ id: 'simulation-legacy' }],
+    }))).toBeNull();
+  });
+
+  it('bloqueia registros Credigrupo com escopo sandbox inconsistente', () => {
     expect(getHomologationArchiveBlocker(audit({
       operations: [{ id: 'operation-test', environment: 'sandbox', testData: false }],
+    }))).toBe('UNCONFIRMED_SANDBOX_RECORD');
+  });
+
+  it('bloqueia qualquer vinculo marcado como producao', () => {
+    expect(getHomologationArchiveBlocker(audit({
+      operations: [{ id: 'operation-test', environment: 'production', testData: false }],
     }))).toBe('UNCONFIRMED_SANDBOX_RECORD');
   });
 });
