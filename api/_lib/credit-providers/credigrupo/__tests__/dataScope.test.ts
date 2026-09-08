@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { isSandboxTestCustomer, permitsRealFinancialEffects } from '../../../../../src/lib/creditProviders/dataScope';
-import { assertSandboxTestPay, requireSandboxTestCustomer } from '../dataScope';
+import { isProductionCustomer, isSandboxTestCustomer, permitsRealFinancialEffects } from '../../../../../src/lib/creditProviders/dataScope';
+import {
+  assertSandboxTestPay,
+  requireCredigrupoCustomerForEnvironment,
+  requireCredigrupoRecordForEnvironment,
+} from '../dataScope';
+import { borrowerLinkId } from '../store';
 
 describe('separacao de dados Credigrupo', () => {
   it('exige identificacao explicita de teste e sandbox', () => {
@@ -8,7 +13,19 @@ describe('separacao de dados Credigrupo', () => {
     for (const data of [{}, { testData: true }, { environment: 'sandbox' as const },
       { environment: 'production' as const, testData: true },
       { environment: 'sandbox' as const, testData: true, archived: true }]) {
-      expect(() => requireSandboxTestCustomer(data)).toThrow();
+      expect(() => requireCredigrupoCustomerForEnvironment(data, 'sandbox')).toThrow();
+    }
+  });
+  it('aceita somente clientes reais sem marcador de teste em producao', () => {
+    expect(isProductionCustomer({})).toBe(true);
+    expect(isProductionCustomer({ environment: 'production', testData: false })).toBe(true);
+    expect(() => requireCredigrupoCustomerForEnvironment({}, 'production')).not.toThrow();
+    for (const data of [
+      { environment: 'sandbox' as const, testData: true },
+      { environment: 'production' as const, testData: true },
+      { environment: 'production' as const, archived: true },
+    ]) {
+      expect(() => requireCredigrupoCustomerForEnvironment(data, 'production')).toThrow();
     }
   });
   it('permite efeitos reais somente com proveniencia production e runtime production', () => {
@@ -28,5 +45,16 @@ describe('separacao de dados Credigrupo', () => {
       ['sandbox', 'wl_live_fixture'], ['sandbox', ''], ['live', 'wl_test_fixture']]) {
       expect(() => assertSandboxTestPay(environment, key)).toThrow();
     }
+  });
+  it('separa o vinculo do tomador por ambiente', () => {
+    const sandbox = borrowerLinkId('customer-1', 'OWN_INVESTOR_KEY', 'sandbox');
+    const production = borrowerLinkId('customer-1', 'OWN_INVESTOR_KEY', 'production');
+    expect(sandbox).not.toBe(production);
+    expect(production).toContain('production');
+  });
+  it('exige escopo explicito nos registros criados pela integracao', () => {
+    expect(() => requireCredigrupoRecordForEnvironment({}, 'production')).toThrow();
+    expect(() => requireCredigrupoRecordForEnvironment({ environment: 'sandbox', testData: true }, 'production')).toThrow();
+    expect(() => requireCredigrupoRecordForEnvironment({ environment: 'production', testData: false }, 'production')).not.toThrow();
   });
 });

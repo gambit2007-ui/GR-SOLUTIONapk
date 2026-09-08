@@ -10,6 +10,13 @@ export interface CreditDataScope {
 export const isSandboxTestCustomer = (data: CreditDataScope) =>
   data.environment === 'sandbox' && data.testData === true && !data.archived && !data.archivedAt;
 
+export const isProductionCustomer = (data: CreditDataScope) =>
+  (data.environment === undefined || data.environment === 'production')
+  && data.testData !== true && !data.archived && !data.archivedAt;
+
+export const isCredigrupoCustomerAllowed = (data: CreditDataScope, environment: CreditDataEnvironment) =>
+  environment === 'sandbox' ? isSandboxTestCustomer(data) : isProductionCustomer(data);
+
 // Missing provenance is never evidence of a real financial operation.
 export const permitsRealFinancialEffects = (data: CreditDataScope, runtimeEnvironment: string | undefined) =>
   runtimeEnvironment === 'production' && data.environment === 'production'

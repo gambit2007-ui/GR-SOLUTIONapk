@@ -10,7 +10,7 @@ const validEnvironment = {
 };
 
 describe('configuracao Credigrupo', () => {
-  it('considera pronta somente a configuracao sandbox completa', () => {
+  it('considera pronta uma configuracao sandbox completa', () => {
     const result = evaluateCredigrupoConfiguration(validEnvironment);
     expect(validEnvironment.CREDIGRUPO_WEBHOOK_SECRET.length).toBeLessThan(32);
     expect(result.configured).toBe(true);
@@ -33,15 +33,37 @@ describe('configuracao Credigrupo', () => {
     expect(short.issues).toEqual([]);
   });
 
-  it('bloqueia chave live e ambiente diferente de sandbox', () => {
+  it('aceita producao somente com chave live correspondente', () => {
     const result = evaluateCredigrupoConfiguration({
       ...validEnvironment,
       CREDIGRUPO_ENV: 'production',
-      CREDIGRUPO_API_KEY: 'wl_live_blocked',
+      CREDIGRUPO_API_KEY: 'wl_live_production',
+    });
+    expect(result.configured).toBe(true);
+    expect(result.environment).toBe('production');
+  });
+
+  it('bloqueia combinacoes de chave e ambiente divergentes', () => {
+    const productionWithTestKey = evaluateCredigrupoConfiguration({
+      ...validEnvironment,
+      CREDIGRUPO_ENV: 'production',
+    });
+    const sandboxWithLiveKey = evaluateCredigrupoConfiguration({
+      ...validEnvironment,
+      CREDIGRUPO_API_KEY: 'wl_live_production',
+    });
+    expect(productionWithTestKey.issues).toContain('CREDIGRUPO_LIVE_KEY_REQUIRED');
+    expect(sandboxWithLiveKey.issues).toContain('CREDIGRUPO_SANDBOX_KEY_REQUIRED');
+  });
+
+  it('bloqueia ambiente fora dos dois modos permitidos', () => {
+    const result = evaluateCredigrupoConfiguration({
+      ...validEnvironment,
+      CREDIGRUPO_ENV: 'staging',
+      CREDIGRUPO_API_KEY: 'wl_live_production',
     });
     expect(result.configured).toBe(false);
     expect(result.issues).toEqual(expect.arrayContaining([
-      'CREDIGRUPO_LIVE_KEY_BLOCKED',
       'CREDIGRUPO_ENV_INVALID',
     ]));
   });

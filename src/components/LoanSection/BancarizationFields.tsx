@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { isSandboxTestCustomer } from '../../lib/creditProviders/dataScope';
+import { isCredigrupoCustomerAllowed } from '../../lib/creditProviders/dataScope';
 import { CheckCircle, Loader2, ShieldCheck } from 'lucide-react';
 import type { Customer } from '../../types';
 import type {
   CredigrupoBorrowerState,
+  CredigrupoEnvironment,
   CredigrupoKycData,
   CredigrupoSimulationResult,
 } from '../../lib/creditProviders/types';
@@ -70,6 +71,7 @@ interface BancarizationFieldsProps {
   value: BancarizationDraft;
   onChange: (value: BancarizationDraft) => void;
   showToast: (message: string, type?: 'success' | 'error') => void;
+  environment: CredigrupoEnvironment;
 }
 
 const inputClass = 'w-full bg-black border border-zinc-800 rounded-xl p-3 text-white outline-none focus:border-[#BF953F] text-[10px]';
@@ -78,8 +80,9 @@ const labelClass = 'text-[8px] font-black text-zinc-500 uppercase tracking-wides
 const currencyFromCents = (value: number) =>
   (Number(value || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, terms, value, onChange, showToast }) => {
-  const sandboxCustomerAllowed = Boolean(customer && isSandboxTestCustomer(customer));
+const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, terms, value, onChange, showToast, environment }) => {
+  const customerAllowed = Boolean(customer && isCredigrupoCustomerAllowed(customer, environment));
+  const isSandbox = environment === 'sandbox';
   const [loadingBorrower, setLoadingBorrower] = useState(false);
   const [syncingBorrower, setSyncingBorrower] = useState(false);
   const [simulating, setSimulating] = useState(false);
@@ -108,7 +111,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
   }, [customer?.id]);
 
   const handleBorrowerSync = async () => {
-    if (!sandboxCustomerAllowed) return;
+    if (!customerAllowed) return;
     if (!customer) {
       showToast('Selecione o cliente', 'error');
       return;
@@ -138,7 +141,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
   };
 
   const handleSimulation = async () => {
-    if (!sandboxCustomerAllowed) return;
+    if (!customerAllowed) return;
     if (!customer || value.borrower?.kycStatus !== 'approved') {
       showToast('O KYC do tomador precisa estar aprovado', 'error');
       return;
@@ -182,8 +185,8 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
         <div className="flex items-center gap-2">
           <ShieldCheck size={16} className="text-[#BF953F]" />
           <div>
-            <p className="text-[9px] font-black text-[#F5D77B] uppercase tracking-widest">Credigrupo - Sandbox</p>
-            <p className="text-[9px] text-amber-300 mt-1">Ambiente Credigrupo Sandbox. Não utilizar dados ou operações reais.</p>
+            <p className="text-[9px] font-black text-[#F5D77B] uppercase tracking-widest">Credigrupo - {isSandbox ? 'Sandbox' : 'Producao'}</p>
+            <p className="text-[9px] text-amber-300 mt-1">{isSandbox ? 'Ambiente de teste. Não utilizar dados ou operações reais.' : 'Ambiente de producao. Confira os dados antes de confirmar.'}</p>
           </div>
         </div>
       </div>
@@ -199,8 +202,8 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
         </div>
       </div>
 
-      {!sandboxCustomerAllowed && <p role="alert" className="text-[10px] text-amber-300">Selecione um cliente de teste ativo, identificado para sandbox pelo administrador.</p>}
-      <fieldset disabled={!sandboxCustomerAllowed} className="pt-3 border-t border-zinc-800 disabled:opacity-40">
+      {!customerAllowed && <p role="alert" className="text-[10px] text-amber-300">{isSandbox ? 'Selecione um cliente de teste ativo, identificado para sandbox pelo administrador.' : 'Cliente de teste ou arquivado nao pode ser usado em producao.'}</p>}
+      <fieldset disabled={!customerAllowed} className="pt-3 border-t border-zinc-800 disabled:opacity-40">
         <p className="text-[8px] font-black text-zinc-400 uppercase tracking-widest mb-3">Dados adicionais do tomador</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <input className={inputClass} placeholder="E-MAIL" value={value.email} onChange={(e) => patch({ email: e.target.value, borrower: undefined, simulation: undefined })} />
@@ -236,7 +239,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
         </div>
       </fieldset>
 
-      <button type="button" onClick={() => void handleBorrowerSync()} disabled={!sandboxCustomerAllowed || loadingBorrower || syncingBorrower || !customer} className="w-full py-3 rounded-xl border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
+      <button type="button" onClick={() => void handleBorrowerSync()} disabled={!customerAllowed || loadingBorrower || syncingBorrower || !customer} className="w-full py-3 rounded-xl border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
         {(loadingBorrower || syncingBorrower) && <Loader2 size={12} className="animate-spin" />}
         {loadingBorrower ? 'Carregando tomador existente' : value.borrower ? 'Atualizar status e elegibilidade' : 'Cadastrar tomador e iniciar KYC'}
       </button>
@@ -276,7 +279,7 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
         </div>
       )}
 
-      <button type="button" onClick={() => void handleSimulation()} disabled={!sandboxCustomerAllowed || simulating || !eligibility.canSimulate} className="w-full py-3 rounded-xl bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
+      <button type="button" onClick={() => void handleSimulation()} disabled={!customerAllowed || simulating || !eligibility.canSimulate} className="w-full py-3 rounded-xl bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] text-[8px] font-black uppercase tracking-widest disabled:opacity-40 flex items-center justify-center gap-2">
         {simulating && <Loader2 size={12} className="animate-spin" />} Simular oficialmente
       </button>
 

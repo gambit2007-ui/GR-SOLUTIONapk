@@ -206,8 +206,8 @@ describe('processamento financeiro do webhook Credigrupo', () => {
     await db.doc('creditSimulations/simulation-gr').set({
       environment: 'sandbox', testData: true,
       customerId: 'customer-1', customerName: 'Cliente', borrowerId: 'borrower-1', accountMode: 'OWN_INVESTOR_KEY', investorType: 'GR',
-      request: { customerId: 'customer-1', fundingSource: 'GR', amountCents: 10000, installments: 1, interestRate: 10, firstPaymentDate: '2026-09-25', frequency: 'monthly', interestType: 'simple' },
-      response: { externalId: 'simulation-external-1', interestRate: 10, simulation: { netAmount: 10000, grossAmount: 11000, totalAmount: 11000, totalInterest: 1000, totalIof: 0, totalFee: 0, installments: [] } },
+      request: { customerId: 'customer-1', fundingSource: 'GR', amountCents: 30000, installments: 1, interestRate: 10, firstPaymentDate: '2026-09-25', frequency: 'monthly', interestType: 'simple' },
+      response: { externalId: 'simulation-external-1', interestRate: 10, simulation: { netAmount: 30000, grossAmount: 33000, totalAmount: 33000, totalInterest: 3000, totalIof: 0, totalFee: 0, installments: [] } },
       createdByUid: 'admin-1', createdAt: Timestamp.now(), expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
     });
 

@@ -9,11 +9,18 @@ import type {
   CredigrupoAccountMode,
   FundingSourceType,
 } from '../../../../src/lib/creditProviders/types.js';
-import { CREDIGRUPO_ACCOUNT_MODE, CREDIGRUPO_OWN_INVESTOR_NAME } from '../../env.js';
+import {
+  CREDIGRUPO_ACCOUNT_MODE,
+  CREDIGRUPO_OWN_INVESTOR_NAME,
+  getCredigrupoServerConfig,
+} from '../../env.js';
 import type { SafeCredigrupoProviderError } from './providerError.js';
 import type { SafeCredigrupoCreateSuccess, SafeCredigrupoFundingPix } from './createSuccess.js';
 import type { CreditDataScope } from '../../../../src/lib/creditProviders/dataScope.js';
-import { requireSandboxTestCustomer } from './dataScope.js';
+import {
+  requireCredigrupoCustomerForEnvironment,
+  requireCredigrupoRecordForEnvironment,
+} from './dataScope.js';
 
 export interface StoredCredigrupoOperation extends CreditDataScope {
   formalizationType?: 'BANCARIZED';
@@ -100,8 +107,8 @@ export const removeUndefined = <T>(value: T): T => {
   return value;
 };
 
-export const borrowerLinkId = (customerId: string, scope: string) =>
-  `${customerId}__${scope}`.replace(/[^a-zA-Z0-9_-]/g, '_');
+export const borrowerLinkId = (customerId: string, scope: string, environment: string) =>
+  `${customerId}__${scope}__${environment}`.replace(/[^a-zA-Z0-9_-]/g, '_');
 
 export const findOperationByProposalId = async (proposalId: string) => {
   const snapshot = await adminDb.collection('creditOperations').where('proposalId', '==', proposalId).limit(1).get();
@@ -131,6 +138,7 @@ export const reserveCredigrupoOperation = async (
   request: CreateBancarizedLoanRequest,
   actor: AuthorizedActor,
 ): Promise<{ duplicate: boolean; operation: StoredCredigrupoOperation }> => {
+  const { environment } = getCredigrupoServerConfig();
   const operationRef = adminDb.doc(`creditOperations/${request.operationId}`);
   const simulationRef = adminDb.doc(`creditSimulations/${request.simulationId}`);
 
@@ -146,15 +154,18 @@ export const reserveCredigrupoOperation = async (
     if (!simulationSnapshot.exists) throw new ApiError(404, 'SIMULATION_NOT_FOUND', 'Simulacao nao encontrada.');
 
     const simulation = simulationSnapshot.data() as StoredCredigrupoSimulation;
-    requireSandboxTestCustomer(simulation);
+    requireCredigrupoRecordForEnvironment(simulation, environment);
     const customerSnapshot = await transaction.get(adminDb.doc(`clientes/${simulation.customerId}`));
     if (!customerSnapshot.exists) throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Cliente nao encontrado.');
-    requireSandboxTestCustomer(customerSnapshot.data() || {});
+    requireCredigrupoCustomerForEnvironment(customerSnapshot.data() || {}, environment);
     if (simulation.createdByUid !== actor.uid && !actor.admin) {
       throw new ApiError(403, 'SIMULATION_ACCESS_DENIED', 'Simulacao pertence a outro usuario.');
     }
     if (simulation.usedByOperationId) throw new ApiError(409, 'SIMULATION_ALREADY_USED', 'Simulacao ja utilizada.');
     if (simulation.expiresAt.toMillis() < Date.now()) throw new ApiError(409, 'SIMULATION_EXPIRED', 'A simulacao expirou.');
+    if (!Number.isSafeInteger(simulation.request.amountCents) || simulation.request.amountCents < 30000) {
+      throw new ApiError(409, 'LOAN_AMOUNT_BELOW_MINIMUM', 'A Credigrupo exige valor minimo de R$ 300,00 para criar a negociacao.');
+    }
     if (request.fundingSource !== simulation.request.fundingSource) {
       throw new ApiError(409, 'FUNDING_SOURCE_CHANGED', 'A origem do capital mudou. Gere uma nova simulacao.');
     }
@@ -163,8 +174,8 @@ export const reserveCredigrupoOperation = async (
     }
 
     const operation: StoredCredigrupoOperation = {
-      environment: 'sandbox',
-      testData: true,
+      environment,
+      testData: environment === 'sandbox',
       customerId: simulation.customerId,
       customerName: simulation.customerName,
       customerPhone: simulation.customerPhone,

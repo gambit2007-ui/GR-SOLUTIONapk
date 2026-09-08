@@ -8,9 +8,12 @@ import {
   normalizeBorrowerDisplayName,
 } from '../_lib/credit-providers/credigrupo/borrowerState.js';
 import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
-import { requireSandboxTestCustomer } from '../_lib/credit-providers/credigrupo/dataScope.js';
+import {
+  requireCredigrupoCustomerForEnvironment,
+  requireCredigrupoRecordForEnvironment,
+} from '../_lib/credit-providers/credigrupo/dataScope.js';
 import { borrowerLinkId, removeUndefined } from '../_lib/credit-providers/credigrupo/store.js';
-import { CREDIGRUPO_ACCOUNT_MODE } from '../_lib/env.js';
+import { CREDIGRUPO_ACCOUNT_MODE, getCredigrupoServerConfig } from '../_lib/env.js';
 import { adminDb } from '../_lib/firebaseAdmin.js';
 import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http.js';
 
@@ -24,10 +27,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
   try {
     if (!['GET', 'POST'].includes(request.method || '')) return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
     await requireAuthorizedActor(request);
+    const { environment } = getCredigrupoServerConfig();
     if (request.method === 'GET') {
       const customerId = requiredText(request.query.customerId, 'customerId');
       const linkSnapshot = await adminDb
-        .doc(`creditBorrowers/${borrowerLinkId(customerId, CREDIGRUPO_ACCOUNT_MODE)}`)
+        .doc(`creditBorrowers/${borrowerLinkId(customerId, CREDIGRUPO_ACCOUNT_MODE, environment)}`)
         .get();
       if (!linkSnapshot.exists) {
         throw new ApiError(404, 'BORROWER_NOT_SYNCED', 'Tomador ainda nao sincronizado.');
@@ -47,15 +51,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
       throw new ApiError(400, 'INVALID_FUNDING_SOURCE', 'A chave propria Credigrupo aceita somente capital da GR.');
     }
     const customerRef = adminDb.doc(`clientes/${customerId}`);
-    const linkRef = adminDb.doc(`creditBorrowers/${borrowerLinkId(customerId, CREDIGRUPO_ACCOUNT_MODE)}`);
+    const linkRef = adminDb.doc(`creditBorrowers/${borrowerLinkId(customerId, CREDIGRUPO_ACCOUNT_MODE, environment)}`);
     const [customerSnapshot, linkSnapshot] = await Promise.all([
       customerRef.get(),
       linkRef.get(),
     ]);
     if (!customerSnapshot.exists) throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Cliente nao encontrado.');
-    requireSandboxTestCustomer(customerSnapshot.data() || {});
-    if (linkSnapshot.exists && linkSnapshot.data()?.environment !== 'sandbox') {
-      throw new ApiError(409, 'BORROWER_ENVIRONMENT_UNCONFIRMED', 'Confirme o ambiente do vinculo existente antes de utiliza-lo.');
+    requireCredigrupoCustomerForEnvironment(customerSnapshot.data() || {}, environment);
+    if (linkSnapshot.exists) {
+      requireCredigrupoRecordForEnvironment(linkSnapshot.data() || {}, environment);
     }
     const client = new CredigrupoClient();
     let borrowerId = String(linkSnapshot.data()?.borrowerId || '').trim();
@@ -144,8 +148,8 @@ export default async function handler(request: VercelRequest, response: VercelRe
     });
 
     await Promise.all([
-      linkRef.set({ ...sharedStatus, customerId, environment: 'sandbox', testData: true }, { merge: true }),
-      customerRef.set({ credigrupo: sharedStatus }, { merge: true }),
+      linkRef.set({ ...sharedStatus, customerId, environment, testData: environment === 'sandbox' }, { merge: true }),
+      customerRef.set({ credigrupo: sharedStatus, environment, testData: environment === 'sandbox' }, { merge: true }),
     ]);
 
     return sendJson(response, 200, safeState);
