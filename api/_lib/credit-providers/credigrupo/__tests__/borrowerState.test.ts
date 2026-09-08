@@ -21,6 +21,9 @@ describe('estado seguro do borrower Credigrupo', () => {
       ccbEligible: false,
       eligibilityErrors: ['Documento invalido'],
       eligibilityCachedAt: '2026-08-27T12:00:00.000Z',
+      documentsSubmitted: ['selfie', 'idFront'],
+      documentsComplete: false,
+      documentsSubmittedAt: '2026-09-08T18:00:00.000Z',
     });
 
     expect(state).toEqual({
@@ -29,6 +32,9 @@ describe('estado seguro do borrower Credigrupo', () => {
       ccbEligible: false,
       eligibilityErrors: ['Documento invalido'],
       eligibilityCachedAt: '2026-08-27T12:00:00.000Z',
+      documentsSubmitted: ['selfie', 'idFront'],
+      documentsComplete: false,
+      documentsSubmittedAt: '2026-09-08T18:00:00.000Z',
     });
     expect(Object.keys(state)).toEqual([
       'borrowerId',
@@ -36,6 +42,9 @@ describe('estado seguro do borrower Credigrupo', () => {
       'ccbEligible',
       'eligibilityErrors',
       'eligibilityCachedAt',
+      'documentsSubmitted',
+      'documentsComplete',
+      'documentsSubmittedAt',
     ]);
     expect(Object.keys(state)).not.toEqual(
       expect.arrayContaining(['cpf', 'document', 'bank', 'pix', 'kyc_data']),
@@ -52,6 +61,9 @@ describe('estado seguro do borrower Credigrupo', () => {
       ccbEligible: null,
       eligibilityErrors: [],
       eligibilityCachedAt: null,
+      documentsSubmitted: [],
+      documentsComplete: false,
+      documentsSubmittedAt: null,
     });
   });
 

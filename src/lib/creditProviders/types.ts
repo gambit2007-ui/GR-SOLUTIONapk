@@ -138,14 +138,26 @@ export type CredigrupoInvestorDocumentType =
   | 'idBack'
   | 'proofOfResidence';
 
+export type CredigrupoBorrowerDocumentType = CredigrupoInvestorDocumentType;
+
 export interface CredigrupoInvestorDocumentReference {
   type: CredigrupoInvestorDocumentType;
+  storagePath: string;
+}
+
+export interface CredigrupoBorrowerDocumentReference {
+  type: CredigrupoBorrowerDocumentType;
   storagePath: string;
 }
 
 export interface UploadCredigrupoInvestorDocumentsRequest {
   investorId: string;
   documents: CredigrupoInvestorDocumentReference[];
+}
+
+export interface UploadCredigrupoBorrowerDocumentsRequest {
+  customerId: string;
+  documents: CredigrupoBorrowerDocumentReference[];
 }
 
 export interface CredigrupoInvestorStatistics {
@@ -253,6 +265,9 @@ export interface CredigrupoBorrowerState {
   ccbEligible: boolean | null;
   eligibilityErrors: string[];
   eligibilityCachedAt: string | null;
+  documentsSubmitted?: CredigrupoBorrowerDocumentType[];
+  documentsComplete?: boolean;
+  documentsSubmittedAt?: string;
 }
 
 export interface CredigrupoSimulationRequest {

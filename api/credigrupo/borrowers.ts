@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { EnsureCredigrupoBorrowerRequest } from '../../src/lib/creditProviders/types.js';
 import { requireAuthorizedActor } from '../_lib/auth.js';
+import { handleBorrowerDocumentsRoute } from '../_lib/credit-providers/credigrupo/borrowerDocumentRoutes.js';
 import {
   createBorrowerPersistencePayload,
   createSafeBorrowerState,
@@ -23,8 +24,17 @@ const requiredText = (value: unknown, field: string): string => {
   return parsed;
 };
 
+const timestampToIso = (value: unknown): string | undefined => {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'toDate' in value && typeof value.toDate === 'function') {
+    return value.toDate().toISOString();
+  }
+  return undefined;
+};
+
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
+    if (request.query.route === 'documents') return await handleBorrowerDocumentsRoute(request, response);
     if (!['GET', 'POST'].includes(request.method || '')) return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
     await requireAuthorizedActor(request);
     const { environment } = getCredigrupoServerConfig();
@@ -43,6 +53,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
         ccbEligible: link.ccbEligible,
         eligibilityErrors: link.eligibilityErrors,
         eligibilityCachedAt: link.eligibilityCachedAt,
+        documentsSubmitted: link.documentsSubmitted,
+        documentsComplete: link.documentsComplete,
+        documentsSubmittedAt: timestampToIso(link.documentsSubmittedAt),
       }));
     }
     const input = parseJsonBody<EnsureCredigrupoBorrowerRequest>(request);
@@ -134,6 +147,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
       ccbEligible,
       eligibilityErrors,
       eligibilityCachedAt,
+      documentsSubmitted: linkSnapshot.data()?.documentsSubmitted,
+      documentsComplete: linkSnapshot.data()?.documentsComplete,
+      documentsSubmittedAt: timestampToIso(linkSnapshot.data()?.documentsSubmittedAt),
     });
     const sharedStatus = createBorrowerPersistencePayload(safeState, FieldValue.serverTimestamp());
 

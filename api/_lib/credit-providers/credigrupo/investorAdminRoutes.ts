@@ -28,7 +28,7 @@ import {
 } from './investorStore.js';
 
 const validDocumentId = (value: string) => /^[a-zA-Z0-9_-]{1,160}$/.test(value);
-const imageContentTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const documentContentTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 const documentTypes = new Set<CredigrupoInvestorDocumentType>(CREDIGRUPO_INVESTOR_DOCUMENT_TYPES);
 
 const configureGrInvestor = async (
@@ -143,9 +143,7 @@ const loadDocument = async (reference: CredigrupoInvestorDocumentReference) => {
   }
 
   const contentType = String(metadata.contentType || '').toLowerCase();
-  const allowed = imageContentTypes.has(contentType)
-    || (reference.type === 'proofOfResidence' && contentType === 'application/pdf');
-  if (!allowed) throw new ApiError(400, 'INVALID_KYC_FILE_TYPE', 'Formato de documento KYC nao permitido.');
+  if (!documentContentTypes.has(contentType)) throw new ApiError(400, 'INVALID_KYC_FILE_TYPE', 'Formato de documento KYC nao permitido.');
   if (buffer.length <= 0 || buffer.length > CREDIGRUPO_DOCUMENT_MAX_BYTES) {
     throw new ApiError(413, 'KYC_FILE_TOO_LARGE', 'Cada documento deve ter no maximo 8 MB.');
   }

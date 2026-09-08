@@ -173,6 +173,25 @@ describe('contrato oficial de operacoes Credigrupo', () => {
     });
   });
 
+  it('envia documentos do tomador ao endpoint oficial sem investorId', async () => {
+    configureSandbox();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      kyc_documents: { selfie: 'https://provider.example/selfie.jpg' },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    await new CredigrupoClient().uploadBorrowerDocuments('borrower/1', {
+      selfie: 'data:image/jpeg;base64,fixture',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('/borrowers/borrower%2F1/documents');
+    expect(fetchMock.mock.calls[0][1]?.method).toBe('POST');
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      selfie: 'data:image/jpeg;base64,fixture',
+    });
+  });
+
   it('omite investorId de borrower, simulacao e criacao no modo de chave propria', async () => {
     configureSandbox();
     const fetchMock = vi.spyOn(globalThis, 'fetch')

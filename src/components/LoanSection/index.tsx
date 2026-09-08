@@ -2411,6 +2411,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   onChange={setBancarizationDraft}
                   showToast={showToast}
                   environment={credigrupoEnvironment}
+                  isAdmin={credigrupoIsAdmin}
                 />
               )}
 

@@ -95,9 +95,11 @@ describe('validacao de investidor Credigrupo', () => {
   it('recusa tipo invalido e arquivo maior que 8 MB', () => {
     const result = validateCredigrupoInvestorDocuments({
       idFront: { name: 'frente.pdf', size: 1024, type: 'application/pdf' },
+      idBack: { name: 'verso.heic', size: 1024, type: 'image/heic' },
       selfie: { name: 'selfie.jpg', size: CREDIGRUPO_DOCUMENT_MAX_BYTES + 1, type: 'image/jpeg' },
     });
-    expect(result['documents.idFront']).toContain('imagem');
+    expect(result['documents.idFront']).toBeUndefined();
+    expect(result['documents.idBack']).toContain('JPG, PNG, WEBP ou PDF');
     expect(result['documents.selfie']).toContain('8 MB');
   });
 });

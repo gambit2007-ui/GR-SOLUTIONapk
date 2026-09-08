@@ -3,6 +3,7 @@ import { assertSandboxTestPay } from './dataScope.js';
 import { CREDIGRUPO_ACCOUNT_MODE, getCredigrupoServerConfig } from '../../env.js';
 import type {
   CreateCredigrupoInvestorRequest,
+  CredigrupoBorrowerDocumentType,
   CredigrupoInvestorDocumentType,
   CredigrupoInstallmentPixResult,
   CredigrupoKycData,
@@ -36,6 +37,7 @@ export interface CredigrupoWebhookConfigurationResponse {
 }
 
 type CredigrupoInvestorDocumentsPayload = Partial<Record<CredigrupoInvestorDocumentType, string>>;
+type CredigrupoBorrowerDocumentsPayload = Partial<Record<CredigrupoBorrowerDocumentType, string>>;
 
 interface CredigrupoBorrowerResponse {
   data: {
@@ -240,6 +242,16 @@ export class CredigrupoClient {
     this.assertInvestorManagementAvailable();
     return this.request<{ success: boolean; kyc_documents: Record<string, string> }>(
       `/investors/${encodeURIComponent(investorId)}/documents`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+    );
+  }
+
+  uploadBorrowerDocuments(borrowerId: string, payload: CredigrupoBorrowerDocumentsPayload) {
+    return this.request<{ success: boolean; kyc_documents: Record<string, string> }>(
+      `/borrowers/${encodeURIComponent(borrowerId)}/documents`,
       {
         method: 'POST',
         body: JSON.stringify(payload),
