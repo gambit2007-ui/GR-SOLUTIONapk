@@ -106,9 +106,9 @@ const describeCredigrupoConfigurationIssues = (issues?: readonly string[]) => {
   if (!issues?.length) return '';
   const descriptions: Record<string, string> = {
     CREDIGRUPO_API_KEY_MISSING: 'Chave da API ausente.',
-    CREDIGRUPO_SANDBOX_KEY_REQUIRED: 'A chave da API nao e uma chave sandbox wl_test_.',
-    CREDIGRUPO_LIVE_KEY_BLOCKED: 'Chave live bloqueada neste ambiente.',
-    CREDIGRUPO_ENV_INVALID: 'Ambiente diferente de sandbox.',
+    CREDIGRUPO_SANDBOX_KEY_REQUIRED: 'A chave da API deve iniciar com wl_test_ no sandbox.',
+    CREDIGRUPO_LIVE_KEY_REQUIRED: 'A chave da API deve iniciar com wl_live_ em producao.',
+    CREDIGRUPO_ENV_INVALID: 'Ambiente Credigrupo invalido.',
     CREDIGRUPO_ACCOUNT_MODE_INVALID: 'Modo da conta deve ser OWN_INVESTOR_KEY.',
     CREDIGRUPO_WEBHOOK_SECRET_MISSING: 'Segredo do webhook ausente.',
   };
@@ -169,7 +169,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [credigrupoStatusLoaded, setCredigrupoStatusLoaded] = useState(false);
   const [credigrupoStatusMessage, setCredigrupoStatusMessage] = useState('');
   const [credigrupoIsAdmin, setCredigrupoIsAdmin] = useState(false);
-  const [credigrupoEnvironment, setCredigrupoEnvironment] = useState<'sandbox'>('sandbox');
+  const [credigrupoEnvironment, setCredigrupoEnvironment] = useState<'sandbox' | 'production'>('sandbox');
   const [hasCredigrupoOperations, setHasCredigrupoOperations] = useState(false);
   const [bancarizationDraft, setBancarizationDraft] = useState<BancarizationDraft>(() => createDefaultBancarizationDraft());
   const [creatingBancarized, setCreatingBancarized] = useState(false);
@@ -2410,6 +2410,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   value={bancarizationDraft}
                   onChange={setBancarizationDraft}
                   showToast={showToast}
+                  environment={credigrupoEnvironment}
                 />
               )}
 

@@ -1,6 +1,6 @@
 import { getApps, deleteApp } from 'firebase-admin/app';
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CredigrupoClient } from '../../api/_lib/credit-providers/credigrupo/client';
 import type { CredigrupoWebhookEvent } from '../../api/_lib/credit-providers/credigrupo/webhook';
 
@@ -72,6 +72,10 @@ beforeEach(async () => {
     const documents = await collection.listDocuments();
     await Promise.all(documents.map((document) => document.delete()));
   }));
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
 });
 
 afterAll(async () => {
@@ -202,12 +206,17 @@ describe('processamento financeiro do webhook Credigrupo', () => {
   });
 
   it('reserva BANCARIZED com a GR sem criar investorId ficticio', async () => {
+    vi.stubEnv('CREDIGRUPO_ENABLED', 'true');
+    vi.stubEnv('CREDIGRUPO_ENV', 'sandbox');
+    vi.stubEnv('CREDIGRUPO_ACCOUNT_MODE', 'OWN_INVESTOR_KEY');
+    vi.stubEnv('CREDIGRUPO_API_KEY', 'wl_test_rules_fixture');
+    vi.stubEnv('CREDIGRUPO_WEBHOOK_SECRET', 'rules-fixture-secret');
     await db.doc('clientes/customer-1').set({ environment: 'sandbox', testData: true, name: 'Fixture' });
     await db.doc('creditSimulations/simulation-gr').set({
       environment: 'sandbox', testData: true,
       customerId: 'customer-1', customerName: 'Cliente', borrowerId: 'borrower-1', accountMode: 'OWN_INVESTOR_KEY', investorType: 'GR',
-      request: { customerId: 'customer-1', fundingSource: 'GR', amountCents: 10000, installments: 1, interestRate: 10, firstPaymentDate: '2026-09-25', frequency: 'monthly', interestType: 'simple' },
-      response: { externalId: 'simulation-external-1', interestRate: 10, simulation: { netAmount: 10000, grossAmount: 11000, totalAmount: 11000, totalInterest: 1000, totalIof: 0, totalFee: 0, installments: [] } },
+      request: { customerId: 'customer-1', fundingSource: 'GR', amountCents: 30000, installments: 1, interestRate: 10, firstPaymentDate: '2026-09-25', frequency: 'monthly', interestType: 'simple' },
+      response: { externalId: 'simulation-external-1', interestRate: 10, simulation: { netAmount: 30000, grossAmount: 33000, totalAmount: 33000, totalInterest: 3000, totalIof: 0, totalFee: 0, installments: [] } },
       createdByUid: 'admin-1', createdAt: Timestamp.now(), expiresAt: Timestamp.fromMillis(Date.now() + 60_000),
     });
 

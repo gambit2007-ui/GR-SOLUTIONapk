@@ -16,6 +16,8 @@ describe('diagnostico seguro do runtime Credigrupo', () => {
     expect(diagnostics).toMatchObject({
       apiKeyPresent: true,
       apiKeyIsSandbox: true,
+      apiKeyIsProduction: false,
+      envIsProduction: false,
       webhookSecretPresent: true,
       webhookSecretLength: webhookSecret.length,
       webhookSecretFingerprint: crypto.createHash('sha256').update(webhookSecret).digest('hex').slice(0, 8),

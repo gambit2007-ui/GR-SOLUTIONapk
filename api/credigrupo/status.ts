@@ -20,8 +20,10 @@ export const getRuntimeDiagnostics = (source: NodeJS.ProcessEnv = process.env) =
   return {
     apiKeyPresent: Boolean(apiKey),
     apiKeyIsSandbox: apiKey?.startsWith('wl_test_') === true,
+    apiKeyIsProduction: apiKey?.startsWith('wl_live_') === true,
     envPresent: Boolean(environment),
     envIsSandbox: environment === 'sandbox',
+    envIsProduction: environment === 'production',
     enabledPresent: Boolean(enabled),
     integrationEnabled: enabled === 'true',
     webhookSecretPresent: Boolean(webhookSecret),

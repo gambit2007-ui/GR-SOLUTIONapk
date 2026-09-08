@@ -1,6 +1,7 @@
 import type { CredigrupoLoanStatus, FundingSourceType } from '../../types';
 export type { CredigrupoLoanStatus, FundingSourceType } from '../../types';
 export type CredigrupoAccountMode = 'OWN_INVESTOR_KEY';
+export type CredigrupoEnvironment = 'sandbox' | 'production';
 
 export type CredigrupoKycStatus =
   | 'pending_kyc'
@@ -13,7 +14,7 @@ export type CredigrupoKycStatus =
 export interface CredigrupoIntegrationStatus {
   enabled: boolean;
   configured: boolean;
-  environment: 'sandbox';
+  environment: CredigrupoEnvironment;
   accountMode: CredigrupoAccountMode;
   investor: 'GR SOLUTION';
   provider: 'CREDIGRUPO';
@@ -23,7 +24,7 @@ export interface CredigrupoIntegrationStatus {
   configurationIssues?: Array<
     | 'CREDIGRUPO_API_KEY_MISSING'
     | 'CREDIGRUPO_SANDBOX_KEY_REQUIRED'
-    | 'CREDIGRUPO_LIVE_KEY_BLOCKED'
+    | 'CREDIGRUPO_LIVE_KEY_REQUIRED'
     | 'CREDIGRUPO_ENV_INVALID'
     | 'CREDIGRUPO_ACCOUNT_MODE_INVALID'
     | 'CREDIGRUPO_WEBHOOK_SECRET_MISSING'
@@ -33,8 +34,10 @@ export interface CredigrupoIntegrationStatus {
 export interface CredigrupoRuntimeDiagnostics {
   apiKeyPresent: boolean;
   apiKeyIsSandbox: boolean;
+  apiKeyIsProduction: boolean;
   envPresent: boolean;
   envIsSandbox: boolean;
+  envIsProduction: boolean;
   enabledPresent: boolean;
   integrationEnabled: boolean;
   webhookSecretPresent: boolean;
