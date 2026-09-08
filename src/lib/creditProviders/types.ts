@@ -58,9 +58,9 @@ export interface CredigrupoHomologationAuditCustomer {
     testData?: boolean;
     archived?: boolean;
   };
-  borrowerLinks: Array<{ id: string; borrowerId?: string }>;
-  simulations: Array<{ id: string; externalId?: string; usedByOperationId?: string }>;
-  operations: Array<{ id: string; proposalId?: string }>;
+  borrowerLinks: Array<{ id: string; borrowerId?: string; environment?: string; testData?: boolean }>;
+  simulations: Array<{ id: string; externalId?: string; usedByOperationId?: string; environment?: string; testData?: boolean }>;
+  operations: Array<{ id: string; proposalId?: string; environment?: string; testData?: boolean }>;
   linkedCounts: {
     contracts: number;
     cashMovements: number;
