@@ -15,6 +15,7 @@ import type {
   CredigrupoInvestorDocumentType,
   CredigrupoGrInvestorSettings,
   CredigrupoHomologationAudit,
+  CredigrupoHomologationArchiveResult,
   CredigrupoOperationSummary,
   CredigrupoRuntimeDiagnostics,
   CredigrupoSimulationRequest,
@@ -227,6 +228,12 @@ export const auditCredigrupoHomologation = () =>
   request<{ action: 'audit_homologation'; readOnly: true; audit: CredigrupoHomologationAudit }>('/api/credigrupo/reconcile', {
     method: 'POST',
     body: JSON.stringify({ action: 'audit_homologation' }),
+  });
+
+export const archiveCredigrupoHomologation = (operationId: string) =>
+  request<CredigrupoHomologationArchiveResult>('/api/credigrupo/reconcile', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'archive_homologation', operationId }),
   });
 
 export interface CredigrupoLoanDiscoveryResult {

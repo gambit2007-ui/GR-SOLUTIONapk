@@ -10,7 +10,11 @@ import {
   listRecentOperationalErrors,
   type OperationalDiagnosticEvent,
 } from '../services/operationalLoggingService';
-import { auditCredigrupoHomologation, getCredigrupoRuntimeDiagnostics } from '../services/credigrupoService';
+import {
+  archiveCredigrupoHomologation,
+  auditCredigrupoHomologation,
+  getCredigrupoRuntimeDiagnostics,
+} from '../services/credigrupoService';
 import type { CredigrupoHomologationAudit, CredigrupoRuntimeDiagnostics } from '../lib/creditProviders/types';
 import { formatDateTimeBR } from '../utils/dateTime';
 import { resolveCashDelta } from '../utils/domainParsers';
@@ -87,6 +91,7 @@ const AuditTab: React.FC<AuditTabProps> = ({
   const [isLoadingCredigrupoDiagnostics, setIsLoadingCredigrupoDiagnostics] = useState(false);
   const [homologationAudit, setHomologationAudit] = useState<CredigrupoHomologationAudit | null>(null);
   const [isLoadingHomologationAudit, setIsLoadingHomologationAudit] = useState(false);
+  const [archivingHomologationOperationId, setArchivingHomologationOperationId] = useState<string | null>(null);
   const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
   const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
   const [selectedCashMovement, setSelectedCashMovement] = useState<CashMovement | null>(null);
@@ -169,6 +174,27 @@ const AuditTab: React.FC<AuditTabProps> = ({
       showToast('Nao foi possivel consultar a auditoria de homologacao', 'error');
     } finally {
       setIsLoadingHomologationAudit(false);
+    }
+  };
+
+  const handleArchiveCredigrupoHomologation = async (operationId: string, customerName: string) => {
+    if (!isAdmin || archivingHomologationOperationId) return;
+    const confirmed = window.confirm(
+      `Arquivar ${customerName} e os vinculos de homologacao Credigrupo? A proposta e a auditoria serao preservadas, sem cancelar ou alterar valores financeiros.`,
+    );
+    if (!confirmed) return;
+
+    setArchivingHomologationOperationId(operationId);
+    try {
+      const result = await archiveCredigrupoHomologation(operationId);
+      const refreshed = await auditCredigrupoHomologation();
+      setHomologationAudit(refreshed.audit);
+      showToast(result.alreadyArchived ? 'Dados de homologacao ja estavam arquivados' : 'Dados de homologacao arquivados com seguranca', 'success');
+    } catch (error) {
+      console.error('Falha ao arquivar homologacao Credigrupo:', error);
+      showToast('Nao foi possivel arquivar a homologacao. Nenhum dado financeiro foi alterado.', 'error');
+    } finally {
+      setArchivingHomologationOperationId(null);
     }
   };
 
@@ -406,6 +432,16 @@ const AuditTab: React.FC<AuditTabProps> = ({
                     <p className="break-all">Proposal IDs: {customer.operations.map((operation) => operation.proposalId).filter(Boolean).join(', ') || 'Nenhuma'}</p>
                     <p>Vinculos: {customer.linkedCounts.contracts} contrato(s), {customer.linkedCounts.cashMovements} movimento(s) de caixa, {customer.linkedCounts.ledgerEntries} registro(s) de ledger</p>
                   </div>
+                  {isAdmin && customer.operations.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => { void handleArchiveCredigrupoHomologation(customer.operations[0].id, customer.customer.name || 'este cliente de teste'); }}
+                      disabled={archivingHomologationOperationId !== null}
+                      className="mt-4 rounded-xl border border-amber-500/40 px-3 py-2 text-[8px] font-black uppercase tracking-widest text-amber-400 hover:bg-amber-500/10 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {archivingHomologationOperationId === customer.operations[0].id ? 'Arquivando homologacao...' : 'Arquivar dados de homologacao'}
+                    </button>
+                  )}
                 </div>
               ))}
               {homologationAudit.customers.length === 0 && (
