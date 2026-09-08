@@ -35,12 +35,13 @@ const digits = (value: unknown) => String(value || '').replace(/\D/g, '');
 const text = (value: unknown) => String(value || '').trim();
 
 export const CREDIGRUPO_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
-export const CREDIGRUPO_INVESTOR_DOCUMENT_TYPES: CredigrupoInvestorDocumentType[] = [
+export const CREDIGRUPO_KYC_DOCUMENT_TYPES: CredigrupoInvestorDocumentType[] = [
   'selfie',
   'idFront',
   'idBack',
   'proofOfResidence',
 ];
+export const CREDIGRUPO_INVESTOR_DOCUMENT_TYPES = CREDIGRUPO_KYC_DOCUMENT_TYPES;
 
 interface InvestorDocumentFile {
   name: string;
@@ -50,17 +51,17 @@ interface InvestorDocumentFile {
 
 export type CredigrupoInvestorDocumentFiles = Partial<Record<CredigrupoInvestorDocumentType, InvestorDocumentFile | null>>;
 
-const imageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const documentTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
 
 export const validateCredigrupoInvestorDocuments = (
   documents: CredigrupoInvestorDocumentFiles,
   options: { requireAll?: boolean } = {},
 ): CredigrupoInvestorFieldErrors => {
   const errors: CredigrupoInvestorFieldErrors = {};
-  const selected = CREDIGRUPO_INVESTOR_DOCUMENT_TYPES.filter((type) => documents[type]);
+  const selected = CREDIGRUPO_KYC_DOCUMENT_TYPES.filter((type) => documents[type]);
 
-  if (options.requireAll && selected.length !== CREDIGRUPO_INVESTOR_DOCUMENT_TYPES.length) {
-    CREDIGRUPO_INVESTOR_DOCUMENT_TYPES.forEach((type) => {
+  if (options.requireAll && selected.length !== CREDIGRUPO_KYC_DOCUMENT_TYPES.length) {
+    CREDIGRUPO_KYC_DOCUMENT_TYPES.forEach((type) => {
       if (!documents[type]) errors[`documents.${type}`] = 'Arquivo obrigatorio para o KYC.';
     });
   } else if (!options.requireAll && selected.length === 0) {
@@ -70,12 +71,9 @@ export const validateCredigrupoInvestorDocuments = (
   selected.forEach((type) => {
     const file = documents[type];
     if (!file) return;
-    const allowed = imageTypes.has(file.type)
-      || (type === 'proofOfResidence' && file.type === 'application/pdf');
+    const allowed = documentTypes.has(file.type);
     if (!allowed) {
-      errors[`documents.${type}`] = type === 'proofOfResidence'
-        ? 'Envie JPG, PNG, WEBP ou PDF.'
-        : 'Envie uma imagem JPG, PNG ou WEBP.';
+      errors[`documents.${type}`] = 'Envie JPG, PNG, WEBP ou PDF.';
     } else if (file.size <= 0 || file.size > CREDIGRUPO_DOCUMENT_MAX_BYTES) {
       errors[`documents.${type}`] = 'O arquivo deve ter no maximo 8 MB.';
     }

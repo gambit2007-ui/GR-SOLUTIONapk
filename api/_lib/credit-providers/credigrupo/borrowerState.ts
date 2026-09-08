@@ -1,9 +1,14 @@
+import type { CredigrupoBorrowerDocumentType } from '../../../../src/lib/creditProviders/types.js';
+
 export interface SafeCredigrupoBorrowerState {
   borrowerId: string;
   kycStatus: string;
   ccbEligible: boolean | null;
   eligibilityErrors: string[];
   eligibilityCachedAt: string | null;
+  documentsSubmitted: CredigrupoBorrowerDocumentType[];
+  documentsComplete: boolean;
+  documentsSubmittedAt: string | null;
 }
 
 interface SafeCredigrupoBorrowerStateInput {
@@ -12,6 +17,9 @@ interface SafeCredigrupoBorrowerStateInput {
   ccbEligible?: boolean;
   eligibilityErrors?: string[];
   eligibilityCachedAt?: string;
+  documentsSubmitted?: CredigrupoBorrowerDocumentType[];
+  documentsComplete?: boolean;
+  documentsSubmittedAt?: string;
 }
 
 const FULL_NAME_PATTERN = /^\p{L}+(?: \p{L}+)+$/u;
@@ -31,6 +39,13 @@ export const createSafeBorrowerState = (
     ? input.eligibilityErrors.filter((message): message is string => typeof message === 'string')
     : [],
   eligibilityCachedAt: input.eligibilityCachedAt || null,
+  documentsSubmitted: Array.isArray(input.documentsSubmitted)
+    ? input.documentsSubmitted.filter((type): type is CredigrupoBorrowerDocumentType => (
+      type === 'selfie' || type === 'idFront' || type === 'idBack' || type === 'proofOfResidence'
+    ))
+    : [],
+  documentsComplete: input.documentsComplete === true,
+  documentsSubmittedAt: input.documentsSubmittedAt || null,
 });
 
 export const createBorrowerPersistencePayload = <TUpdatedAt>(

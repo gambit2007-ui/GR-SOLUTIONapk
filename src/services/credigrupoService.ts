@@ -6,6 +6,8 @@ import type {
   CreateCredigrupoInvestorRequest,
   CreateCredigrupoInvestorResult,
   CredigrupoBorrowerState,
+  CredigrupoBorrowerDocumentReference,
+  CredigrupoBorrowerDocumentType,
   CredigrupoIntegrationStatus,
   CredigrupoInstallmentActionRequest,
   CredigrupoInstallmentPixResult,
@@ -26,6 +28,7 @@ import type {
   UpdateCredigrupoInvestorRequest,
   UpdateCredigrupoGrInvestorRequest,
   UploadCredigrupoInvestorDocumentsRequest,
+  UploadCredigrupoBorrowerDocumentsRequest,
 } from '../lib/creditProviders/types';
 
 interface ApiFailure {
@@ -98,7 +101,7 @@ export const createCredigrupoInvestor = (payload: CreateCredigrupoInvestorReques
     body: JSON.stringify(payload),
   });
 
-const investorDocumentExtension = (file: File) => {
+const credigrupoDocumentExtension = (file: File) => {
   if (file.type === 'image/jpeg') return 'jpg';
   if (file.type === 'image/png') return 'png';
   if (file.type === 'image/webp') return 'webp';
@@ -106,9 +109,9 @@ const investorDocumentExtension = (file: File) => {
   return 'bin';
 };
 
-export const uploadCredigrupoInvestorDocuments = async (
-  investorId: string,
-  documents: Partial<Record<CredigrupoInvestorDocumentType, File>>,
+const stageCredigrupoKycDocuments = async <TDocumentType extends string, TResult>(
+  documents: Partial<Record<TDocumentType, File>>,
+  submit: (references: Array<{ type: TDocumentType; storagePath: string }>) => Promise<TResult>,
 ) => {
   const user = auth.currentUser;
   if (!user) throw new CredigrupoServiceError('AUTH_REQUIRED', 'Faca login novamente.');
@@ -116,27 +119,35 @@ export const uploadCredigrupoInvestorDocuments = async (
   const uploadId = crypto.randomUUID();
   const storage = getStorage(firebaseApp);
   const uploadedReferences: Array<{
-    api: CredigrupoInvestorDocumentReference;
+    api: { type: TDocumentType; storagePath: string };
     storage: ReturnType<typeof ref>;
   }> = [];
 
   try {
-    for (const [type, file] of Object.entries(documents) as Array<[CredigrupoInvestorDocumentType, File]>) {
+    for (const [type, file] of Object.entries(documents) as Array<[TDocumentType, File]>) {
       if (!file) continue;
-      const storagePath = `credigrupo-kyc/${user.uid}/${uploadId}/${type}.${investorDocumentExtension(file)}`;
+      const storagePath = `credigrupo-kyc/${user.uid}/${uploadId}/${type}.${credigrupoDocumentExtension(file)}`;
       const storageReference = ref(storage, storagePath);
       await uploadBytes(storageReference, file, { contentType: file.type });
-      uploadedReferences.push({
-        api: { type, storagePath },
-        storage: storageReference,
-      });
+      uploadedReferences.push({ api: { type, storagePath }, storage: storageReference });
     }
 
+    return await submit(uploadedReferences.map((item) => item.api));
+  } finally {
+    await Promise.allSettled(uploadedReferences.map((item) => deleteObject(item.storage)));
+  }
+};
+
+export const uploadCredigrupoInvestorDocuments = async (
+  investorId: string,
+  documents: Partial<Record<CredigrupoInvestorDocumentType, File>>,
+) => {
+  return stageCredigrupoKycDocuments(documents, (references) => {
     const payload: UploadCredigrupoInvestorDocumentsRequest = {
       investorId,
-      documents: uploadedReferences.map((item) => item.api),
+      documents: references as CredigrupoInvestorDocumentReference[],
     };
-    return await request<{
+    return request<{
       success: true;
       documentsSubmitted: CredigrupoInvestorDocumentType[];
       documentsComplete: boolean;
@@ -144,10 +155,26 @@ export const uploadCredigrupoInvestorDocuments = async (
       method: 'POST',
       body: JSON.stringify(payload),
     });
-  } finally {
-    await Promise.allSettled(uploadedReferences.map((item) => deleteObject(item.storage)));
-  }
+  });
 };
+
+export const uploadCredigrupoBorrowerDocuments = async (
+  customerId: string,
+  documents: Partial<Record<CredigrupoBorrowerDocumentType, File>>,
+) => stageCredigrupoKycDocuments(documents, (references) => {
+  const payload: UploadCredigrupoBorrowerDocumentsRequest = {
+    customerId,
+    documents: references as CredigrupoBorrowerDocumentReference[],
+  };
+  return request<{
+    success: true;
+    documentsSubmitted: CredigrupoBorrowerDocumentType[];
+    documentsComplete: boolean;
+  }>('/api/credigrupo/borrowers?route=documents', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+});
 
 export const updateCredigrupoInvestor = (payload: UpdateCredigrupoInvestorRequest) =>
   request<{ investor: CredigrupoInvestorSummary }>('/api/credigrupo/investors', {

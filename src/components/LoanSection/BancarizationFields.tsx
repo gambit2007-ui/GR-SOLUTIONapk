@@ -1,19 +1,26 @@
 import React, { useState } from 'react';
 import { isCredigrupoCustomerAllowed } from '../../lib/creditProviders/dataScope';
-import { CheckCircle, Loader2, ShieldCheck } from 'lucide-react';
+import { CheckCircle, FileText, Loader2, ShieldCheck, Upload } from 'lucide-react';
 import type { Customer } from '../../types';
 import type {
   CredigrupoBorrowerState,
+  CredigrupoBorrowerDocumentType,
   CredigrupoEnvironment,
   CredigrupoKycData,
   CredigrupoSimulationResult,
 } from '../../lib/creditProviders/types';
 import { getBorrowerEligibilityPresentation } from '../../lib/creditProviders/borrowerEligibility';
 import {
+  CREDIGRUPO_KYC_DOCUMENT_TYPES,
+  type CredigrupoInvestorFieldErrors,
+  validateCredigrupoInvestorDocuments,
+} from '../../lib/creditProviders/investorValidation';
+import {
   CredigrupoServiceError,
   ensureCredigrupoBorrower,
   getStoredCredigrupoBorrower,
   simulateCredigrupoLoan,
+  uploadCredigrupoBorrowerDocuments,
 } from '../../services/credigrupoService';
 
 export interface BancarizationTerms {
@@ -72,20 +79,30 @@ interface BancarizationFieldsProps {
   onChange: (value: BancarizationDraft) => void;
   showToast: (message: string, type?: 'success' | 'error') => void;
   environment: CredigrupoEnvironment;
+  isAdmin: boolean;
 }
 
 const inputClass = 'w-full bg-black border border-zinc-800 rounded-xl p-3 text-white outline-none focus:border-[#BF953F] text-[10px]';
 const labelClass = 'text-[8px] font-black text-zinc-500 uppercase tracking-widest ml-1';
+const documentDefinitions: Array<{ type: CredigrupoBorrowerDocumentType; label: string; accept: string }> = [
+  { type: 'selfie', label: 'Selfie', accept: 'image/jpeg,image/png,image/webp,application/pdf' },
+  { type: 'idFront', label: 'Documento (frente)', accept: 'image/jpeg,image/png,image/webp,application/pdf' },
+  { type: 'idBack', label: 'Documento (verso)', accept: 'image/jpeg,image/png,image/webp,application/pdf' },
+  { type: 'proofOfResidence', label: 'Comprovante de residencia', accept: 'image/jpeg,image/png,image/webp,application/pdf' },
+];
 
 const currencyFromCents = (value: number) =>
   (Number(value || 0) / 100).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
-const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, terms, value, onChange, showToast, environment }) => {
+const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, terms, value, onChange, showToast, environment, isAdmin }) => {
   const customerAllowed = Boolean(customer && isCredigrupoCustomerAllowed(customer, environment));
   const isSandbox = environment === 'sandbox';
   const [loadingBorrower, setLoadingBorrower] = useState(false);
   const [syncingBorrower, setSyncingBorrower] = useState(false);
   const [simulating, setSimulating] = useState(false);
+  const [documents, setDocuments] = useState<Partial<Record<CredigrupoBorrowerDocumentType, File>>>({});
+  const [documentErrors, setDocumentErrors] = useState<CredigrupoInvestorFieldErrors>({});
+  const [uploadingDocuments, setUploadingDocuments] = useState(false);
 
   const patch = (fields: Partial<BancarizationDraft>) => onChange({ ...value, ...fields });
   const patchKyc = (fields: Partial<CredigrupoKycData>) => patch({ kycData: { ...value.kycData, ...fields }, simulation: undefined });
@@ -137,6 +154,34 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
       showToast(error instanceof Error ? error.message : 'Nao foi possivel sincronizar o tomador', 'error');
     } finally {
       setSyncingBorrower(false);
+    }
+  };
+
+  const handleBorrowerDocuments = async () => {
+    if (!customer || !value.borrower || !isAdmin) return;
+    const errors = validateCredigrupoInvestorDocuments(documents);
+    setDocumentErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+
+    setUploadingDocuments(true);
+    try {
+      const result = await uploadCredigrupoBorrowerDocuments(customer.id, documents);
+      patch({
+        borrower: {
+          ...value.borrower,
+          documentsSubmitted: result.documentsSubmitted,
+          documentsComplete: result.documentsComplete,
+          documentsSubmittedAt: new Date().toISOString(),
+        },
+        simulation: undefined,
+      });
+      setDocuments({});
+      setDocumentErrors({});
+      showToast('Documentos enviados para a Credigrupo.', 'success');
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Nao foi possivel enviar os documentos.', 'error');
+    } finally {
+      setUploadingDocuments(false);
     }
   };
 
@@ -249,6 +294,48 @@ const BancarizationFields: React.FC<BancarizationFieldsProps> = ({ customer, ter
           <div className="rounded-xl border border-zinc-800 bg-black/50 p-3 flex items-center justify-between gap-3">
             <div><p className="text-[8px] font-black text-zinc-400 uppercase">KYC: {value.borrower.kycStatus}</p><p className="text-[7px] text-zinc-600 mt-1 break-all">ID: {value.borrower.borrowerId}</p></div>
             {value.borrower.kycStatus === 'approved' && <CheckCircle size={17} className="text-emerald-500" />}
+          </div>
+          <div className="rounded-xl border border-[#BF953F]/25 bg-black/40 p-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="flex items-center gap-2 text-[8px] font-black uppercase tracking-widest text-[#F5D77B]"><FileText size={13} /> Documentos de KYC</p>
+                <p className="mt-1 text-[7px] uppercase tracking-wider text-zinc-600">
+                  {value.borrower.documentsSubmitted?.length || 0} de {CREDIGRUPO_KYC_DOCUMENT_TYPES.length} enviados. JPG, PNG, WEBP ou PDF, ate 8 MB por arquivo.
+                </p>
+              </div>
+              {value.borrower.documentsComplete && <span className="rounded-full border border-emerald-500/25 bg-emerald-500/10 px-2 py-1 text-[7px] font-black uppercase tracking-widest text-emerald-400">Completo</span>}
+            </div>
+            {isAdmin ? <>
+              <p className="mt-3 text-[8px] leading-relaxed text-zinc-400">Envie um ou mais arquivos. A Credigrupo preserva documentos anteriores e substitui somente o tipo reenviado.</p>
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {documentDefinitions.map((definition) => {
+                  const file = documents[definition.type];
+                  const error = documentErrors[`documents.${definition.type}`];
+                  return (
+                    <label key={definition.type} className={`cursor-pointer rounded-xl border p-3 ${error ? 'border-red-500/40' : file ? 'border-emerald-500/35' : 'border-zinc-800 hover:border-[#BF953F]/40'}`}>
+                      <span className="block text-[8px] font-black uppercase tracking-widest text-zinc-300">{definition.label}</span>
+                      <span className="mt-1 block truncate text-[7px] text-zinc-600">{file ? file.name : 'Selecionar arquivo'}</span>
+                      <input
+                        className="sr-only"
+                        type="file"
+                        accept={definition.accept}
+                        onChange={(event) => {
+                          const selected = event.target.files?.[0];
+                          setDocuments((current) => ({ ...current, [definition.type]: selected }));
+                          setDocumentErrors((current) => ({ ...current, [`documents.${definition.type}`]: undefined }));
+                        }}
+                      />
+                      {error && <span className="mt-2 block text-[7px] text-red-400">{error}</span>}
+                    </label>
+                  );
+                })}
+              </div>
+              <button type="button" onClick={() => void handleBorrowerDocuments()} disabled={uploadingDocuments || Object.keys(documents).length === 0} className="mt-3 inline-flex items-center gap-2 rounded-xl border border-[#BF953F]/30 bg-[#BF953F]/10 px-4 py-2.5 text-[8px] font-black uppercase tracking-widest text-[#F5D77B] disabled:opacity-40">
+                {uploadingDocuments ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />} Enviar documentos selecionados
+              </button>
+            </> : (
+              <p className="mt-3 text-[8px] text-amber-300">Somente administradores podem enviar documentos de KYC.</p>
+            )}
           </div>
           <div className={`rounded-xl border p-3 ${
             eligibility.status === 'ELIGIBLE'
