@@ -94,6 +94,14 @@ export interface CredigrupoHomologationAudit {
   };
 }
 
+export interface CredigrupoHomologationArchiveResult {
+  action: 'archive_homologation';
+  archived: boolean;
+  alreadyArchived: boolean;
+  customerId: string;
+  operationIds: string[];
+}
+
 export interface CredigrupoInstallmentPixResult {
   brCode: string;
   qrCodeImage: string;

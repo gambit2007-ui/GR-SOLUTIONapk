@@ -19,6 +19,7 @@ import {
   buildSandboxHomologationAuditSummary,
   type HomologationAuditDocument,
 } from '../_lib/credit-providers/credigrupo/homologationAudit.js';
+import { getHomologationArchiveBlocker } from '../_lib/credit-providers/credigrupo/homologationArchive.js';
 import { requireCredigrupoProposalId } from '../_lib/credit-providers/credigrupo/operationGuards.js';
 import { syncCredigrupoInstallments } from '../_lib/credit-providers/credigrupo/installments.js';
 import { processStoredCredigrupoEvent } from '../_lib/credit-providers/credigrupo/webhookProcessor.js';
@@ -319,6 +320,54 @@ const auditSandboxHomologation = async () => {
   return buildSandboxHomologationAuditSummary(customers);
 };
 
+const archiveSandboxHomologation = async (
+  customerId: string,
+  actor: { uid: string; email?: string; name?: string },
+) => {
+  const audit = await auditHomologationCustomer(customerId);
+  const blocker = getHomologationArchiveBlocker(audit);
+  if (blocker === 'CUSTOMER_NOT_FOUND') throw new ApiError(404, blocker, 'Cliente de homologacao nao encontrado.');
+  if (blocker === 'NO_CREDIGRUPO_RECORDS') throw new ApiError(409, blocker, 'Nenhum vinculo Credigrupo foi encontrado para arquivamento.');
+  if (blocker === 'FINANCIAL_EFFECT_FOUND') throw new ApiError(409, blocker, 'Homologacao com vinculo financeiro nao pode ser arquivada.');
+  if (blocker === 'UNCONFIRMED_SANDBOX_RECORD') throw new ApiError(409, blocker, 'Todos os vinculos precisam estar identificados como sandbox.');
+
+  const [customerSnapshot, borrowerSnapshot, simulationSnapshot, operationSnapshot] = await Promise.all([
+    adminDb.doc(`clientes/${customerId}`).get(),
+    adminDb.collection('creditBorrowers').where('customerId', '==', customerId).limit(50).get(),
+    adminDb.collection('creditSimulations').where('customerId', '==', customerId).limit(50).get(),
+    adminDb.collection('creditOperations').where('customerId', '==', customerId).limit(50).get(),
+  ]);
+  if (!customerSnapshot.exists) throw new ApiError(404, 'CUSTOMER_NOT_FOUND', 'Cliente de homologacao nao encontrado.');
+
+  const records = [customerSnapshot, ...borrowerSnapshot.docs, ...simulationSnapshot.docs, ...operationSnapshot.docs];
+  const alreadyArchived = records.every((record) => record.data()?.archived === true || Boolean(record.data()?.archivedAt));
+  if (alreadyArchived) {
+    return { archived: false, alreadyArchived: true, customerId, operationIds: audit.operations.map((operation) => operation.id) };
+  }
+
+  const archivedAt = FieldValue.serverTimestamp();
+  const archiveMetadata = removeUndefined({
+    environment: 'sandbox',
+    testData: true,
+    archived: true,
+    archivedAt,
+    archivedReason: 'CREDIGRUPO_SANDBOX_HOMOLOGATION',
+    archivedByUid: actor.uid,
+    archivedByEmail: actor.email?.toLowerCase(),
+    archivedByName: actor.name,
+  });
+  const batch = adminDb.batch();
+  records.forEach((record) => batch.set(record.ref, archiveMetadata, { merge: true }));
+  await batch.commit();
+
+  return {
+    archived: true,
+    alreadyArchived: false,
+    customerId,
+    operationIds: audit.operations.map((operation) => operation.id),
+  };
+};
+
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
@@ -353,6 +402,12 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const operationSnapshot = await operationRef.get();
     if (!operationSnapshot.exists) throw new ApiError(404, 'OPERATION_NOT_FOUND', 'Operacao nao encontrada.');
     const operation = operationSnapshot.data() as StoredCredigrupoOperation;
+    if (input.action === 'archive_homologation') {
+      return sendJson(response, 200, {
+        action: 'archive_homologation',
+        ...await archiveSandboxHomologation(operation.customerId, actor),
+      });
+    }
     if (input.action === 'discover_existing_loan') {
       return sendJson(response, 200, await discoverExistingLoan(operationId, operation, actor));
     }
