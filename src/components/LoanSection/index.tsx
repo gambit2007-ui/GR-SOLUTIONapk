@@ -174,6 +174,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [hasCredigrupoOperations, setHasCredigrupoOperations] = useState(false);
   const [bancarizationDraft, setBancarizationDraft] = useState<BancarizationDraft>(() => createDefaultBancarizationDraft());
   const [creatingBancarized, setCreatingBancarized] = useState(false);
+  const [creatingDirect, setCreatingDirect] = useState(false);
   const [bancarizationRefreshKey, setBancarizationRefreshKey] = useState(0);
   const pendingBancarizationOperationIdsRef = React.useRef<Record<string, string>>({});
 
@@ -897,6 +898,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       return;
     }
 
+    if (creatingDirect) return;
+
     if (formData.interestType === 'SPLIT') {
       const totalMonthlyRate = Number(formData.interestRate);
       const paidMonthlyRate = Number(formData.monthlyPaidInterestRate);
@@ -960,6 +963,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       },
     };
 
+    setCreatingDirect(true);
     try {
       if (editingLoanId) {
         const currentLoan = loans.find(l => l.id === editingLoanId);
@@ -1047,6 +1051,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       if (editingLoanId) {
         showToast('Erro ao atualizar contrato', 'error');
       }
+    } finally {
+      setCreatingDirect(false);
     }
   };
 
@@ -2456,8 +2462,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 />
               )}
 
-              <button disabled={creatingBancarized || (formData.formalizationType === 'BANCARIZED' && !bancarizationDraft.simulation)} className="w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                {creatingBancarized && <Loader2 size={13} className="animate-spin" />}
+              <button disabled={creatingDirect || creatingBancarized || (formData.formalizationType === 'BANCARIZED' && !bancarizationDraft.simulation)} className="w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {(creatingDirect || creatingBancarized) && <Loader2 size={13} className="animate-spin" />}
                 {editingLoanId ? 'Salvar Alteracoes' : formData.formalizationType === 'BANCARIZED' ? 'Confirmar Bancarizacao' : 'Efetivar Contrato'}
               </button>
             </form>

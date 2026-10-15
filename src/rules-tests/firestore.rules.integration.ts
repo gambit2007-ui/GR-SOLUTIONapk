@@ -105,6 +105,8 @@ describe('firestore.rules', () => {
       });
       tx.set(loanRef, {
         ...validLoan,
+          frequency: 'DIARIO',
+          dailyChargeDays: [1, 2, 3, 4, 5, 6],
         lastOperationId: movementRef.id,
         lastOperationType: 'LOAN_CREATED',
         lastOperationAt: serverTimestamp(),

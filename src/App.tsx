@@ -59,6 +59,12 @@ const ViewLoadingFallback: React.FC = () => (
   </div>
 );
 
+const getSafeErrorCode = (error: unknown): string | null => {
+  if (typeof error !== 'object' || error === null || !('code' in error)) return null;
+  const code = String((error as { code?: unknown }).code || '').trim().toLowerCase();
+  return /^[a-z]+(?:-[a-z]+)*$/.test(code) ? code : null;
+};
+
 const App: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -375,7 +381,8 @@ const App: React.FC = () => {
       return createdLoanId;
     } catch (error: unknown) {
       reportAppError('loan.create', error);
-      showToast('Erro ao salvar contrato', 'error');
+      const code = getSafeErrorCode(error);
+      showToast(code ? `Erro ao salvar contrato (${code})` : 'Erro ao salvar contrato', 'error');
       throw error;
     }
   };
