@@ -246,6 +246,8 @@ export interface Loan {
   installmentCount?: number;
   installmentsCount?: number;
   frequency: Frequency;
+  /** Weekdays used by direct daily contracts (0 = Sunday through 6 = Saturday). */
+  dailyChargeDays?: number[];
   interestType: InterestType;
   monthlyPaidInterestRate?: number;
   monthlyAccruedInterestRate?: number;

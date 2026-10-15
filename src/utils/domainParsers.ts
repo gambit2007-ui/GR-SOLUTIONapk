@@ -230,6 +230,12 @@ const parseFrequency = (value: unknown): Frequency => {
   return 'MENSAL';
 };
 
+const parseDailyChargeDays = (value: unknown): number[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const days = [...new Set(value.filter((day): day is number => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
+  return days.length > 0 ? days : undefined;
+};
+
 const parseInterestType = (value: unknown): InterestType => {
   const normalized = String(value ?? '').trim().toUpperCase();
   if (normalized === 'PRICE') return 'PRICE';
@@ -331,6 +337,7 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     installmentCount: installmentsCount,
     installmentsCount,
     frequency: parseFrequency(payload.frequency),
+    dailyChargeDays: parseDailyChargeDays(payload.dailyChargeDays),
     interestType: parseInterestType(payload.interestType),
     monthlyPaidInterestRate: toNumber(payload.monthlyPaidInterestRate, 0) || undefined,
     monthlyAccruedInterestRate: toNumber(payload.monthlyAccruedInterestRate, 0) || undefined,

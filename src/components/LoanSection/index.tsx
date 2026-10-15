@@ -144,6 +144,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     monthlyAccruedInterestRate: '',
     interestType: 'SIMPLE' as 'SIMPLE' | 'PRICE' | 'SPLIT',
     frequency: 'MONTHLY' as 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY',
+    dailyChargeDays: [1, 2, 3, 4, 5, 6],
     installmentsCount: '',
     startDate: getLocalISODate(),
     formalizationType: 'DIRECT' as 'DIRECT' | 'BANCARIZED',
@@ -472,8 +473,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const baseDate = new Date(formData.startDate + 'T12:00:00'); // Use noon to avoid timezone shifts
     const effectiveFrequency = formData.interestType === 'SPLIT' ? 'MONTHLY' : formData.frequency;
 
+    if (effectiveFrequency === 'DAILY' && formData.dailyChargeDays.length === 0) return [];
+
     const buildDueDate = (index: number) => {
-      return buildInstallmentDueDate(baseDate, index, effectiveFrequency) || getLocalISODate(baseDate);
+      return buildInstallmentDueDate(baseDate, index, effectiveFrequency, formData.dailyChargeDays) || getLocalISODate(baseDate);
     };
 
     if (formData.interestType === 'SPLIT') {
@@ -564,6 +567,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       monthlyAccruedInterestRate: String(loan.monthlyAccruedInterestRate ?? ''),
       interestType: fromLegacyInterestType(loan.interestType),
       frequency: fromLegacyFrequency(loan.frequency),
+      dailyChargeDays: loan.dailyChargeDays?.length ? loan.dailyChargeDays : [1, 2, 3, 4, 5, 6],
       installmentsCount: String(loanInstallmentsCount(loan)),
       startDate: loan.startDate || getLocalISODate(),
       formalizationType: 'DIRECT',
@@ -911,6 +915,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       }
     }
 
+    if (formData.frequency === 'DAILY' && formData.dailyChargeDays.length === 0) {
+      showToast('Selecione ao menos um dia de cobranca para o contrato diario.', 'error');
+      return;
+    }
+
     const installments = calculateInstallments();
     if (!installments.length) {
       showToast('Nao foi possivel calcular as parcelas. Revise os dados.', 'error');
@@ -931,6 +940,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       monthlyPaidInterestRate: isSplitContract ? Number(formData.monthlyPaidInterestRate) : undefined,
       monthlyAccruedInterestRate: isSplitContract ? Number(formData.monthlyAccruedInterestRate) : undefined,
       frequency: isSplitContract ? 'MENSAL' : toLegacyFrequency(formData.frequency),
+      dailyChargeDays: !isSplitContract && formData.frequency === 'DAILY' ? formData.dailyChargeDays : undefined,
       installmentCount: Number(formData.installmentsCount),
       installmentsCount: Number(formData.installmentsCount),
       totalToReturn,
@@ -1002,6 +1012,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           monthlyPaidInterestRate: payload.monthlyPaidInterestRate,
           monthlyAccruedInterestRate: payload.monthlyAccruedInterestRate,
           frequency: payload.frequency || 'MENSAL',
+          dailyChargeDays: payload.dailyChargeDays,
           installmentCount: Number(payload.installmentCount || payload.installmentsCount || 0),
           installmentsCount: Number(payload.installmentsCount || payload.installmentCount || 0),
           totalToReturn: Number(totalToReturn.toFixed(2)),
@@ -2284,6 +2295,36 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   )}
                 </div>
               </div>
+              {formData.formalizationType === 'DIRECT' && formData.interestType !== 'SPLIT' && formData.frequency === 'DAILY' && (
+                <fieldset className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">
+                  <legend className="px-1 text-[9px] font-black text-zinc-500 uppercase tracking-widest">Dias de cobranca</legend>
+                  <p className="mb-3 text-[10px] text-zinc-400">Selecione os dias em que cada parcela diaria podera vencer.</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {[
+                      { value: 0, label: 'DOM' }, { value: 1, label: 'SEG' }, { value: 2, label: 'TER' },
+                      { value: 3, label: 'QUA' }, { value: 4, label: 'QUI' }, { value: 5, label: 'SEX' }, { value: 6, label: 'SAB' },
+                    ].map((day) => {
+                      const selected = formData.dailyChargeDays.includes(day.value);
+                      return (
+                        <label key={day.value} className={`flex cursor-pointer items-center justify-between rounded-xl border px-3 py-2 text-[10px] font-black tracking-wider ${selected ? 'border-[#BF953F] bg-[#BF953F]/15 text-[#E5C46A]' : 'border-zinc-800 text-zinc-500'}`}>
+                          <span>{day.label}</span>
+                          <input
+                            type="checkbox"
+                            className="accent-[#BF953F]"
+                            checked={selected}
+                            onChange={() => setFormData((current) => ({
+                              ...current,
+                              dailyChargeDays: selected
+                                ? current.dailyChargeDays.filter((value) => value !== day.value)
+                                : [...current.dailyChargeDays, day.value].sort((a, b) => a - b),
+                            }))}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>

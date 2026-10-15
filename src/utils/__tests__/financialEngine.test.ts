@@ -50,6 +50,12 @@ describe('motor financeiro', () => {
     expect(buildInstallmentDueDate('2024-01-31', 1, 'MONTHLY')).toBe('2024-02-29');
   });
 
+  it('pula dias nao selecionados em contratos diarios', () => {
+    expect(buildInstallmentDueDate('2026-10-02', 1, 'DAILY', [1, 2, 3, 4, 5, 6])).toBe('2026-10-03');
+    expect(buildInstallmentDueDate('2026-10-02', 2, 'DAILY', [1, 2, 3, 4, 5, 6])).toBe('2026-10-05');
+    expect(buildInstallmentDueDate('2026-10-02', 1, 'DAILY', [1, 2, 3, 4, 5])).toBe('2026-10-05');
+  });
+
   it('calcula multa por trechos depois de pagamento parcial', () => {
     const installment: Installment = {
       number: 1,

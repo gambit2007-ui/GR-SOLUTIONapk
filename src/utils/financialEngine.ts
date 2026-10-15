@@ -449,7 +449,7 @@ export const applyLoanPaymentToCurrentLoan = (
             number: baseNumber + index,
             amount,
             value: amount,
-            dueDate: buildInstallmentDueDate(startDate, index, frequency) || startDate,
+            dueDate: buildInstallmentDueDate(startDate, index, frequency, currentLoan.dailyChargeDays) || startDate,
             status: 'PENDENTE',
             paidAmount: 0,
             partialPaid: 0,

@@ -135,6 +135,15 @@ const getFrequencyLabel = (frequency: unknown) => {
   return 'Mensal';
 };
 
+const getDailyChargeDaysLabel = (days: unknown): string | null => {
+  if (!Array.isArray(days)) return null;
+  const labels = ['Domingo', 'Segunda', 'Terca', 'Quarta', 'Quinta', 'Sexta', 'Sabado'];
+  const selected = [...new Set(days.filter((day): day is number => Number.isInteger(day) && day >= 0 && day <= 6))]
+    .sort((a, b) => a - b)
+    .map((day) => labels[day]);
+  return selected.length > 0 ? selected.join(', ') : null;
+};
+
 const getInstallmentPaidValue = (installment: Installment) => {
   const paid = installmentPaidAmount(installment);
   return normalizeInstallmentStatus(installment.status) === 'PAID'
@@ -413,6 +422,7 @@ export const buildContractPDFDocument = (
     options.dailyLateFeeRate ?? DEFAULT_DAILY_LATE_FEE_RATE,
   );
   const frequencyLabel = getFrequencyLabel(loan.frequency);
+  const dailyChargeDaysLabel = getDailyChargeDaysLabel(loan.dailyChargeDays);
   const issueDate = formatDateBR(generatedAt);
   const startDate = formatDateBR(loan.startDate || loan.createdAt);
   const firstDueDate = formatDateBR(firstInstallment?.dueDate || loan.startDate);
@@ -484,6 +494,7 @@ export const buildContractPDFDocument = (
     { label: 'Pago nas parcelas', value: formatCurrency(paidOnInstallments) },
     { label: 'Saldo nominal restante', value: formatCurrency(nominalBalance) },
     { label: 'Frequência', value: frequencyLabel },
+    ...(dailyChargeDaysLabel ? [{ label: 'Dias de cobrança', value: dailyChargeDaysLabel }] : []),
     { label: 'Primeiro vencimento', value: firstDueDate },
   ], y);
 
