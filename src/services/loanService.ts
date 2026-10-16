@@ -267,8 +267,9 @@ export const cancelLoan = async (
 };
 
 /**
- * Deletes only an untouched direct contract. The original grant withdrawal is
- * retained and reversed, so the cash book remains a complete audit trail.
+ * Deletes an untouched or cancelled direct contract without financial history.
+ * The original grant withdrawal is retained and reversed, preserving the
+ * complete cash-book audit trail.
  */
 export const deletePristineDirectLoan = async (loanId: string, actor?: MovementActor): Promise<void> => {
   const safeLoanId = String(loanId || '').trim();
@@ -303,8 +304,9 @@ export const deletePristineDirectLoan = async (loanId: string, actor?: MovementA
       Number(loan.version || 0) === 0 &&
       loan.lastOperationType === 'LOAN_CREATED' &&
       loan.lastOperationId === originalMovementId;
+    const isCancelledWithoutFinancialHistory = normalizeLoanStatus(loan.status) === 'CANCELLED';
     if (!isDirectLoan) throw new Error('CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO');
-    if (!isPristineActiveLoan || hasFinancialHistory(loan)) {
+    if ((!isPristineActiveLoan && !isCancelledWithoutFinancialHistory) || hasFinancialHistory(loan)) {
       throw new Error('CONTRATO_NAO_ELEGIVEL_PARA_EXCLUSAO_SEGURA');
     }
     if (!originalMovementSnapshot.exists()) throw new Error('MOVIMENTO_ORIGINAL_NAO_ENCONTRADO');

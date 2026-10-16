@@ -158,18 +158,20 @@ service cloud.firestore {
         request.resource.data.updatedAt == request.time;
     }
 
-    function isPristineDirectLoanForDeletion(data, loanId) {
+    function isDeletableDirectLoan(data, loanId) {
+      let isPristineActiveLoan = data.status in ['ATIVO', 'ACTIVE'] &&
+        data.get('version', 0) == 0 &&
+        data.lastOperationType == 'LOAN_CREATED' &&
+        data.lastOperationId == 'loan-created-' + loanId;
+      let isCancelledLoan = data.status in ['CANCELADO', 'CANCELLED'];
       return data.get('formalizationType', 'DIRECT') != 'BANCARIZED' &&
         data.get('provider', 'GR') != 'CREDIGRUPO' &&
-        data.status in ['ATIVO', 'ACTIVE'] &&
-        data.get('version', 0) == 0 &&
         data.get('hasFinancialHistory', false) == false &&
         data.get('paidAmount', 0) == 0 &&
         data.get('fiscalPaymentEntries', []).size() == 0 &&
         data.get('renewalHistory', []).size() == 0 &&
         data.get('renewCount', 0) == 0 &&
-        data.lastOperationType == 'LOAN_CREATED' &&
-        data.lastOperationId == 'loan-created-' + loanId;
+        (isPristineActiveLoan || isCancelledLoan);
     }
 
     function validOriginalLoanWithdrawal(loanId, loanData) {
@@ -223,7 +225,7 @@ service cloud.firestore {
     }
 
     function validPristineDirectLoanDeletion(loanId) {
-      return isPristineDirectLoanForDeletion(resource.data, loanId) &&
+      return isDeletableDirectLoan(resource.data, loanId) &&
         validOriginalLoanWithdrawal(loanId, resource.data) &&
         validLoanDeletionReversal(loanId, resource.data) &&
         validLoanDeletionCashUpdate(loanId, resource.data) &&
@@ -302,7 +304,7 @@ service cloud.firestore {
         eventId == 'loan-deleted-' + request.resource.data.loanId &&
         exists(/databases/$(database)/documents/loans/$(request.resource.data.loanId)) &&
         !existsAfter(/databases/$(database)/documents/loans/$(request.resource.data.loanId)) &&
-        isPristineDirectLoanForDeletion(
+        isDeletableDirectLoan(
           get(/databases/$(database)/documents/loans/$(request.resource.data.loanId)).data,
           request.resource.data.loanId
         ) &&
