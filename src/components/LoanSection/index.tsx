@@ -672,7 +672,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const label = loan.contractNumber || loan.id;
     const confirmed = window.confirm(
       `Excluir definitivamente o contrato ${label}?\n\n` +
-      'Permitido somente porque ele nao possui recebimentos nem alteracoes. ' +
+      'Permitido somente porque ele nao possui recebimentos, renovacoes ou outras movimentacoes financeiras. ' +
       'A retirada inicial sera preservada e recebera um estorno auditavel no caixa.',
     );
     if (!confirmed) return;
@@ -1434,12 +1434,15 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             loanInstallments.some((inst) => getRemainingInstallmentValue(inst) > 0);
           const canInterestOnlyRenew = !isBancarized && canLoanRenewWithInterestOnly(loan);
           const canChargeLoan = resolvedLoanStatus === 'ACTIVE' && totalRemainingLoanAmount > 0;
-          const canDeletePristineDirectLoan = isAdmin &&
-            !isBancarized &&
+          const isPristineActiveDirectLoan =
             resolvedLoanStatus === 'ACTIVE' &&
             Number(loan.version || 0) === 0 &&
             loan.lastOperationType === 'LOAN_CREATED' &&
-            loan.lastOperationId === `loan-created-${loan.id}` &&
+            loan.lastOperationId === `loan-created-${loan.id}`;
+          const isCancelledDirectLoan = resolvedLoanStatus === 'CANCELLED';
+          const canDeletePristineDirectLoan = isAdmin &&
+            !isBancarized &&
+            (isPristineActiveDirectLoan || isCancelledDirectLoan) &&
             !loan.hasFinancialHistory &&
             Number(loan.paidAmount || 0) === 0 &&
             (!Array.isArray(loan.fiscalPaymentEntries) || loan.fiscalPaymentEntries.length === 0) &&

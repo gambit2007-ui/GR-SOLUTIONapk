@@ -183,6 +183,62 @@ describe('firestore.rules', () => {
     await assertSucceeds(getDoc(auditRef));
   });
 
+  it('permite ao admin excluir contrato direto cancelado sem recebimentos com estorno e auditoria atomicos', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'settings', 'accessControl'), { enforced: true });
+      await setDoc(doc(db, 'authorizedUsers', 'admin-1'), { role: 'ADMIN' });
+      await setDoc(doc(db, 'loans', 'loan-cancelled-deleteable'), {
+        ...validLoan,
+        status: 'CANCELADO',
+        version: 1,
+        lastOperationId: 'cancellation-loan-cancelled-deleteable',
+        lastOperationType: 'CANCELLATION',
+      });
+      await setDoc(doc(db, 'cashMovement', 'loan-created-loan-cancelled-deleteable'), {
+        type: 'RETIRADA', amount: 100, value: 100,
+        description: 'EMPRESTIMO: CLIENTE TESTE', date: '2026-01-01T12:00:00.000Z',
+        loanId: 'loan-cancelled-deleteable', operationId: 'loan-created-loan-cancelled-deleteable',
+        createdByUid: 'admin-1', recordedAt: serverTimestamp(),
+      });
+      await setDoc(doc(db, 'settings', 'caixa'), { value: -100 });
+    });
+
+    const admin = testEnvironment.authenticatedContext('admin-1').firestore();
+    const loanRef = doc(admin, 'loans', 'loan-cancelled-deleteable');
+    const originalRef = doc(admin, 'cashMovement', 'loan-created-loan-cancelled-deleteable');
+    const reversalRef = doc(admin, 'cashMovement', 'loan-deletion-reversal-loan-cancelled-deleteable');
+    const auditRef = doc(admin, 'financialAuditEvents', 'loan-deleted-loan-cancelled-deleteable');
+    const cashRef = doc(admin, 'settings', 'caixa');
+
+    await assertSucceeds(runTransaction(admin, async (tx) => {
+      await tx.get(loanRef);
+      await tx.get(originalRef);
+      await tx.get(cashRef);
+      tx.set(reversalRef, {
+        type: 'ENTRADA', amount: 100, value: 100,
+        description: 'ESTORNO: EXCLUSAO DE CONTRATO 2026001', date: '2026-01-01T12:00:00.000Z',
+        loanId: loanRef.id, operationId: reversalRef.id,
+        createdByUid: 'admin-1', recordedAt: serverTimestamp(),
+      });
+      tx.set(cashRef, {
+        value: 0, lastMovementId: reversalRef.id,
+        updatedByUid: 'admin-1', updatedAt: serverTimestamp(),
+      }, { merge: true });
+      tx.set(auditRef, {
+        id: auditRef.id, type: 'LOAN_DELETION', loanId: loanRef.id,
+        originalMovementId: originalRef.id, reversalMovementId: reversalRef.id,
+        amount: 100, previousCash: -100, newCash: 0,
+        actorUid: 'admin-1', recordedAt: serverTimestamp(),
+      });
+      tx.delete(loanRef);
+    }));
+
+    await assertSucceeds(getDoc(originalRef));
+    await assertSucceeds(getDoc(reversalRef));
+    await assertSucceeds(getDoc(auditRef));
+  });
+
   it('bloqueia exclusao de contrato direto para usuario sem permissao ADMIN', async () => {
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
