@@ -1,8 +1,11 @@
 import {
   collection,
   doc,
+  getDocs,
+  query,
   runTransaction,
   serverTimestamp,
+  where,
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { Installment, Loan, LoanDraft, LoanType, MovementType } from '../types';
@@ -30,6 +33,19 @@ export interface LoanMovementPayload {
 }
 
 const round2 = (value: number): number => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+
+const hasFinancialHistory = (loan: Loan): boolean => (
+  loan.hasFinancialHistory === true ||
+  Number(loan.paidAmount || 0) > 0 ||
+  (Array.isArray(loan.fiscalPaymentEntries) && loan.fiscalPaymentEntries.length > 0) ||
+  (Array.isArray(loan.renewalHistory) && loan.renewalHistory.length > 0) ||
+  Number(loan.renewCount || 0) > 0 ||
+  loan.installments.some((installment) => (
+    Number(installment.paidAmount || installment.partialPaid || 0) > 0 ||
+    Boolean(installment.paymentBreakdown) ||
+    (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
+  ))
+);
 
 type LoanOperationType = NonNullable<Loan['lastOperationType']>;
 
@@ -247,6 +263,92 @@ export const cancelLoan = async (
       updatedAt: serverTimestamp(),
       ...buildLoanOperationAudit(`cancellation-${loanId}-${Date.now()}`, 'CANCELLATION', actor),
     }));
+  });
+};
+
+/**
+ * Deletes only an untouched direct contract. The original grant withdrawal is
+ * retained and reversed, so the cash book remains a complete audit trail.
+ */
+export const deletePristineDirectLoan = async (loanId: string, actor?: MovementActor): Promise<void> => {
+  const safeLoanId = String(loanId || '').trim();
+  if (!safeLoanId) throw new Error('CONTRATO_NAO_ENCONTRADO');
+  if (!actor?.uid) throw new Error('AUTOR_NAO_IDENTIFICADO');
+
+  const originalMovementId = `loan-created-${safeLoanId}`;
+  const reversalMovementId = `loan-deletion-reversal-${safeLoanId}`;
+  const auditEventId = `loan-deleted-${safeLoanId}`;
+  const linkedMovementsSnapshot = await getDocs(
+    query(collection(db, 'cashMovement'), where('loanId', '==', safeLoanId)),
+  );
+
+  await runTransaction(db, async (tx) => {
+    const loanRef = doc(db, 'loans', safeLoanId);
+    const originalMovementRef = doc(db, 'cashMovement', originalMovementId);
+    const reversalMovementRef = doc(db, 'cashMovement', reversalMovementId);
+    const auditEventRef = doc(db, 'financialAuditEvents', auditEventId);
+    const [loanSnapshot, originalMovementSnapshot, reversalMovementSnapshot, auditEventSnapshot, cashBalance] = await Promise.all([
+      tx.get(loanRef),
+      tx.get(originalMovementRef),
+      tx.get(reversalMovementRef),
+      tx.get(auditEventRef),
+      readCashBalanceInTransaction(tx),
+    ]);
+
+    if (!loanSnapshot.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
+    const loan = parseLoan(loanSnapshot.id, loanSnapshot.data());
+    const isDirectLoan = loan.formalizationType !== 'BANCARIZED' && loan.provider !== 'CREDIGRUPO';
+    const isPristineActiveLoan =
+      normalizeLoanStatus(loan.status) === 'ACTIVE' &&
+      Number(loan.version || 0) === 0 &&
+      loan.lastOperationType === 'LOAN_CREATED' &&
+      loan.lastOperationId === originalMovementId;
+    if (!isDirectLoan) throw new Error('CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO');
+    if (!isPristineActiveLoan || hasFinancialHistory(loan)) {
+      throw new Error('CONTRATO_NAO_ELEGIVEL_PARA_EXCLUSAO_SEGURA');
+    }
+    if (!originalMovementSnapshot.exists()) throw new Error('MOVIMENTO_ORIGINAL_NAO_ENCONTRADO');
+    if (reversalMovementSnapshot.exists() || auditEventSnapshot.exists()) {
+      throw new Error('EXCLUSAO_JA_PROCESSADA');
+    }
+
+    const originalMovement = originalMovementSnapshot.data();
+    const originalAmount = round2(Number(originalMovement.amount || originalMovement.value || 0));
+    const isOriginalWithdrawal =
+      parseMovementType(originalMovement.type) === 'RETIRADA' &&
+      originalAmount > 0 &&
+      originalAmount === round2(Number(loan.amount || 0)) &&
+      String(originalMovement.loanId || '') === safeLoanId &&
+      String(originalMovement.operationId || '') === originalMovementId;
+    if (!isOriginalWithdrawal) throw new Error('MOVIMENTO_ORIGINAL_INVALIDO');
+    if (linkedMovementsSnapshot.size !== 1 || linkedMovementsSnapshot.docs[0]?.id !== originalMovementId) {
+      throw new Error('CONTRATO_POSSUI_MOVIMENTACOES_VINCULADAS');
+    }
+
+    await appendCashMovementInTransaction(tx, {
+      type: 'ENTRADA',
+      amount: originalAmount,
+      description: `ESTORNO: EXCLUSAO DE CONTRATO ${loan.contractNumber || safeLoanId}`,
+      loanId: safeLoanId,
+      operationId: reversalMovementId,
+      actor,
+    }, { currentCashBalance: cashBalance, movementId: reversalMovementId });
+
+    tx.set(auditEventRef, sanitizeFirestorePayload({
+      id: auditEventId,
+      type: 'LOAN_DELETION',
+      loanId: safeLoanId,
+      originalMovementId,
+      reversalMovementId,
+      previousCash: cashBalance,
+      newCash: round2(cashBalance + originalAmount),
+      amount: originalAmount,
+      actorUid: actor.uid,
+      actorEmail: actor.email?.toLowerCase() || undefined,
+      actorName: actor.displayName || undefined,
+      recordedAt: serverTimestamp(),
+    }));
+    tx.delete(loanRef);
   });
 };
 

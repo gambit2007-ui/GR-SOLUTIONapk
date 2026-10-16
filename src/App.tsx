@@ -34,6 +34,7 @@ import {
   applyLoanPayment,
   cancelLoan,
   createLoan,
+  deletePristineDirectLoan,
   reverseLoanPayment,
   updateLoan,
   updateLoanAndAddMovement,
@@ -398,6 +399,25 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeletePristineDirectLoan = async (loanId: string) => {
+    try {
+      await deletePristineDirectLoan(loanId, movementActor);
+      showToast('Contrato excluido com estorno auditavel registrado no caixa.', 'success');
+    } catch (error: unknown) {
+      void reportOperationalError('loan.delete-pristine', error, movementActor);
+      const code = error instanceof Error ? error.message : '';
+      const message = code === 'CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO'
+        ? 'Contratos bancarizados nao podem ser excluidos por esta funcao.'
+        : code === 'CONTRATO_POSSUI_MOVIMENTACOES_VINCULADAS'
+          ? 'Contrato possui movimentacoes vinculadas e nao pode ser excluido.'
+          : code === 'CONTRATO_NAO_ELEGIVEL_PARA_EXCLUSAO_SEGURA'
+            ? 'A exclusao e permitida somente para contratos diretos recem-criados e sem historico.'
+            : 'Nao foi possivel excluir o contrato com seguranca.';
+      showToast(message, 'error');
+      throw error;
+    }
+  };
+
   const handleReverseLoanPayment = async (loanId: string, request: LoanPaymentReversalRequest) => {
     try {
       return await reverseLoanPayment(loanId, request, movementActor);
@@ -482,6 +502,8 @@ const App: React.FC = () => {
             onAddLoan={handleAddLoan}
             onUpdateLoan={handleUpdateLoan}
             onCancelLoan={handleCancelLoan}
+            onDeletePristineDirectLoan={handleDeletePristineDirectLoan}
+            isAdmin={accessControl.role?.toUpperCase() === 'ADMIN'}
             showToast={showToast}
             initialExpandedLoanId={selectedLoanId}
             currentActor={movementActor}

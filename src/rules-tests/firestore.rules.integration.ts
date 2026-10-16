@@ -128,6 +128,103 @@ describe('firestore.rules', () => {
     }));
   });
 
+  it('permite ao admin excluir contrato direto intacto com estorno e auditoria atomicos', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'settings', 'accessControl'), { enforced: true });
+      await setDoc(doc(db, 'authorizedUsers', 'admin-1'), { role: 'ADMIN' });
+      await setDoc(doc(db, 'authorizedUsers', 'user-1'), { role: 'USER' });
+      await setDoc(doc(db, 'loans', 'loan-deleteable'), {
+        ...validLoan,
+        lastOperationId: 'loan-created-loan-deleteable',
+        lastOperationType: 'LOAN_CREATED',
+      });
+      await setDoc(doc(db, 'cashMovement', 'loan-created-loan-deleteable'), {
+        type: 'RETIRADA', amount: 100, value: 100,
+        description: 'EMPRESTIMO: CLIENTE TESTE', date: '2026-01-01T12:00:00.000Z',
+        loanId: 'loan-deleteable', operationId: 'loan-created-loan-deleteable',
+        createdByUid: 'admin-1', recordedAt: serverTimestamp(),
+      });
+      await setDoc(doc(db, 'settings', 'caixa'), { value: -100 });
+    });
+
+    const admin = testEnvironment.authenticatedContext('admin-1').firestore();
+    const loanRef = doc(admin, 'loans', 'loan-deleteable');
+    const originalRef = doc(admin, 'cashMovement', 'loan-created-loan-deleteable');
+    const reversalRef = doc(admin, 'cashMovement', 'loan-deletion-reversal-loan-deleteable');
+    const auditRef = doc(admin, 'financialAuditEvents', 'loan-deleted-loan-deleteable');
+    const cashRef = doc(admin, 'settings', 'caixa');
+
+    await assertSucceeds(runTransaction(admin, async (tx) => {
+      await tx.get(loanRef);
+      await tx.get(originalRef);
+      await tx.get(cashRef);
+      tx.set(reversalRef, {
+        type: 'ENTRADA', amount: 100, value: 100,
+        description: 'ESTORNO: EXCLUSAO DE CONTRATO 2026001', date: '2026-01-01T12:00:00.000Z',
+        loanId: loanRef.id, operationId: reversalRef.id,
+        createdByUid: 'admin-1', recordedAt: serverTimestamp(),
+      });
+      tx.set(cashRef, {
+        value: 0, lastMovementId: reversalRef.id,
+        updatedByUid: 'admin-1', updatedAt: serverTimestamp(),
+      }, { merge: true });
+      tx.set(auditRef, {
+        id: auditRef.id, type: 'LOAN_DELETION', loanId: loanRef.id,
+        originalMovementId: originalRef.id, reversalMovementId: reversalRef.id,
+        amount: 100, previousCash: -100, newCash: 0,
+        actorUid: 'admin-1', recordedAt: serverTimestamp(),
+      });
+      tx.delete(loanRef);
+    }));
+
+    await assertSucceeds(getDoc(originalRef));
+    await assertSucceeds(getDoc(reversalRef));
+    await assertSucceeds(getDoc(auditRef));
+  });
+
+  it('bloqueia exclusao de contrato direto para usuario sem permissao ADMIN', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'settings', 'accessControl'), { enforced: true });
+      await setDoc(doc(db, 'authorizedUsers', 'admin-1'), { role: 'ADMIN' });
+      await setDoc(doc(db, 'authorizedUsers', 'user-1'), { role: 'USER' });
+      await setDoc(doc(db, 'loans', 'loan-user-delete'), {
+        ...validLoan,
+        lastOperationId: 'loan-created-loan-user-delete',
+        lastOperationType: 'LOAN_CREATED',
+      });
+      await setDoc(doc(db, 'cashMovement', 'loan-created-loan-user-delete'), {
+        type: 'RETIRADA', amount: 100, loanId: 'loan-user-delete',
+        operationId: 'loan-created-loan-user-delete', createdByUid: 'admin-1',
+      });
+      await setDoc(doc(db, 'settings', 'caixa'), { value: -100 });
+    });
+    const user = testEnvironment.authenticatedContext('user-1').firestore();
+    await assertFails(deleteDoc(doc(user, 'loans', 'loan-user-delete')));
+  });
+
+  it('bloqueia exclusao de contrato bancarizado e de contrato com recebimento', async () => {
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'settings', 'accessControl'), { enforced: true });
+      await setDoc(doc(db, 'authorizedUsers', 'admin-1'), { role: 'ADMIN' });
+      await setDoc(doc(db, 'loans', 'loan-bancarized-delete'), {
+        ...validLoan,
+        formalizationType: 'BANCARIZED', provider: 'CREDIGRUPO',
+        lastOperationId: 'loan-created-loan-bancarized-delete', lastOperationType: 'LOAN_CREATED',
+      });
+      await setDoc(doc(db, 'loans', 'loan-paid-delete'), {
+        ...validLoan,
+        hasFinancialHistory: true, paidAmount: 10,
+        lastOperationId: 'loan-created-loan-paid-delete', lastOperationType: 'LOAN_CREATED',
+      });
+    });
+    const admin = testEnvironment.authenticatedContext('admin-1').firestore();
+    await assertFails(deleteDoc(doc(admin, 'loans', 'loan-bancarized-delete')));
+    await assertFails(deleteDoc(doc(admin, 'loans', 'loan-paid-delete')));
+  });
+
   it('recusa alteracao financeira sem movimento correspondente', async () => {
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
       await setDoc(doc(context.firestore(), 'loans', 'loan-1'), validLoan);

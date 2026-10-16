@@ -158,6 +158,78 @@ service cloud.firestore {
         request.resource.data.updatedAt == request.time;
     }
 
+    function isPristineDirectLoanForDeletion(data, loanId) {
+      return data.get('formalizationType', 'DIRECT') != 'BANCARIZED' &&
+        data.get('provider', 'GR') != 'CREDIGRUPO' &&
+        data.status in ['ATIVO', 'ACTIVE'] &&
+        data.get('version', 0) == 0 &&
+        data.get('hasFinancialHistory', false) == false &&
+        data.get('paidAmount', 0) == 0 &&
+        data.get('fiscalPaymentEntries', []).size() == 0 &&
+        data.get('renewalHistory', []).size() == 0 &&
+        data.get('renewCount', 0) == 0 &&
+        data.lastOperationType == 'LOAN_CREATED' &&
+        data.lastOperationId == 'loan-created-' + loanId;
+    }
+
+    function validOriginalLoanWithdrawal(loanId, loanData) {
+      let movementId = 'loan-created-' + loanId;
+      let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
+      return exists(movementPath) &&
+        get(movementPath).data.type == 'RETIRADA' &&
+        get(movementPath).data.amount == loanData.amount &&
+        get(movementPath).data.loanId == loanId &&
+        get(movementPath).data.operationId == movementId;
+    }
+
+    function validLoanDeletionReversal(loanId, loanData) {
+      let reversalId = 'loan-deletion-reversal-' + loanId;
+      let reversalPath = /databases/$(database)/documents/cashMovement/$(reversalId);
+      return existsAfter(reversalPath) &&
+        getAfter(reversalPath).data.type == 'ENTRADA' &&
+        getAfter(reversalPath).data.amount == loanData.amount &&
+        getAfter(reversalPath).data.loanId == loanId &&
+        getAfter(reversalPath).data.operationId == reversalId &&
+        getAfter(reversalPath).data.createdByUid == request.auth.uid &&
+        getAfter(reversalPath).data.recordedAt == request.time;
+    }
+
+    function validLoanDeletionCashUpdate(loanId, loanData) {
+      let cashPath = /databases/$(database)/documents/settings/caixa;
+      let reversalId = 'loan-deletion-reversal-' + loanId;
+      return exists(cashPath) &&
+        existsAfter(cashPath) &&
+        getAfter(cashPath).data.lastMovementId == reversalId &&
+        getAfter(cashPath).data.updatedByUid == request.auth.uid &&
+        getAfter(cashPath).data.updatedAt == request.time &&
+        getAfter(cashPath).data.value >= get(cashPath).data.get('value', 0) + loanData.amount - 0.001 &&
+        getAfter(cashPath).data.value <= get(cashPath).data.get('value', 0) + loanData.amount + 0.001;
+    }
+
+    function validLoanDeletionAudit(loanId, loanData) {
+      let auditId = 'loan-deleted-' + loanId;
+      let auditPath = /databases/$(database)/documents/financialAuditEvents/$(auditId);
+      return existsAfter(auditPath) &&
+        getAfter(auditPath).data.id == auditId &&
+        getAfter(auditPath).data.type == 'LOAN_DELETION' &&
+        getAfter(auditPath).data.loanId == loanId &&
+        getAfter(auditPath).data.originalMovementId == 'loan-created-' + loanId &&
+        getAfter(auditPath).data.reversalMovementId == 'loan-deletion-reversal-' + loanId &&
+        getAfter(auditPath).data.amount == loanData.amount &&
+        getAfter(auditPath).data.previousCash == get(/databases/$(database)/documents/settings/caixa).data.get('value', 0) &&
+        getAfter(auditPath).data.newCash == getAfter(/databases/$(database)/documents/settings/caixa).data.value &&
+        getAfter(auditPath).data.actorUid == request.auth.uid &&
+        getAfter(auditPath).data.recordedAt == request.time;
+    }
+
+    function validPristineDirectLoanDeletion(loanId) {
+      return isPristineDirectLoanForDeletion(resource.data, loanId) &&
+        validOriginalLoanWithdrawal(loanId, resource.data) &&
+        validLoanDeletionReversal(loanId, resource.data) &&
+        validLoanDeletionCashUpdate(loanId, resource.data) &&
+        validLoanDeletionAudit(loanId, resource.data);
+    }
+
     function validContractCounterUpdate() {
       let loanId = request.resource.data.lastLoanId;
       let loanPath = /databases/$(database)/documents/loans/$(loanId);
@@ -204,7 +276,7 @@ service cloud.firestore {
         request.resource.data.lastOperationType == 'LOAN_CREATED' &&
         hasLinkedCashMovement(request.resource.data, loanId);
       allow update: if isAuthorized() && validLoanUpdate(resource.data, request.resource.data, loanId);
-      allow delete: if false;
+      allow delete: if isAdmin() && validPristineDirectLoanDeletion(loanId);
     }
 
     match /cashMovement/{movementId} {
@@ -220,6 +292,33 @@ service cloud.firestore {
         );
       allow update: if false;
       allow delete: if false;
+    }
+
+    match /financialAuditEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        request.resource.data.id == eventId &&
+        request.resource.data.loanId is string &&
+        eventId == 'loan-deleted-' + request.resource.data.loanId &&
+        exists(/databases/$(database)/documents/loans/$(request.resource.data.loanId)) &&
+        !existsAfter(/databases/$(database)/documents/loans/$(request.resource.data.loanId)) &&
+        isPristineDirectLoanForDeletion(
+          get(/databases/$(database)/documents/loans/$(request.resource.data.loanId)).data,
+          request.resource.data.loanId
+        ) &&
+        validOriginalLoanWithdrawal(
+          request.resource.data.loanId,
+          get(/databases/$(database)/documents/loans/$(request.resource.data.loanId)).data
+        ) &&
+        validLoanDeletionReversal(
+          request.resource.data.loanId,
+          get(/databases/$(database)/documents/loans/$(request.resource.data.loanId)).data
+        ) &&
+        validLoanDeletionCashUpdate(
+          request.resource.data.loanId,
+          get(/databases/$(database)/documents/loans/$(request.resource.data.loanId)).data
+        );
+      allow update, delete: if false;
     }
 
     match /settings/accessControl {
