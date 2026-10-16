@@ -104,6 +104,13 @@ interface InterestOnlyRenewalModalState {
   notes: string;
 }
 
+type ContractPdfGenerator = typeof import('../../utils/contractGenerator').generateContractPDF;
+
+const isStaleAssetError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error || '');
+  return /dynamically imported module|importing a module script|loading chunk|failed to fetch/i.test(message);
+};
+
 const describeCredigrupoConfigurationIssues = (issues?: readonly string[]) => {
   if (!issues?.length) return '';
   const descriptions: Record<string, string> = {
@@ -182,6 +189,29 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [deletingLoanId, setDeletingLoanId] = useState<string | null>(null);
   const [bancarizationRefreshKey, setBancarizationRefreshKey] = useState(0);
   const pendingBancarizationOperationIdsRef = React.useRef<Record<string, string>>({});
+  const contractPdfGeneratorRef = React.useRef<ContractPdfGenerator | null>(null);
+
+  const loadContractPdfGenerator = async (): Promise<ContractPdfGenerator> => {
+    if (contractPdfGeneratorRef.current) return contractPdfGeneratorRef.current;
+
+    try {
+      const { generateContractPDF } = await import('../../utils/contractGenerator');
+      contractPdfGeneratorRef.current = generateContractPDF;
+      sessionStorage.removeItem('gr-contract-pdf-stale-assets');
+      return generateContractPDF;
+    } catch (error) {
+      if (isStaleAssetError(error) && !sessionStorage.getItem('gr-contract-pdf-stale-assets')) {
+        sessionStorage.setItem('gr-contract-pdf-stale-assets', '1');
+        showToast('O aplicativo foi atualizado. Recarregando para gerar o PDF.');
+        window.setTimeout(() => window.location.reload(), 150);
+      }
+      throw error;
+    }
+  };
+
+  React.useEffect(() => {
+    void loadContractPdfGenerator().catch(() => undefined);
+  }, []);
 
   React.useEffect(() => {
     let active = true;
@@ -592,12 +622,19 @@ const LoanSection: React.FC<LoanSectionProps> = ({
 
     setGeneratingContractPdfId(loan.id);
     try {
-      const { generateContractPDF } = await import('../../utils/contractGenerator');
+      const generateContractPDF = contractPdfGeneratorRef.current;
+      if (!generateContractPDF) {
+        void loadContractPdfGenerator().catch(() => undefined);
+        showToast('Preparando gerador de PDF. Tente novamente em instantes.');
+        return;
+      }
       generateContractPDF(customer, loan, { dailyLateFeeRate });
       showToast('Contrato atualizado gerado em PDF!', 'success');
     } catch (error) {
       console.error('Falha ao gerar o contrato em PDF:', error);
-      showToast('Nao foi possivel gerar o contrato em PDF.', 'error');
+      if (!isStaleAssetError(error)) {
+        showToast('Nao foi possivel gerar o contrato em PDF.', 'error');
+      }
     } finally {
       setGeneratingContractPdfId(null);
     }
@@ -1020,7 +1057,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             id: editingLoanId,
             installments: updatedPayload.installments || currentLoan.installments,
           };
-          const { generateContractPDF } = await import('../../utils/contractGenerator');
+          const generateContractPDF = await loadContractPdfGenerator();
           generateContractPDF(customer, updatedLoan, { dailyLateFeeRate });
           showToast('Contrato atualizado e novo PDF gerado!', 'success');
         } catch (pdfError) {
@@ -1059,7 +1096,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             contractNumber: createdLoan?.contractNumber || newLoan.contractNumber,
             createdAt: Date.now(),
           };
-          const { generateContractPDF } = await import('../../utils/contractGenerator');
+          const generateContractPDF = await loadContractPdfGenerator();
           generateContractPDF(customer, loanForPdf, { dailyLateFeeRate });
           showToast('Contrato efetivado e PDF gerado!', 'success');
         } catch (pdfError) {

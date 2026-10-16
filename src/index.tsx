@@ -8,7 +8,9 @@ import './styles.css';
 const updateSW = registerSW({
   immediate: true,
   onNeedRefresh() {
-    updateSW(true);
+    void updateSW(true)
+      .then(() => window.location.reload())
+      .catch(() => undefined);
   },
 });
 
