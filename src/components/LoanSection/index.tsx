@@ -12,7 +12,7 @@ import {
   PaymentApplyMode,
   DataLoadStatus,
 } from '../../types';
-import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown, ExternalLink, ShieldCheck } from 'lucide-react';
+import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown, ExternalLink, ShieldCheck, Trash2 } from 'lucide-react';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -58,6 +58,8 @@ interface LoanSectionProps {
   onAddLoan: (draft: LoanDraft) => Promise<CreatedLoanResult>;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onCancelLoan: (loanId: string, reason: string) => Promise<void>;
+  onDeletePristineDirectLoan: (loanId: string) => Promise<void>;
+  isAdmin?: boolean;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   initialExpandedLoanId?: string | null;
   currentActor?: {
@@ -128,6 +130,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   onAddLoan, 
   onUpdateLoan,
   onCancelLoan,
+  onDeletePristineDirectLoan,
+  isAdmin = false,
   showToast, 
   initialExpandedLoanId,
   currentActor,
@@ -175,6 +179,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [bancarizationDraft, setBancarizationDraft] = useState<BancarizationDraft>(() => createDefaultBancarizationDraft());
   const [creatingBancarized, setCreatingBancarized] = useState(false);
   const [creatingDirect, setCreatingDirect] = useState(false);
+  const [deletingLoanId, setDeletingLoanId] = useState<string | null>(null);
   const [bancarizationRefreshKey, setBancarizationRefreshKey] = useState(0);
   const pendingBancarizationOperationIdsRef = React.useRef<Record<string, string>>({});
 
@@ -622,6 +627,24 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       await onCancelLoan(loan.id, reason.trim());
     } catch (error) {
       showToast('Erro ao cancelar contrato', 'error');
+    }
+  };
+
+  const handleDeletePristineDirectLoan = async (loan: Loan) => {
+    if (deletingLoanId) return;
+    const label = loan.contractNumber || loan.id;
+    const confirmed = window.confirm(
+      `Excluir definitivamente o contrato ${label}?\n\n` +
+      'Permitido somente porque ele nao possui recebimentos nem alteracoes. ' +
+      'A retirada inicial sera preservada e recebera um estorno auditavel no caixa.',
+    );
+    if (!confirmed) return;
+
+    setDeletingLoanId(loan.id);
+    try {
+      await onDeletePristineDirectLoan(loan.id);
+    } finally {
+      setDeletingLoanId(null);
     }
   };
 
@@ -1374,6 +1397,18 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             loanInstallments.some((inst) => getRemainingInstallmentValue(inst) > 0);
           const canInterestOnlyRenew = !isBancarized && canLoanRenewWithInterestOnly(loan);
           const canChargeLoan = resolvedLoanStatus === 'ACTIVE' && totalRemainingLoanAmount > 0;
+          const canDeletePristineDirectLoan = isAdmin &&
+            !isBancarized &&
+            resolvedLoanStatus === 'ACTIVE' &&
+            Number(loan.version || 0) === 0 &&
+            loan.lastOperationType === 'LOAN_CREATED' &&
+            loan.lastOperationId === `loan-created-${loan.id}` &&
+            !loan.hasFinancialHistory &&
+            Number(loan.paidAmount || 0) === 0 &&
+            (!Array.isArray(loan.fiscalPaymentEntries) || loan.fiscalPaymentEntries.length === 0) &&
+            (!Array.isArray(loan.renewalHistory) || loan.renewalHistory.length === 0) &&
+            Number(loan.renewCount || 0) === 0 &&
+            !hasFinancialHistory;
 
           return (
             <div key={loan.id} id={`loan-${loan.id}`} className={`bg-[#050505] border rounded-[2rem] overflow-hidden transition-all ${
@@ -1515,6 +1550,20 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 >
                   <Ban size={16} />
                 </button>
+                {canDeletePristineDirectLoan && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDeletePristineDirectLoan(loan);
+                    }}
+                    disabled={deletingLoanId !== null}
+                    className="h-[42px] w-[42px] shrink-0 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-black transition-all flex items-center justify-center disabled:bg-zinc-900 disabled:text-zinc-700 disabled:cursor-not-allowed"
+                    title="Excluir contrato direto sem recebimentos"
+                    aria-label="Excluir contrato direto sem recebimentos"
+                  >
+                    {deletingLoanId === loan.id ? <Loader2 size={16} className="animate-spin" /> : <Trash2 size={16} />}
+                  </button>
+                )}
                 <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase ${
                   resolvedLoanStatus === 'ACTIVE' 
                     ? (isOverdue ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500') 
