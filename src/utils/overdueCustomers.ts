@@ -40,6 +40,19 @@ export const summarizeOverdueInstallments = (
   };
 };
 
+export const summarizeCustomerOverdueInstallments = (
+  loans: readonly Loan[],
+  customerId: string,
+  referenceDate = new Date(),
+  dailyLateFeeRate?: number,
+): OverdueInstallmentSummary => summarizeOverdueInstallments(
+  loans
+    .filter((loan) => loan.customerId === customerId && effectiveLoanStatus(loan) === 'ACTIVE')
+    .flatMap((loan) => Array.isArray(loan.installments) ? loan.installments : []),
+  referenceDate,
+  dailyLateFeeRate,
+);
+
 export const buildOverdueCustomerCards = (
   loans: Loan[],
   referenceDate = new Date(),

@@ -47,7 +47,7 @@ import { formatCredigrupoFormalizationStatus } from '../../lib/creditProviders/l
 import { getCustomerCreditRisk, type CreditRiskDecisionInput } from '../../services/creditRiskService';
 import type { CreditRiskAssessment } from '../../utils/creditRisk';
 import { assessLiquidityReserve, MINIMUM_CASH_RESERVE } from '../../utils/liquidityReserve';
-import { summarizeOverdueInstallments } from '../../utils/overdueCustomers';
+import { summarizeCustomerOverdueInstallments } from '../../utils/overdueCustomers';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -1342,7 +1342,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const dueDate = targetInstallment.dueDate
       ? new Date(`${targetInstallment.dueDate}T12:00:00`).toLocaleDateString('pt-BR')
       : 'Nao informada';
-    const overdueSummary = summarizeOverdueInstallments(installments, new Date(), dailyLateFeeRate);
+    const overdueSummary = summarizeCustomerOverdueInstallments(
+      loans,
+      loan.customerId,
+      new Date(),
+      dailyLateFeeRate,
+    );
     const oldestOverdueDate = overdueSummary.oldestDueDate
       ? new Date(`${overdueSummary.oldestDueDate}T12:00:00`).toLocaleDateString('pt-BR')
       : dueDate;

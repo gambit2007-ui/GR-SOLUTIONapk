@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { Installment, Loan } from '../../types';
-import { buildOverdueCustomerCards, summarizeOverdueInstallments } from '../overdueCustomers';
+import {
+  buildOverdueCustomerCards,
+  summarizeCustomerOverdueInstallments,
+  summarizeOverdueInstallments,
+} from '../overdueCustomers';
 
 const referenceDate = new Date('2026-09-22T12:00:00Z');
 const installment = (dueDate: string, amount: number, number = 1): Installment => ({
@@ -61,6 +65,21 @@ describe('overdue customer cards', () => {
     expect(summary).toEqual({
       count: 2,
       amount: 443,
+      oldestDueDate: '2026-09-14',
+    });
+  });
+
+  it('sums overdue installments across all active contracts for the same customer', () => {
+    const summary = summarizeCustomerOverdueInstallments([
+      loan('first', 'mariane', 'Mariane', [installment('2026-09-19', 100)]),
+      loan('second', 'mariane', 'Mariane', [installment('2026-09-14', 500, 2)]),
+      loan('other-customer', 'other', 'Outra', [installment('2026-09-01', 900)]),
+      { ...loan('settled', 'mariane', 'Mariane', [installment('2026-09-01', 900)]), status: 'QUITADO' },
+    ], 'mariane', referenceDate, 0);
+
+    expect(summary).toEqual({
+      count: 2,
+      amount: 600,
       oldestDueDate: '2026-09-14',
     });
   });
