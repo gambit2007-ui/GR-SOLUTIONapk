@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Installment, Loan } from '../../types';
-import { buildOverdueCustomerCards } from '../overdueCustomers';
+import { buildOverdueCustomerCards, summarizeOverdueInstallments } from '../overdueCustomers';
 
 const referenceDate = new Date('2026-09-22T12:00:00Z');
 const installment = (dueDate: string, amount: number, number = 1): Installment => ({
@@ -49,5 +49,19 @@ describe('overdue customer cards', () => {
       }, installment('2026-09-01', 700, 2)]),
     ], referenceDate, 0);
     expect(cards[0]).toMatchObject({ overdueAmount: 1_000, maxOverdueDays: 21 });
+  });
+
+  it('sums every overdue installment for the collection message, including the current late fee', () => {
+    const summary = summarizeOverdueInstallments([
+      installment('2026-09-19', 100),
+      { ...installment('2026-09-14', 500, 2), paidAmount: 200 },
+      installment('2026-09-25', 900, 3),
+    ], referenceDate, 0.01);
+
+    expect(summary).toEqual({
+      count: 2,
+      amount: 443,
+      oldestDueDate: '2026-09-14',
+    });
   });
 });

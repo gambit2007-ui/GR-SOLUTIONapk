@@ -47,6 +47,7 @@ import { formatCredigrupoFormalizationStatus } from '../../lib/creditProviders/l
 import { getCustomerCreditRisk, type CreditRiskDecisionInput } from '../../services/creditRiskService';
 import type { CreditRiskAssessment } from '../../utils/creditRisk';
 import { assessLiquidityReserve, MINIMUM_CASH_RESERVE } from '../../utils/liquidityReserve';
+import { summarizeOverdueInstallments } from '../../utils/overdueCustomers';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -1329,7 +1330,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!phoneValue) {
       return showToast('Cliente sem telefone cadastrado', 'error');
     }
-    const targetInstallment = (Array.isArray(loan.installments) ? loan.installments : []).find(
+    const installments = Array.isArray(loan.installments) ? loan.installments : [];
+    const targetInstallment = installments.find(
       (installment) => getRemainingInstallmentValue(installment) > 0,
     );
     if (!targetInstallment) {
@@ -1340,11 +1342,19 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const dueDate = targetInstallment.dueDate
       ? new Date(`${targetInstallment.dueDate}T12:00:00`).toLocaleDateString('pt-BR')
       : 'Nao informada';
+    const overdueSummary = summarizeOverdueInstallments(installments, new Date(), dailyLateFeeRate);
+    const oldestOverdueDate = overdueSummary.oldestDueDate
+      ? new Date(`${overdueSummary.oldestDueDate}T12:00:00`).toLocaleDateString('pt-BR')
+      : dueDate;
+    const paymentReminder = overdueSummary.count > 0
+      ? `Identificamos ${overdueSummary.count} ${overdueSummary.count === 1 ? 'parcela em atraso' : 'parcelas em atraso'}, com valor total atualizado de R$ ${overdueSummary.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.\n\n` +
+        `O vencimento mais antigo foi em ${oldestOverdueDate}.\n\n`
+      : `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n`;
     const phone = phoneValue.replace(/\D/g, '');
     const text = encodeURIComponent(
       `Ol\u00e1, ${customerName}. Tudo bem?\n\n` +
       `Aqui \u00e9 da GR SOLUTION.\n\n` +
-      `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n` +
+      paymentReminder +
       `Caso j\u00e1 tenha realizado o pagamento, por favor envie o comprovante para darmos baixa em nosso sistema.\n\n` +
       `Qualquer d\u00favida, estou \u00e0 disposi\u00e7\u00e3o.\n\n` +
       `Atenciosamente,\n` +

@@ -1,4 +1,4 @@
-import type { Loan } from '../types';
+import type { Installment, Loan } from '../types';
 import { getLocalISODate } from './dateTime';
 import { calculateOverdueDays } from './creditRisk';
 import { getInstallmentOutstanding, roundMoney } from './financialEngine';
@@ -14,6 +14,31 @@ export interface OverdueCustomerCard {
   maxOverdueDays: number;
   overdueAmount: number;
 }
+
+export interface OverdueInstallmentSummary {
+  count: number;
+  amount: number;
+  oldestDueDate?: string;
+}
+
+export const summarizeOverdueInstallments = (
+  installments: readonly Installment[],
+  referenceDate = new Date(),
+  dailyLateFeeRate?: number,
+): OverdueInstallmentSummary => {
+  const today = getLocalISODate(referenceDate);
+  const overdue = installments.flatMap((installment) => {
+    if (normalizeInstallmentStatus(installment.status) === 'PAID' || installment.dueDate >= today) return [];
+    const amount = getInstallmentOutstanding(installment, referenceDate, dailyLateFeeRate).total;
+    return amount > 0 ? [{ dueDate: installment.dueDate, amount }] : [];
+  }).sort((left, right) => left.dueDate.localeCompare(right.dueDate));
+
+  return {
+    count: overdue.length,
+    amount: roundMoney(overdue.reduce((sum, installment) => sum + installment.amount, 0)),
+    oldestDueDate: overdue[0]?.dueDate,
+  };
+};
 
 export const buildOverdueCustomerCards = (
   loans: Loan[],
