@@ -273,7 +273,7 @@ const drawPageFooters = (doc: jsPDF, contractNumber: string, customerName: strin
     doc.setPage(page);
     const isCover = page === 1;
     const lineColor = isCover ? COLORS.gold : COLORS.border;
-    const textColor = isCover ? COLORS.muted : COLORS.slate;
+    const textColor = COLORS.slate;
 
     doc.setDrawColor(...lineColor);
     doc.setLineWidth(0.25);
@@ -436,8 +436,8 @@ export const buildContractPDFDocument = (
     keywords: `contrato, empréstimo, parcelas, ${CREDITOR_NAME}`,
   });
 
-  // Capa
-  doc.setFillColor(...COLORS.navy);
+  // Capa em fundo branco para reduzir o consumo de tinta na impressão.
+  doc.setFillColor(...COLORS.white);
   doc.rect(0, 0, PAGE_WIDTH, PAGE_HEIGHT, 'F');
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
@@ -447,7 +447,7 @@ export const buildContractPDFDocument = (
   doc.rect(MARGIN, 40, 34, 1.5, 'F');
 
   doc.setFontSize(28);
-  doc.setTextColor(...COLORS.white);
+  doc.setTextColor(...COLORS.navy);
   const coverTitle = doc.splitTextToSize(
     'Contrato particular de mútuo civil com confissão de dívida',
     CONTENT_WIDTH,
@@ -456,7 +456,7 @@ export const buildContractPDFDocument = (
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(13);
-  doc.setTextColor(192, 203, 219);
+  doc.setTextColor(...COLORS.slate);
   doc.text('Constituição de título executivo extrajudicial e outras avenças', MARGIN, 113);
   doc.text(`${formatCurrency(loan.amount)}  |  ${customerName}`, MARGIN, 130);
 
