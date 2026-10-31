@@ -515,33 +515,71 @@ const App: React.FC = () => {
       case 'SIMULATION':
         return <SimulationTab />;
       case 'REPORTS':
-        return (
-          <Reports
-            loans={contratos}
-            cashMovements={movimentacoes}
-            monthlySnapshots={monthlySnapshots}
-            caixa={caixa}
-            currentUserUid={user?.uid}
-            dailyLateFeeRate={dailyLateFeeRate}
-            onAddTransaction={handleAddTransaction}
-            onRecalculateCash={handleRecalculateCash}
-            onDownloadBackup={handleDownloadBackup}
-            showToast={showToast}
-          />
-        );
       case 'AUDIT':
         return (
-          <AuditTab
-            loans={contratos}
-            cashMovements={movimentacoes}
-            cashMovementsStatus={cashMovementsStatus}
-            caixa={caixa}
-            currentUserUid={user?.uid}
-            isAdmin={accessControl.role?.toUpperCase() === 'ADMIN'}
-            onNavigateToLoan={navigateToLoan}
-            onDownloadBackup={handleDownloadBackup}
-            showToast={showToast}
-          />
+          <div className="space-y-6">
+            <section className="rounded-[2rem] border border-zinc-900 bg-[#050505] p-4 sm:p-5">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-xs font-black uppercase tracking-[0.2em] text-white">Financeiro</h2>
+                  <p className="mt-1 text-[8px] uppercase tracking-widest text-zinc-500">
+                    Indicadores, fluxo de caixa e rastreabilidade
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 rounded-2xl border border-zinc-800 bg-black p-1 text-[8px] font-black uppercase tracking-widest">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentView('REPORTS')}
+                    className={`min-h-[40px] rounded-xl px-3 transition-colors ${
+                      currentView === 'REPORTS'
+                        ? 'bg-[#BF953F] text-black'
+                        : 'text-zinc-500 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className="inline-flex items-center justify-center gap-2"><PieChart size={13} /> Visao financeira</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentView('AUDIT')}
+                    className={`min-h-[40px] rounded-xl px-3 transition-colors ${
+                      currentView === 'AUDIT'
+                        ? 'bg-[#BF953F] text-black'
+                        : 'text-zinc-500 hover:text-zinc-200'
+                    }`}
+                  >
+                    <span className="inline-flex items-center justify-center gap-2"><ShieldCheck size={13} /> Auditoria</span>
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {currentView === 'REPORTS' ? (
+              <Reports
+                loans={contratos}
+                cashMovements={movimentacoes}
+                monthlySnapshots={monthlySnapshots}
+                caixa={caixa}
+                currentUserUid={user?.uid}
+                dailyLateFeeRate={dailyLateFeeRate}
+                onAddTransaction={handleAddTransaction}
+                onRecalculateCash={handleRecalculateCash}
+                onDownloadBackup={handleDownloadBackup}
+                showToast={showToast}
+              />
+            ) : (
+              <AuditTab
+                loans={contratos}
+                cashMovements={movimentacoes}
+                cashMovementsStatus={cashMovementsStatus}
+                caixa={caixa}
+                currentUserUid={user?.uid}
+                isAdmin={accessControl.role?.toUpperCase() === 'ADMIN'}
+                onNavigateToLoan={navigateToLoan}
+                onDownloadBackup={handleDownloadBackup}
+                showToast={showToast}
+              />
+            )}
+          </div>
         );
       default:
         return null;
@@ -634,7 +672,6 @@ const App: React.FC = () => {
     },
     { id: 'SIMULATION', label: 'Simular', icon: Calculator },
     { id: 'REPORTS', label: 'Financeiro', icon: PieChart },
-    { id: 'AUDIT', label: 'Auditoria e Historico', icon: ShieldCheck },
   ];
 
   const handleSelectView = (view: View) => {
@@ -699,7 +736,9 @@ const App: React.FC = () => {
               key={item.id}
               onClick={() => handleSelectView(item.id as View)}
               className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all relative ${
-                currentView === item.id
+                (item.id === 'REPORTS'
+                  ? currentView === 'REPORTS' || currentView === 'AUDIT'
+                  : currentView === item.id)
                   ? 'gold-gradient text-black font-black'
                   : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900/50'
               }`}
@@ -741,7 +780,9 @@ const App: React.FC = () => {
               <Menu size={18} className="text-[#BF953F]" />
             </button>
             <h2 className="text-[10px] sm:text-xs font-black text-zinc-100 uppercase tracking-[0.22em] truncate">
-              {navItems.find((item) => item.id === currentView)?.label}
+              {currentView === 'AUDIT'
+                ? 'Financeiro'
+                : navItems.find((item) => item.id === currentView)?.label}
             </h2>
           </div>
           <div className="flex items-center gap-2 sm:gap-4 min-w-0">
