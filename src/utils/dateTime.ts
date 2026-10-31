@@ -17,6 +17,12 @@ const toLocalDateAtNoon = (value: string | Date): Date | null => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const normalizeDailyChargeDays = (value?: readonly number[]): number[] | null => {
+  if (!value) return null;
+  const days = [...new Set(value.filter((day) => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
+  return days.length > 0 ? days : null;
+};
+
 export const addCalendarMonthsClamped = (value: string | Date, months: number): string | null => {
   const source = toLocalDateAtNoon(value);
   if (!source || !Number.isInteger(months)) return null;
@@ -32,11 +38,25 @@ export const buildInstallmentDueDate = (
   value: string | Date,
   offset: number,
   frequency: 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY',
+  dailyChargeDays?: readonly number[],
 ): string | null => {
   const source = toLocalDateAtNoon(value);
   if (!source || !Number.isInteger(offset) || offset < 0) return null;
 
   if (frequency === 'MONTHLY') return addCalendarMonthsClamped(source, offset);
+
+  if (frequency === 'DAILY') {
+    const selectedDays = normalizeDailyChargeDays(dailyChargeDays);
+    if (selectedDays) {
+      const target = new Date(source);
+      let remainingCharges = offset;
+      while (remainingCharges > 0) {
+        target.setDate(target.getDate() + 1);
+        if (selectedDays.includes(target.getDay())) remainingCharges -= 1;
+      }
+      return getLocalISODate(target);
+    }
+  }
 
   const target = new Date(source);
   const days = frequency === 'DAILY' ? offset : frequency === 'WEEKLY' ? offset * 7 : offset * 15;

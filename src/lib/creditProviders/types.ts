@@ -311,6 +311,10 @@ export interface CreateBancarizedLoanRequest {
   operationId: string;
   simulationId: string;
   fundingSource: 'GR';
+  riskDecision?: {
+    type: 'CONFIRM_EXPOSURE' | 'EXCEPTION';
+    justification?: string;
+  };
 }
 
 export interface CreateBancarizedLoanResult {

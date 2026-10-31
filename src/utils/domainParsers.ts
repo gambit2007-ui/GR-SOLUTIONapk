@@ -93,6 +93,7 @@ export const parseCashMovement = (id: string, raw: unknown): CashMovement => {
     createdByEmail: toOptionalString(payload.createdByEmail),
     createdByName: toOptionalString(payload.createdByName),
     operationId: toOptionalString(payload.operationId),
+    reversalOfMovementId: toOptionalString(payload.reversalOfMovementId),
     discountApplied: toOptionalPositiveNumber(payload.discountApplied),
     recordedAt: payload.recordedAt as CashMovement['recordedAt'],
   };
@@ -230,6 +231,12 @@ const parseFrequency = (value: unknown): Frequency => {
   return 'MENSAL';
 };
 
+const parseDailyChargeDays = (value: unknown): number[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  const days = [...new Set(value.filter((day): day is number => Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
+  return days.length > 0 ? days : undefined;
+};
+
 const parseInterestType = (value: unknown): InterestType => {
   const normalized = String(value ?? '').trim().toUpperCase();
   if (normalized === 'PRICE') return 'PRICE';
@@ -331,6 +338,7 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     installmentCount: installmentsCount,
     installmentsCount,
     frequency: parseFrequency(payload.frequency),
+    dailyChargeDays: parseDailyChargeDays(payload.dailyChargeDays),
     interestType: parseInterestType(payload.interestType),
     monthlyPaidInterestRate: toNumber(payload.monthlyPaidInterestRate, 0) || undefined,
     monthlyAccruedInterestRate: toNumber(payload.monthlyAccruedInterestRate, 0) || undefined,
@@ -343,6 +351,9 @@ export const parseLoan = (id: string, raw: unknown): Loan => {
     installments,
     status: parseLoanStatus(payload.status),
     paidAmount: toNumber(payload.paidAmount, 0) || undefined,
+    maxHistoricalOverdueDays: Number.isSafeInteger(payload.maxHistoricalOverdueDays) && Number(payload.maxHistoricalOverdueDays) >= 0
+      ? Number(payload.maxHistoricalOverdueDays)
+      : undefined,
     renewCount: Math.max(0, Math.trunc(toNumber(payload.renewCount, 0))) || undefined,
     lastRenewAt: toOptionalString(payload.lastRenewAt),
     allowInterestOnlyRenewal:

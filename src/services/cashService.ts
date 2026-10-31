@@ -1,10 +1,10 @@
 import {
   collection,
   doc,
+  getDoc,
   getDocs,
   runTransaction,
   serverTimestamp,
-  setDoc,
   Transaction,
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -12,6 +12,7 @@ import { CashMovement, CashOutflowCategory, MovementType } from '../types';
 import { parseCashOutflowCategory } from '../utils/cashCategories';
 import { parseCashMovement, parseMovementType, resolveCashDelta } from '../utils/domainParsers';
 import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
+import { appendFinancialAuditEventInTransaction } from './financialAuditEventService';
 
 export interface MovementActor {
   uid?: string | null;
@@ -117,17 +118,37 @@ export const addCashMovement = async (payload: CashMovementPayload) => {
 };
 
 export const recalculateCashBalance = async (actor?: MovementActor): Promise<number> => {
+  if (!actor?.uid) throw new Error('RESPONSAVEL_PELA_CONCILIACAO_OBRIGATORIO');
+  const previousCashSnapshot = await getDoc(caixaRef);
   const movementSnap = await getDocs(collection(db, 'cashMovement'));
   const movements = movementSnap.docs.map((movementDoc) => parseCashMovement(movementDoc.id, movementDoc.data()));
 
   const saldoCalculado = movements.reduce((acc, movement) => acc + resolveCashDelta(movement), 0);
   const novoSaldo = Number(saldoCalculado.toFixed(2));
 
-  await setDoc(caixaRef, {
-    value: novoSaldo,
-    reconciledByUid: actor?.uid || undefined,
-    reconciledAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
+  const auditId = `cash-reconciliation-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  await runTransaction(db, async (tx) => {
+    const currentCashSnapshot = await tx.get(caixaRef);
+    const previousMovementId = String(previousCashSnapshot.data()?.lastMovementId || '');
+    const currentMovementId = String(currentCashSnapshot.data()?.lastMovementId || '');
+    if (previousMovementId !== currentMovementId) {
+      throw new Error('CAIXA_MUDOU_DURANTE_A_CONCILIACAO');
+    }
+    const previousCash = currentCashSnapshot.exists() ? Number(currentCashSnapshot.data().value || 0) : 0;
+    tx.set(caixaRef, {
+      value: novoSaldo,
+      reconciledByUid: actor.uid,
+      reconciledAuditId: auditId,
+      reconciledAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
+    appendFinancialAuditEventInTransaction(tx, {
+      id: auditId,
+      type: 'CASH_RECONCILIATION',
+      previousCash,
+      newCash: novoSaldo,
+      reason: 'Conciliacao manual com movimentos do livro caixa',
+    }, actor);
+  });
   return novoSaldo;
 };

@@ -9,7 +9,12 @@ import {
 import { getInstallmentOutstanding } from './financialEngine';
 import { calculatePortfolioRoi } from './portfolioRoi';
 import { resolveCashDelta } from './domainParsers';
-import { CASH_OUTFLOW_CATEGORY_LABELS, parseCashOutflowCategory } from './cashCategories';
+import {
+  CASH_OUTFLOW_CATEGORY_LABELS,
+  isOperatingExpenseMovement,
+  parseCashOutflowCategory,
+  sumOperatingExpensesByCategory,
+} from './cashCategories';
 
 interface AnnualCashReportParams {
   year: number;
@@ -34,6 +39,7 @@ interface MonthSummary extends PaymentMetrics {
   capitalBorrowed: number;
   projectedProfit: number;
   manualWithdrawals: number;
+  operatingExpenses: number;
   loanOutflows: number;
   reversals: number;
   outflows: number;
@@ -297,6 +303,7 @@ const buildMonthlySummaries = (
     realRevenue: 0,
     projectedProfit: 0,
     manualWithdrawals: 0,
+    operatingExpenses: 0,
     loanOutflows: 0,
     reversals: 0,
     outflows: 0,
@@ -325,6 +332,9 @@ const buildMonthlySummaries = (
       const outflowKind = getOutflowKind(movement);
 
       month.outflows = roundMoney(month.outflows + outflowAmount);
+      if (isOperatingExpenseMovement(movement)) {
+        month.operatingExpenses = roundMoney(month.operatingExpenses + outflowAmount);
+      }
       if (outflowKind === 'LOAN') {
         month.loanOutflows = roundMoney(month.loanOutflows + outflowAmount);
       } else if (outflowKind === 'ESTORNO') {
@@ -439,7 +449,7 @@ const buildMonthlySummaries = (
         0,
       ),
     );
-    month.result = roundMoney(month.realRevenue - month.manualWithdrawals);
+    month.result = roundMoney(month.realRevenue - month.operatingExpenses);
 
     const snapshot = monthlySnapshots.find(
       (item) => item.month === `${year}-${String(month.monthIndex + 1).padStart(2, '0')}`,
@@ -451,13 +461,16 @@ const buildMonthlySummaries = (
       month.realRevenue = snapshot.realProfit;
       month.projectedProfit = snapshot.projectedProfit ?? month.projectedProfit;
       month.manualWithdrawals = snapshot.manualWithdrawals ?? month.manualWithdrawals;
+      if (snapshot.outflowCategoryTotals) {
+        month.operatingExpenses = sumOperatingExpensesByCategory(snapshot.outflowCategoryTotals);
+      }
       month.loanOutflows = snapshot.loanOutflows ?? month.loanOutflows;
       month.reversals = snapshot.reversals ?? month.reversals;
       month.outflows = snapshot.totalExpense;
       month.overdueAmount = snapshot.overdueAmount ?? month.overdueAmount;
       month.closingCash = snapshot.closingCash;
       month.contractsCount = snapshot.createdLoansCount;
-      month.result = roundMoney(month.realRevenue - month.manualWithdrawals);
+      month.result = roundMoney(month.realRevenue - month.operatingExpenses);
     }
   });
 
@@ -529,10 +542,11 @@ const buildAnnualMetrics = (
   const realRevenue = roundMoney(months.reduce((sum, month) => sum + month.realRevenue, 0));
   const projectedProfit = roundMoney(months.reduce((sum, month) => sum + month.projectedProfit, 0));
   const totalRetiradas = roundMoney(months.reduce((sum, month) => sum + month.manualWithdrawals, 0));
+  const totalOperatingExpenses = roundMoney(months.reduce((sum, month) => sum + month.operatingExpenses, 0));
   const totalEmprestimos = roundMoney(months.reduce((sum, month) => sum + month.loanOutflows, 0));
   const totalEstornos = roundMoney(months.reduce((sum, month) => sum + month.reversals, 0));
   const totalOutflows = roundMoney(totalRetiradas + totalEmprestimos + totalEstornos);
-  const resultAfterExpenses = roundMoney(realRevenue - totalRetiradas);
+  const resultAfterExpenses = roundMoney(realRevenue - totalOperatingExpenses);
 
   return {
     caixa,
@@ -547,6 +561,7 @@ const buildAnnualMetrics = (
     valorEmAtraso,
     totalAportes,
     totalRetiradas,
+    totalOperatingExpenses,
     totalEmprestimos,
     totalEstornos,
     totalOutflows,
@@ -715,7 +730,8 @@ export const generateAnnualCashReportPdf = async ({
       ['Total recebido dos clientes', formatCurrency(annual.totalReceived)],
       ['Faturamento real do ano', formatCurrency(annual.realRevenue)],
       ['Lucro projetado do ano', formatCurrency(annual.projectedProfit)],
-      ['Resultado operacional apos retiradas', formatCurrency(annual.resultAfterExpenses)],
+      ['Despesas operacionais', formatCurrency(annual.totalOperatingExpenses)],
+      ['Resultado operacional', formatCurrency(annual.resultAfterExpenses)],
       ['Total a receber', formatCurrency(annual.totalAReceber)],
       ['Valor em rua', formatCurrency(annual.valorEmRua)],
       ['Valor em atraso', formatCurrency(annual.valorEmAtraso)],
@@ -751,6 +767,7 @@ export const generateAnnualCashReportPdf = async ({
       'Faturamento real',
       'Lucro projetado',
       'Retiradas',
+      'Despesas',
       'Emprestimos',
       'Estornos',
       'Resultado',
@@ -766,6 +783,7 @@ export const generateAnnualCashReportPdf = async ({
       formatCurrency(month.realRevenue),
       formatCurrency(month.projectedProfit),
       formatCurrency(month.manualWithdrawals),
+      formatCurrency(month.operatingExpenses),
       formatCurrency(month.loanOutflows),
       formatCurrency(month.reversals),
       formatCurrency(month.result),

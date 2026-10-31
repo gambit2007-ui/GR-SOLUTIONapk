@@ -12,7 +12,7 @@ import {
   PaymentApplyMode,
   DataLoadStatus,
 } from '../../types';
-import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown, ExternalLink, ShieldCheck } from 'lucide-react';
+import { Plus, Calculator, Calendar, User, Percent, MessageCircle, CheckCircle, RotateCcw, XCircle, DollarSign, Loader2, Search, Pencil, Ban, FileDown, ExternalLink, ShieldCheck, Trash2 } from 'lucide-react';
 import {
   effectiveLoanStatus,
   installmentAmount,
@@ -44,6 +44,9 @@ import BancarizationOperations from './BancarizationOperations';
 import BancarizedInstallmentActions from './BancarizedInstallmentActions';
 import { createBancarizedLoan, getCredigrupoStatus, reconcileCredigrupoOperation } from '../../services/credigrupoService';
 import { formatCredigrupoFormalizationStatus } from '../../lib/creditProviders/loanStatus';
+import { getCustomerCreditRisk, type CreditRiskDecisionInput } from '../../services/creditRiskService';
+import type { CreditRiskAssessment } from '../../utils/creditRisk';
+import { assessLiquidityReserve, MINIMUM_CASH_RESERVE } from '../../utils/liquidityReserve';
 
 interface LoanSectionProps {
   customers: Customer[];
@@ -55,9 +58,13 @@ interface LoanSectionProps {
   hasMoreLoans?: boolean;
   onLoadMoreLoans?: () => void;
   onLoadAllLoans?: () => Promise<void> | void;
-  onAddLoan: (draft: LoanDraft) => Promise<CreatedLoanResult>;
+  onAddLoan: (draft: LoanDraft, decision?: CreditRiskDecisionInput, requestId?: string) => Promise<CreatedLoanResult>;
+  cashBalance: number;
+  cashBalanceStatus: 'idle' | 'loading' | 'ready' | 'error';
+  isAdmin?: boolean;
   onUpdateLoan: (loanId: string, newData: Partial<Loan>) => Promise<void>;
   onCancelLoan: (loanId: string, reason: string) => Promise<void>;
+  onDeleteUnpaidLoan: (loanId: string) => Promise<void>;
   showToast: (msg: string, type?: 'success' | 'error') => void;
   initialExpandedLoanId?: string | null;
   currentActor?: {
@@ -85,6 +92,7 @@ interface PaymentModalState {
   loanId: string;
   installmentIndex: number;
   amount: string;
+  discount: string;
   applyMode: PaymentApplyMode;
   redistributionStartDate: string;
   redistributionInstallmentsCount: string;
@@ -115,6 +123,27 @@ const describeCredigrupoConfigurationIssues = (issues?: readonly string[]) => {
   return issues.map((issue) => descriptions[issue] || 'Configuracao Credigrupo invalida.').join(' ');
 };
 
+const hasLoanFinancialHistory = (loan: Loan): boolean => (
+  loan.hasFinancialHistory === true ||
+  Number(loan.paidAmount || 0) > 0 ||
+  (Array.isArray(loan.fiscalPaymentEntries) && loan.fiscalPaymentEntries.length > 0) ||
+  (Array.isArray(loan.renewalHistory) && loan.renewalHistory.length > 0) ||
+  Number(loan.renewCount || 0) > 0 ||
+  loan.installments.some((installment) => (
+    installmentPaidAmount(installment) > 0 ||
+    normalizeInstallmentStatus(installment.status) === 'PAID' ||
+    Boolean(installment.paymentBreakdown) ||
+    (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
+  ))
+);
+
+const formatRiskMoney = (amount: number): string =>
+  Number(amount || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+const riskLevelLabel = (risk: CreditRiskAssessment): string => risk.historyIncomplete
+  ? 'REVISAO MANUAL'
+  : ({ GREEN: 'NORMAL', YELLOW: 'EXPOSICAO ATIVA', ORANGE: 'ATENCAO', RED: 'BLOQUEADO' })[risk.level];
+
 const LoanSection: React.FC<LoanSectionProps> = ({ 
   customers, 
   loans, 
@@ -125,9 +154,13 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   hasMoreLoans = false,
   onLoadMoreLoans,
   onLoadAllLoans,
-  onAddLoan, 
+  onAddLoan,
+  cashBalance,
+  cashBalanceStatus,
+  isAdmin = false,
   onUpdateLoan,
   onCancelLoan,
+  onDeleteUnpaidLoan,
   showToast, 
   initialExpandedLoanId,
   currentActor,
@@ -144,6 +177,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     monthlyAccruedInterestRate: '',
     interestType: 'SIMPLE' as 'SIMPLE' | 'PRICE' | 'SPLIT',
     frequency: 'MONTHLY' as 'DAILY' | 'WEEKLY' | 'BIWEEKLY' | 'MONTHLY',
+    dailyChargeDays: [1, 2, 3, 4, 5, 6],
     installmentsCount: '',
     startDate: getLocalISODate(),
     formalizationType: 'DIRECT' as 'DIRECT' | 'BANCARIZED',
@@ -173,6 +207,14 @@ const LoanSection: React.FC<LoanSectionProps> = ({
   const [hasCredigrupoOperations, setHasCredigrupoOperations] = useState(false);
   const [bancarizationDraft, setBancarizationDraft] = useState<BancarizationDraft>(() => createDefaultBancarizationDraft());
   const [creatingBancarized, setCreatingBancarized] = useState(false);
+  const [creatingDirect, setCreatingDirect] = useState(false);
+  const [customerRisk, setCustomerRisk] = useState<CreditRiskAssessment | null>(null);
+  const [riskLoading, setRiskLoading] = useState(false);
+  const [riskError, setRiskError] = useState('');
+  const [riskModal, setRiskModal] = useState<CreditRiskAssessment | null>(null);
+  const [riskExceptionReason, setRiskExceptionReason] = useState('');
+  const [showRiskExceptionForm, setShowRiskExceptionForm] = useState(false);
+  const pendingDirectRequestIdRef = React.useRef<string | null>(null);
   const [bancarizationRefreshKey, setBancarizationRefreshKey] = useState(0);
   const pendingBancarizationOperationIdsRef = React.useRef<Record<string, string>>({});
 
@@ -430,6 +472,21 @@ const LoanSection: React.FC<LoanSectionProps> = ({
         true,
       )
     : 0;
+  const paymentModalInstallmentOutstanding = paymentModalLoan
+    ? getInstallmentOutstanding(
+        paymentModalLoan.installments[paymentModal?.installmentIndex ?? -1],
+        new Date(),
+        dailyLateFeeRate,
+      ).total
+    : 0;
+  const paymentModalDisplayedOutstanding = paymentModal?.applyMode === 'INSTALLMENT_DISCOUNT'
+    ? paymentModalInstallmentOutstanding
+    : paymentModalOutstandingTotal;
+  const paymentModalNegotiatedAmount = parseMoneyInput(paymentModal?.amount);
+  const paymentModalDiscountPreview = paymentModal?.applyMode === 'INSTALLMENT_DISCOUNT'
+    ? roundMoney(Math.max(paymentModalInstallmentOutstanding - paymentModalNegotiatedAmount, 0))
+    : 0;
+  const paymentModalManualDiscount = parseMoneyInput(paymentModal?.discount);
 
   React.useEffect(() => {
     if (initialExpandedLoanId) {
@@ -447,6 +504,23 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     }
   }, [initialExpandedLoanId]);
   const [formData, setFormData] = useState(buildDefaultFormData);
+
+  React.useEffect(() => {
+    if (!isModalOpen || editingLoanId || !formData.customerId) {
+      setCustomerRisk(null);
+      setRiskError('');
+      return;
+    }
+    let active = true;
+    setCustomerRisk(null);
+    setRiskLoading(true);
+    setRiskError('');
+    void getCustomerCreditRisk(formData.customerId)
+      .then((risk) => { if (active) setCustomerRisk(risk); })
+      .catch((error) => { if (active) setRiskError(error instanceof Error ? error.message : 'Falha ao analisar o risco.'); })
+      .finally(() => { if (active) setRiskLoading(false); });
+    return () => { active = false; };
+  }, [isModalOpen, editingLoanId, formData.customerId]);
 
   React.useEffect(() => {
     if (!bancarizationDraft.simulation) return;
@@ -472,8 +546,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const baseDate = new Date(formData.startDate + 'T12:00:00'); // Use noon to avoid timezone shifts
     const effectiveFrequency = formData.interestType === 'SPLIT' ? 'MONTHLY' : formData.frequency;
 
+    if (effectiveFrequency === 'DAILY' && formData.dailyChargeDays.length === 0) return [];
+
     const buildDueDate = (index: number) => {
-      return buildInstallmentDueDate(baseDate, index, effectiveFrequency) || getLocalISODate(baseDate);
+      return buildInstallmentDueDate(baseDate, index, effectiveFrequency, formData.dailyChargeDays) || getLocalISODate(baseDate);
     };
 
     if (formData.interestType === 'SPLIT') {
@@ -535,6 +611,10 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     setFormData(buildDefaultFormData());
     setBancarizationDraft(createDefaultBancarizationDraft());
     setEditingLoanId(null);
+    setRiskModal(null);
+    setRiskExceptionReason('');
+    setShowRiskExceptionForm(false);
+    pendingDirectRequestIdRef.current = null;
   };
 
   const openNewLoanModal = () => {
@@ -547,11 +627,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       showToast('Contratos bancarizados sao atualizados pela Credigrupo', 'error');
       return;
     }
-    const hasPaidInstallment = (Array.isArray(loan.installments) ? loan.installments : [])
-      .some(inst => installmentPaidAmount(inst) > 0 || normalizeInstallmentStatus(inst?.status) === 'PAID');
-
-    if (hasPaidInstallment) {
-      showToast('Nao e possivel editar contrato com parcelas pagas', 'error');
+    if (hasLoanFinancialHistory(loan)) {
+      showToast('Nao e possivel editar contrato com pagamentos ou renovacoes', 'error');
       return;
     }
 
@@ -564,6 +641,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       monthlyAccruedInterestRate: String(loan.monthlyAccruedInterestRate ?? ''),
       interestType: fromLegacyInterestType(loan.interestType),
       frequency: fromLegacyFrequency(loan.frequency),
+      dailyChargeDays: loan.dailyChargeDays?.length ? loan.dailyChargeDays : [1, 2, 3, 4, 5, 6],
       installmentsCount: String(loanInstallmentsCount(loan)),
       startDate: loan.startDate || getLocalISODate(),
       formalizationType: 'DIRECT',
@@ -617,6 +695,20 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       await onCancelLoan(loan.id, reason.trim());
     } catch (error) {
       showToast('Erro ao cancelar contrato', 'error');
+    }
+  };
+
+  const handleDeleteUnpaidLoan = async (loan: Loan) => {
+    if (!window.confirm(
+      `Excluir definitivamente o emprestimo ${loan.contractNumber || loan.id}? ` +
+       'Esta acao remove o contrato e somente a retirada original, devolvendo o valor ao caixa. ' +
+       'Nao e permitida para contratos com recebimentos, estornos, renovacoes ou outras alteracoes.',
+    )) return;
+
+    try {
+      await onDeleteUnpaidLoan(loan.id);
+    } catch {
+      // The parent already reports a specific, user-facing failure message.
     }
   };
 
@@ -855,16 +947,47 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitLoan = async (riskDecision?: CreditRiskDecisionInput) => {
     const customer = customers.find(c => c.id === formData.customerId);
     if (!customer) return showToast('Selecione um cliente', 'error');
+
+    if (!editingLoanId && !riskDecision) {
+      try {
+        const risk = await getCustomerCreditRisk(customer.id);
+        setCustomerRisk(risk);
+        if (risk.level !== 'GREEN' || risk.historyIncomplete) {
+          setShowRiskExceptionForm(false);
+          setRiskModal(risk);
+          return;
+        }
+      } catch (error) {
+        showToast(error instanceof Error ? error.message : 'Analise de risco indisponivel.', 'error');
+        return;
+      }
+    }
+
+    const confirmLiquidityReserve = (amount: number): boolean => {
+      if (cashBalanceStatus !== 'ready') {
+        return window.confirm('Nao foi possivel confirmar o saldo atual do caixa. Deseja continuar com a concessao mesmo assim?');
+      }
+      const assessment = assessLiquidityReserve(cashBalance, amount);
+      if (!assessment.shouldWarn) return true;
+      return window.confirm(
+        `ALERTA DE RESERVA MINIMA\n\n` +
+        `Caixa atual: ${formatRiskMoney(cashBalance)}\n` +
+        `Valor do emprestimo: ${formatRiskMoney(amount)}\n` +
+        `Caixa apos a concessao: ${formatRiskMoney(assessment.projectedCash)}\n` +
+        `Reserva minima: ${formatRiskMoney(MINIMUM_CASH_RESERVE)}\n\n` +
+        'A concessao pode continuar. Deseja prosseguir?',
+      );
+    };
 
     if (formData.formalizationType === 'BANCARIZED') {
       if (editingLoanId) return showToast('Bancarizacao nao pode ser aplicada por edicao', 'error');
       if (!credigrupoEnabled) return showToast('Integracao Credigrupo desativada', 'error');
       if (!bancarizationDraft.simulation) return showToast('Realize e confirme a simulacao oficial', 'error');
       if (creatingBancarized) return;
+      if (!confirmLiquidityReserve(Number(formData.amount))) return;
 
       const simulationId = bancarizationDraft.simulation.simulationId;
       const operationId = pendingBancarizationOperationIdsRef.current[simulationId]
@@ -878,6 +1001,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           operationId,
           simulationId,
           fundingSource: 'GR',
+          riskDecision,
         });
         delete pendingBancarizationOperationIdsRef.current[simulationId];
         setIsModalOpen(false);
@@ -911,6 +1035,11 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       }
     }
 
+    if (formData.frequency === 'DAILY' && formData.dailyChargeDays.length === 0) {
+      showToast('Selecione ao menos um dia de cobranca para o contrato diario.', 'error');
+      return;
+    }
+
     const installments = calculateInstallments();
     if (!installments.length) {
       showToast('Nao foi possivel calcular as parcelas. Revise os dados.', 'error');
@@ -931,6 +1060,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       monthlyPaidInterestRate: isSplitContract ? Number(formData.monthlyPaidInterestRate) : undefined,
       monthlyAccruedInterestRate: isSplitContract ? Number(formData.monthlyAccruedInterestRate) : undefined,
       frequency: isSplitContract ? 'MENSAL' : toLegacyFrequency(formData.frequency),
+      dailyChargeDays: !isSplitContract && formData.frequency === 'DAILY' ? formData.dailyChargeDays : undefined,
       installmentCount: Number(formData.installmentsCount),
       installmentsCount: Number(formData.installmentsCount),
       totalToReturn,
@@ -957,11 +1087,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           showToast('Contrato nao encontrado para atualizacao', 'error');
           return;
         }
-        const hasFinancialHistory = currentLoan.installments.some((installment) => (
-          installmentPaidAmount(installment) > 0 ||
-          Boolean(installment.paymentBreakdown) ||
-          (Array.isArray(installment.paymentEntries) && installment.paymentEntries.length > 0)
-        ));
+        const hasFinancialHistory = hasLoanFinancialHistory(currentLoan);
         if (hasFinancialHistory) {
           showToast(
             'Contrato com pagamentos nao pode ter as condicoes financeiras alteradas. Gere o PDF atualizado sem editar o cronograma.',
@@ -991,6 +1117,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           showToast('Contrato atualizado, mas falhou ao gerar o novo PDF.', 'error');
         }
       } else {
+        if (creatingDirect) return;
+        if (!confirmLiquidityReserve(Number(payload.amount || 0))) return;
         const newLoan: LoanDraft = {
           contractNumber: getNextContractNumber(),
           customerId: payload.customerId || customer.id,
@@ -1002,6 +1130,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           monthlyPaidInterestRate: payload.monthlyPaidInterestRate,
           monthlyAccruedInterestRate: payload.monthlyAccruedInterestRate,
           frequency: payload.frequency || 'MENSAL',
+          dailyChargeDays: payload.dailyChargeDays,
           installmentCount: Number(payload.installmentCount || payload.installmentsCount || 0),
           installmentsCount: Number(payload.installmentsCount || payload.installmentCount || 0),
           totalToReturn: Number(totalToReturn.toFixed(2)),
@@ -1013,7 +1142,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           notes: '',
           installments: payload.installments || [],
         };
-        const createdLoan = await onAddLoan(newLoan);
+        pendingDirectRequestIdRef.current ||= crypto.randomUUID();
+        setCreatingDirect(true);
+        const createdLoan = await onAddLoan(newLoan, riskDecision, pendingDirectRequestIdRef.current);
         try {
           const loanForPdf: Loan = {
             ...newLoan,
@@ -1035,8 +1166,17 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     } catch (error) {
       if (editingLoanId) {
         showToast('Erro ao atualizar contrato', 'error');
+      } else {
+        showToast(error instanceof Error ? error.message : 'Erro ao efetivar contrato', 'error');
       }
+    } finally {
+      setCreatingDirect(false);
     }
+  };
+
+  const handleSubmit = (event: React.FormEvent) => {
+    event.preventDefault();
+    void submitLoan();
   };
 
   const handlePayment = async (
@@ -1066,6 +1206,17 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     }
 
     const applyMode: PaymentApplyMode = directApplyMode || activeModal?.applyMode || 'INSTALLMENTS';
+    const parsedDiscount = applyMode === 'INSTALLMENT_DISCOUNT'
+      ? 0
+      : parseMoneyInput(activeModal?.discount);
+    if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0) {
+      showToast('Desconto invalido', 'error');
+      return;
+    }
+    if (applyMode === 'EARLY_SETTLEMENT' && parsedDiscount > 0) {
+      showToast('A quitacao antecipada calcula o desconto automaticamente.', 'error');
+      return;
+    }
     const redistributionInstallmentsCount = applyMode === 'REDISTRIBUTE_BALANCE'
       ? Number.parseInt(String(activeModal?.redistributionInstallmentsCount || ''), 10)
       : undefined;
@@ -1093,6 +1244,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       installmentIndex,
       applyMode,
       roundMoney(parsedAmount),
+      roundMoney(parsedDiscount),
       redistributionStartDate || '',
       redistributionInstallmentsCount || '',
     ].join(':');
@@ -1102,6 +1254,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       const result = await onApplyLoanPayment(loanId, {
         operationId: getPaymentOperationId(fingerprint),
         amount: roundMoney(parsedAmount),
+        discountApplied: roundMoney(parsedDiscount),
         installmentIndex,
         applyMode,
         processedAt: new Date().toISOString(),
@@ -1110,7 +1263,12 @@ const LoanSection: React.FC<LoanSectionProps> = ({
       });
       clearPaymentOperationId(fingerprint);
 
-      if (result.unappliedAmount > 0.000001) {
+      if (result.discountApplied > 0.000001) {
+        showToast(
+          `Pagamento com desconto registrado. Recebido: R$ ${result.appliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} | Desconto: R$ ${result.discountApplied.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`,
+          'success',
+        );
+      } else if (result.unappliedAmount > 0.000001) {
         showToast(
           `Pagamento aplicado: R$ ${result.appliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}. Excedente nao aplicado: R$ ${result.unappliedAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.`,
           'success',
@@ -1227,7 +1385,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
           </div>
           <div className="flex bg-[#050505] border border-zinc-900 rounded-xl p-1 overflow-x-auto max-w-full">
             {(['ALL', 'ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED'] as const).map(f => (
-              <button
+                               <button
                 key={f}
                 onClick={() => setStatusFilter(f)}
                 className={`px-4 py-2 rounded-lg text-[8px] font-black uppercase tracking-widest transition-all whitespace-nowrap ${
@@ -1355,8 +1513,28 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             resolvedLoanStatus === 'ACTIVE' &&
             fromLegacyInterestType(loan.interestType) === 'PRICE' &&
             loanInstallments.some((inst) => getRemainingInstallmentValue(inst) > 0);
-          const canInterestOnlyRenew = !isBancarized && canLoanRenewWithInterestOnly(loan);
-          const canChargeLoan = resolvedLoanStatus === 'ACTIVE' && totalRemainingLoanAmount > 0;
+           const canInterestOnlyRenew = !isBancarized && canLoanRenewWithInterestOnly(loan);
+           const canChargeLoan = resolvedLoanStatus === 'ACTIVE' && totalRemainingLoanAmount > 0;
+           const isPristineActiveLoan =
+             resolvedLoanStatus === 'ACTIVE' &&
+             loan.version === 0 &&
+             loan.lastOperationType === 'LOAN_CREATED' &&
+             loan.lastOperationId === `loan-created-${loan.id}`;
+           const isImmediatelyCancelledLoan =
+             resolvedLoanStatus === 'CANCELLED' &&
+             loan.version === 1 &&
+             loan.lastOperationType === 'CANCELLATION' &&
+             Boolean(loan.cancellationReason?.trim());
+           const canDeleteUnpaidLoan = !isBancarized &&
+             (isPristineActiveLoan || isImmediatelyCancelledLoan) &&
+             !loan.hasFinancialHistory &&
+             !hasFinancialHistory &&
+             Number(loan.paidAmount || 0) === 0 &&
+             !(loan.fiscalPaymentEntries?.length) &&
+             !(loan.renewalHistory?.length) &&
+             Number(loan.renewCount || 0) === 0 &&
+             Number(loan.maxHistoricalOverdueDays || 0) === 0 &&
+             overdueLoanAmount === 0;
 
           return (
             <div key={loan.id} id={`loan-${loan.id}`} className={`bg-[#050505] border rounded-[2rem] overflow-hidden transition-all ${
@@ -1498,6 +1676,19 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 >
                   <Ban size={16} />
                 </button>
+                {canDeleteUnpaidLoan && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void handleDeleteUnpaidLoan(loan);
+                    }}
+                    className="h-[42px] w-[42px] shrink-0 rounded-xl bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-black transition-all flex items-center justify-center"
+                    title="Excluir emprestimo sem recebimentos e recompor o caixa"
+                    aria-label="Excluir emprestimo sem recebimentos"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
                 <span className={`text-[8px] font-black px-3 py-1 rounded-full uppercase ${
                   resolvedLoanStatus === 'ACTIVE' 
                     ? (isOverdue ? 'bg-red-500/10 text-red-500' : 'bg-emerald-500/10 text-emerald-500') 
@@ -1645,6 +1836,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                                     loanId: loan.id,
                                     installmentIndex: idx,
                                     amount: Math.max(remaining, 0).toFixed(2),
+                                    discount: '',
                                     applyMode: 'INSTALLMENTS',
                                     redistributionStartDate: getLocalISODate(),
                                     redistributionInstallmentsCount: String(Math.max(pendingCountFromCurrent, 1)),
@@ -1655,11 +1847,36 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                                     ? 'bg-zinc-900 text-zinc-700 cursor-not-allowed' 
                                     : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
                                 }`}
-                                title="Pagar valor parcial"
+                                title="Registrar pagamento parcial ou aplicar desconto negociado"
                               >
-                                <DollarSign size={10} /> Parcial
-                              </button>
-                            </div>
+                                 <DollarSign size={10} /> Pagar / desconto
+                               </button>
+                               <button
+                                 disabled={isLocked || !!processingPayment}
+                                 onClick={(e) => {
+                                   e.stopPropagation();
+                                   const pendingCountFromCurrent = getPendingInstallmentIndexes(loanInstallments, idx).length;
+                                   setPaymentModal({
+                                     isOpen: true,
+                                     loanId: loan.id,
+                                     installmentIndex: idx,
+                                     amount: Math.max(remaining, 0).toFixed(2),
+                                      discount: '',
+                                     applyMode: 'INSTALLMENT_DISCOUNT',
+                                     redistributionStartDate: getLocalISODate(),
+                                     redistributionInstallmentsCount: String(Math.max(pendingCountFromCurrent, 1)),
+                                   });
+                                 }}
+                                 className={`flex-1 py-2 rounded-xl text-[7px] font-black uppercase tracking-widest flex items-center justify-center gap-1 transition-all ${
+                                   isLocked || !!processingPayment
+                                     ? 'bg-zinc-900 text-zinc-700 cursor-not-allowed'
+                                     : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500 hover:text-black'
+                                 }`}
+                                 title="Quitar somente esta parcela pelo valor negociado, registrando o desconto"
+                               >
+                                 <Percent size={10} /> Desconto
+                               </button>
+                             </div>
                           )}
                           
                           {installmentPaidAmount(inst) > 0 && !isBancarized && (
@@ -1964,14 +2181,20 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 <DollarSign size={24} className="text-emerald-500" />
               </div>
               <div>
-                <h2 className="text-sm font-black text-white uppercase tracking-widest">Registrar Pagamento</h2>
-                <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">Informe o valor recebido</p>
+                <h2 className="text-sm font-black text-white uppercase tracking-widest">
+                  {paymentModal.applyMode === 'INSTALLMENT_DISCOUNT' ? 'Pagamento com desconto' : 'Registrar Pagamento'}
+                </h2>
+                <p className="text-[9px] text-zinc-500 uppercase tracking-widest mt-1">
+                  {paymentModal.applyMode === 'INSTALLMENT_DISCOUNT' ? 'Informe o valor negociado e recebido para esta parcela' : 'Informe o valor recebido'}
+                </p>
               </div>
             </div>
 
             <div className="space-y-6">
               <div className="space-y-2">
-                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor do Pagamento</label>
+                <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">
+                  {paymentModal.applyMode === 'INSTALLMENT_DISCOUNT' ? 'Valor negociado para a parcela' : 'Valor recebido'}
+                </label>
                 <div className="relative">
                   <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-black text-xs">R$</span>
                   <input
@@ -1985,16 +2208,53 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   />
                 </div>
                 <p className="text-[8px] text-zinc-600 uppercase italic ml-1">
-                  * Valores maiores que a parcela podem ser distribuidos em outras parcelas.
+                  {paymentModal.applyMode === 'INSTALLMENT_DISCOUNT'
+                    ? '* Quita somente esta parcela; a diferenca sera registrada como desconto, nunca como entrada de caixa.'
+                    : '* Valores maiores que a parcela podem ser distribuidos em outras parcelas.'}
                 </p>
                 <p className="text-[8px] text-red-500/80 uppercase ml-1">
-                  Valor em atraso (total faltante): R$ {paymentModalOutstandingTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  Saldo para quitar: R$ {paymentModalDisplayedOutstanding.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                 </p>
+                {paymentModal.applyMode === 'INSTALLMENT_DISCOUNT' && (
+                  <p className="text-[8px] text-emerald-500 uppercase ml-1">
+                    Desconto a registrar: R$ {paymentModalDiscountPreview.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </p>
+                )}
               </div>
+
+              {paymentModal.applyMode !== 'INSTALLMENT_DISCOUNT' && (
+                <div className="space-y-2">
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">
+                    Desconto concedido (opcional)
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500 font-black text-xs">R$</span>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0,00"
+                      className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 pl-10 text-white outline-none focus:border-amber-400 text-sm font-black"
+                      value={paymentModal.discount}
+                      onChange={event => setPaymentModal({
+                        ...paymentModal,
+                        discount: event.target.value.replace(/[^\d,.-]/g, ''),
+                      })}
+                    />
+                  </div>
+                  <p className="text-[8px] text-zinc-600 uppercase italic ml-1">
+                    * Nao entra no caixa. Abate somente principal e juros; multas permanecem devidas.
+                  </p>
+                  {paymentModalManualDiscount > 0 && (
+                    <p className="text-[8px] text-amber-400 uppercase ml-1">
+                      Desconto a registrar: R$ {paymentModalManualDiscount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="space-y-2">
                 <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Forma de Abatimento</label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                   <button
                     type="button"
                     onClick={() => setPaymentModal({ ...paymentModal, applyMode: 'INSTALLMENTS' })}
@@ -2042,6 +2302,22 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   >
                     Redividir
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setPaymentModal({
+                      ...paymentModal,
+                      applyMode: 'INSTALLMENT_DISCOUNT',
+                      amount: paymentModalInstallmentOutstanding.toFixed(2),
+                      discount: '',
+                    })}
+                    className={`py-3 rounded-xl text-[8px] font-black uppercase tracking-widest border transition-all ${
+                      paymentModal.applyMode === 'INSTALLMENT_DISCOUNT'
+                        ? 'bg-amber-500 text-black border-amber-400'
+                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700'
+                    }`}
+                  >
+                    Desconto nesta parcela
+                  </button>
                 </div>
                 {paymentModal.applyMode === 'REDISTRIBUTE_BALANCE' && (
                   <div className="space-y-2 pt-1">
@@ -2081,6 +2357,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 <p className="text-[8px] text-zinc-600 uppercase italic ml-1">
                   {paymentModal.applyMode === 'TOTAL_BALANCE'
                     ? '* Abate do fim para o inicio das parcelas pendentes.'
+                    : paymentModal.applyMode === 'INSTALLMENT_DISCOUNT'
+                      ? '* Quita somente a parcela selecionada e registra a diferenca como desconto negociado.'
                     : paymentModal.applyMode === 'REDISTRIBUTE_BALANCE'
                       ? '* Abate, soma saldo+multas, redefine quantidade de parcelas e novos vencimentos.'
                       : '* Abate em sequencia: parcela atual e, se sobrar, parcelas seguintes.'}
@@ -2246,6 +2524,24 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   {customers.map(c => <option key={c.id} value={c.id}>{c.name.toUpperCase()}</option>)}
                 </select>
               </div>
+              {!editingLoanId && formData.customerId && (
+                <div className={`rounded-2xl border p-4 text-[10px] ${customerRisk?.level === 'RED' || customerRisk?.historyIncomplete ? 'border-red-700/50 bg-red-950/20' : customerRisk?.level === 'ORANGE' ? 'border-orange-600/50 bg-orange-950/20' : 'border-[#BF953F]/30 bg-[#BF953F]/5'}`}>
+                  <div className="flex justify-between gap-3 font-black uppercase tracking-wider">
+                    <span>Analise de risco de credito</span>
+                    <span>{riskLoading ? 'ANALISANDO...' : customerRisk ? riskLevelLabel(customerRisk) : 'INDISPONIVEL'}</span>
+                  </div>
+                  {riskError && <p className="mt-2 text-red-400">{riskError}</p>}
+                  {customerRisk && (
+                    <>
+                      <p className="mt-2 text-zinc-300">Contratos: {customerRisk.totalContracts} total · {customerRisk.completedContracts} quitados · {customerRisk.activeContracts} ativos · {customerRisk.overdueContracts} em atraso</p>
+                      <p className="mt-1 text-zinc-300">Saldo em aberto: {formatRiskMoney(customerRisk.openAmount)} · Vencido: {formatRiskMoney(customerRisk.overdueAmount)}</p>
+                      <p className="mt-1 text-zinc-300">Maior atraso atual: {customerRisk.maxCurrentOverdueDays} dias · Historico: {customerRisk.maxHistoricalOverdueDays} dias</p>
+                      <p className="mt-1 text-zinc-300">Lucro real: {formatRiskMoney(customerRisk.realProfit)}</p>
+                      {customerRisk.historyIncomplete && <p className="mt-2 text-amber-400">Historico legado sem datas completas: revisao manual obrigatoria antes de nova concessao.</p>}
+                    </>
+                  )}
+                </div>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Tipo de Juros</label>
@@ -2284,18 +2580,48 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                   )}
                 </div>
               </div>
+              {formData.formalizationType === 'DIRECT' && formData.interestType !== 'SPLIT' && formData.frequency === 'DAILY' && (
+                <fieldset className="rounded-2xl border border-zinc-800 bg-zinc-950/40 p-4">
+                  <legend className="px-1 text-[9px] font-black text-zinc-500 uppercase tracking-widest">Dias de cobranca</legend>
+                  <p className="mb-3 text-[10px] text-zinc-400">Selecione os dias em que cada parcela diaria podera vencer.</p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {[
+                      { value: 0, label: 'DOM' }, { value: 1, label: 'SEG' }, { value: 2, label: 'TER' },
+                      { value: 3, label: 'QUA' }, { value: 4, label: 'QUI' }, { value: 5, label: 'SEX' }, { value: 6, label: 'SAB' },
+                    ].map((day) => {
+                      const selected = formData.dailyChargeDays.includes(day.value);
+                      return (
+                        <label key={day.value} className={`flex cursor-pointer items-center justify-between rounded-xl border px-3 py-2 text-[10px] font-black tracking-wider ${selected ? 'border-[#BF953F] bg-[#BF953F]/15 text-[#E5C46A]' : 'border-zinc-800 text-zinc-500'}`}>
+                          <span>{day.label}</span>
+                          <input
+                            type="checkbox"
+                            className="accent-[#BF953F]"
+                            checked={selected}
+                            onChange={() => setFormData((current) => ({
+                              ...current,
+                              dailyChargeDays: selected
+                                ? current.dailyChargeDays.filter((value) => value !== day.value)
+                                : [...current.dailyChargeDays, day.value].sort((a, b) => a - b),
+                            }))}
+                          />
+                        </label>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              )}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="space-y-1">
                   <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Valor</label>
                   <input
                     type="number" placeholder="0.00" required
-                    disabled={Boolean(editingLoanId)}
+                    disabled={Boolean(editingLoanId && loans.some((loan) => loan.id === editingLoanId && hasLoanFinancialHistory(loan)))}
                     className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs disabled:opacity-50 disabled:cursor-not-allowed"
                     value={formData.amount}
                     onChange={e => setFormData({ ...formData, amount: e.target.value })}
                   />
                   {editingLoanId && (
-                    <p className="text-[8px] text-zinc-600 uppercase mt-1">O principal e imutavel para preservar o caixa.</p>
+                    <p className="text-[8px] text-zinc-600 uppercase mt-1">Sem pagamentos ou renovacoes, o caixa sera ajustado automaticamente pela diferenca.</p>
                   )}
                 </div>
                 <div className="space-y-1">
@@ -2415,11 +2741,49 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                 />
               )}
 
-              <button disabled={creatingBancarized || (formData.formalizationType === 'BANCARIZED' && !bancarizationDraft.simulation)} className="w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
-                {creatingBancarized && <Loader2 size={13} className="animate-spin" />}
+              <button disabled={creatingBancarized || creatingDirect || riskLoading || Boolean(riskError) || (formData.formalizationType === 'BANCARIZED' && !bancarizationDraft.simulation)} className="w-full py-5 gold-gradient text-black rounded-2xl font-black uppercase text-[10px] tracking-widest mt-4 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                {(creatingBancarized || creatingDirect) && <Loader2 size={13} className="animate-spin" />}
                 {editingLoanId ? 'Salvar Alteracoes' : formData.formalizationType === 'BANCARIZED' ? 'Confirmar Bancarizacao' : 'Efetivar Contrato'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+      {riskModal && (
+        <div className="fixed inset-0 z-[220] flex items-center justify-center bg-black/90 p-4">
+          <div role="dialog" aria-modal="true" aria-label="Confirmacao de risco de credito" className="w-full max-w-md rounded-3xl border border-[#BF953F]/40 bg-[#090909] p-6 text-white shadow-2xl">
+            <h3 className="text-sm font-black uppercase tracking-wider">{riskModal.level === 'RED' || riskModal.historyIncomplete ? 'Novo emprestimo bloqueado' : 'Cliente com emprestimo em aberto'}</h3>
+            <p className="mt-3 text-xs text-zinc-300">Situacao: {riskLevelLabel(riskModal)}. Contratos ativos: {riskModal.activeContracts}. Saldo em aberto: {formatRiskMoney(riskModal.openAmount)}. Valor em atraso: {formatRiskMoney(riskModal.overdueAmount)}.</p>
+            <p className="mt-2 text-xs text-zinc-300">Maior atraso atual: {riskModal.maxCurrentOverdueDays} dias. Maior atraso historico: {riskModal.maxHistoricalOverdueDays} dias.</p>
+            {(riskModal.level === 'RED' || riskModal.historyIncomplete) ? (
+              <>
+                <p className="mt-4 text-xs font-bold text-red-400">Concessao bloqueada. {riskModal.historyIncomplete ? 'O historico legado requer revisao manual.' : 'Ha atraso atual ou historico acima de 15 dias.'}</p>
+                {isAdmin && showRiskExceptionForm && (
+                  <label className="mt-4 block text-[10px] font-black uppercase tracking-wide text-zinc-400">
+                    Motivo obrigatorio da liberacao excepcional
+                    <textarea value={riskExceptionReason} onChange={(event) => setRiskExceptionReason(event.target.value)} maxLength={1000} rows={3} className="mt-2 w-full rounded-xl border border-zinc-700 bg-black p-3 text-sm font-normal normal-case text-white" />
+                  </label>
+                )}
+              </>
+            ) : (
+              <p className="mt-4 text-xs font-bold text-amber-400">{riskModal.level === 'ORANGE' ? 'Atencao: existe parcela em atraso. ' : ''}Deseja realmente conceder um novo emprestimo?</p>
+            )}
+            <div className="mt-5 flex gap-3">
+              <button type="button" onClick={() => { setRiskModal(null); setRiskExceptionReason(''); setShowRiskExceptionForm(false); }} className="flex-1 rounded-xl bg-zinc-800 p-3 text-xs font-black uppercase">{riskModal.level === 'RED' || riskModal.historyIncomplete ? 'Voltar' : 'Cancelar'}</button>
+              {(riskModal.level !== 'RED' && !riskModal.historyIncomplete || isAdmin) && (
+                <button type="button" disabled={creatingBancarized || creatingDirect || ((riskModal.level === 'RED' || riskModal.historyIncomplete) && showRiskExceptionForm && !riskExceptionReason.trim())} onClick={() => {
+                  if ((riskModal.level === 'RED' || riskModal.historyIncomplete) && !showRiskExceptionForm) {
+                    setShowRiskExceptionForm(true);
+                    return;
+                  }
+                  const decision: CreditRiskDecisionInput = riskModal.level === 'RED' || riskModal.historyIncomplete
+                    ? { type: 'EXCEPTION', justification: riskExceptionReason.trim() }
+                    : { type: 'CONFIRM_EXPOSURE' };
+                  setRiskModal(null);
+                  void submitLoan(decision);
+                }} className="flex-1 rounded-xl bg-[#BF953F] p-3 text-xs font-black uppercase text-black disabled:opacity-40">{riskModal.level === 'RED' || riskModal.historyIncomplete ? showRiskExceptionForm ? 'Confirmar excecao' : 'Liberar excepcionalmente' : 'Continuar mesmo assim'}</button>
+              )}
+            </div>
           </div>
         </div>
       )}

@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { FieldValue } from 'firebase-admin/firestore';
 import type { CreateBancarizedLoanRequest } from '../../src/lib/creditProviders/types.js';
 import { requireAuthorizedActor } from '../_lib/auth.js';
+import directLoanHandler from '../_lib/directLoans.js';
 import { CredigrupoClient } from '../_lib/credit-providers/credigrupo/client.js';
 import { normalizeCredigrupoCreateSuccess } from '../_lib/credit-providers/credigrupo/createSuccess.js';
 import { buildCredigrupoCreateFailurePatch } from '../_lib/credit-providers/credigrupo/operationFailure.js';
@@ -10,6 +11,7 @@ import { adminDb } from '../_lib/firebaseAdmin.js';
 import { ApiError, handleApiError, parseJsonBody, sendJson } from '../_lib/http.js';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
+  if (request.query.route === 'direct') return directLoanHandler(request, response);
   try {
     if (request.method !== 'POST') return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
     const actor = await requireAuthorizedActor(request);
@@ -54,11 +56,19 @@ export default async function handler(request: VercelRequest, response: VercelRe
       const localLoanId = normalized.internalStatus === 'AWAITING_LENDER_PAYMENT'
         ? adminDb.collection('loans').doc().id
         : undefined;
-      await adminDb.doc(`creditOperations/${input.operationId}`).update(removeUndefined({
+      const operationUpdate = adminDb.batch();
+      operationUpdate.update(adminDb.doc(`creditOperations/${input.operationId}`), removeUndefined({
         ...normalized,
         localLoanId,
         updatedAt: FieldValue.serverTimestamp(),
       }));
+      operationUpdate.update(adminDb.doc(`creditRiskDecisions/${input.operationId}`), removeUndefined({
+        loanId: localLoanId || null,
+        proposalId: normalized.proposalId || null,
+        status: 'PROPOSAL_CREATED',
+        updatedAt: FieldValue.serverTimestamp(),
+      }));
+      await operationUpdate.commit();
       if (!normalized.proposalId) {
         throw new ApiError(
           502,
@@ -78,10 +88,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
         duplicate: false,
       });
     } catch (error) {
-      await adminDb.doc(`creditOperations/${input.operationId}`).set(removeUndefined({
+      const failureUpdate = adminDb.batch();
+      failureUpdate.set(adminDb.doc(`creditOperations/${input.operationId}`), removeUndefined({
         ...buildCredigrupoCreateFailurePatch(error),
         updatedAt: FieldValue.serverTimestamp(),
       }), { merge: true });
+      failureUpdate.update(adminDb.doc(`creditRiskDecisions/${input.operationId}`), {
+        status: 'PROVIDER_FAILED', updatedAt: FieldValue.serverTimestamp(),
+      });
+      await failureUpdate.commit();
       throw error;
     }
   } catch (error) {

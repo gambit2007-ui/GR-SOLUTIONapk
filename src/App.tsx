@@ -34,6 +34,7 @@ import {
   applyLoanPayment,
   cancelLoan,
   createLoan,
+  deleteUnpaidLoan,
   reverseLoanPayment,
   updateLoan,
   updateLoanAndAddMovement,
@@ -84,6 +85,7 @@ const App: React.FC = () => {
     monthlySnapshots,
     feeSettings,
     caixa,
+    cashBalanceStatus,
     isCustomersLoading: isRealtimeCustomersLoading,
     cashMovementsStatus,
   } = useRealtimeData(activeDataUser, {
@@ -367,15 +369,18 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddLoan = async (loanDraft: LoanDraft): Promise<CreatedLoanResult> => {
+  const handleAddLoan = async (
+    loanDraft: LoanDraft,
+    decision?: import('./services/creditRiskService').CreditRiskDecisionInput,
+    requestId?: string,
+  ): Promise<CreatedLoanResult> => {
     try {
-      const createdLoanId = await createLoan(loanDraft, movementActor);
+      const createdLoanId = await createLoan(loanDraft, movementActor, decision, requestId);
       setCurrentView('DASHBOARD');
       showToast('Contrato efetivado!', 'success');
       return createdLoanId;
     } catch (error: unknown) {
       reportAppError('loan.create', error);
-      showToast('Erro ao salvar contrato', 'error');
       throw error;
     }
   };
@@ -387,6 +392,25 @@ const App: React.FC = () => {
     } catch (error: unknown) {
       reportAppError('loan.cancel', error);
       showToast('Erro ao cancelar contrato', 'error');
+      throw error;
+    }
+  };
+
+  const handleDeleteUnpaidLoan = async (loanId: string) => {
+    try {
+      await deleteUnpaidLoan(loanId, movementActor);
+      showToast('Emprestimo excluido e caixa recomposto!', 'success');
+    } catch (error: unknown) {
+      reportAppError('loan.delete-unpaid', error);
+      const code = error instanceof Error ? error.message : '';
+      const message = code === 'CONTRATO_POSSUI_HISTORICO_FINANCEIRO'
+        ? 'Contrato possui recebimento ou historico financeiro e nao pode ser excluido.'
+        : code === 'CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO'
+          ? 'Contrato bancarizado nao pode ser excluido.'
+          : code === 'CONTRATO_NAO_ELEGIVEL_PARA_EXCLUSAO_SEGURA'
+            ? 'Somente contratos recem-criados, sem alteracoes e sem recebimentos podem ser excluidos.'
+            : 'Erro ao excluir emprestimo';
+      showToast(message, 'error');
       throw error;
     }
   };
@@ -473,8 +497,12 @@ const App: React.FC = () => {
             onLoadMoreLoans={() => { void paginatedLoans.loadMore(); }}
             onLoadAllLoans={paginatedLoans.loadAll}
             onAddLoan={handleAddLoan}
+            cashBalance={caixa}
+            cashBalanceStatus={cashBalanceStatus}
+            isAdmin={accessControl.role?.toUpperCase() === 'ADMIN'}
             onUpdateLoan={handleUpdateLoan}
             onCancelLoan={handleCancelLoan}
+            onDeleteUnpaidLoan={handleDeleteUnpaidLoan}
             showToast={showToast}
             initialExpandedLoanId={selectedLoanId}
             currentActor={movementActor}
@@ -671,7 +699,9 @@ const App: React.FC = () => {
               key={item.id}
               onClick={() => handleSelectView(item.id as View)}
               className={`w-full flex items-center gap-4 px-4 py-4 rounded-2xl transition-all relative ${
-                currentView === item.id ? 'gold-gradient text-black font-black' : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900/50'
+                currentView === item.id
+                  ? 'gold-gradient text-black font-black'
+                  : 'text-zinc-500 hover:text-zinc-200 hover:bg-zinc-900/50'
               }`}
             >
               <item.icon size={22} />

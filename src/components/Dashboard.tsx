@@ -9,6 +9,7 @@ import { getLocalISODate } from '../utils/dateTime';
 import { calculateInstallmentLateFee } from '../utils/lateFee';
 import { getInstallmentOutstanding } from '../utils/financialEngine';
 import { calculateDelinquencyRate } from '../utils/delinquencyRate';
+import { buildOverdueCustomerCards } from '../utils/overdueCustomers';
 
 interface DashboardProps {
   loans: Loan[];
@@ -59,22 +60,6 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
     return getInstallmentOutstanding(inst, new Date(), dailyLateFeeRate).total;
   };
 
-  const getOverdueDays = (dueDateValue: string) => {
-    const dueDate = new Date(`${dueDateValue}T00:00:00`);
-    if (Number.isNaN(dueDate.getTime())) return 0;
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (dueDate >= today) return 0;
-
-    return Math.floor((today.getTime() - dueDate.getTime()) / (24 * 60 * 60 * 1000));
-  };
-
-  const getMaxOverdueDays = (installments: Installment[]) =>
-    installments.reduce((maxDays, installment) => Math.max(maxDays, getOverdueDays(installment.dueDate)), 0);
-
-  const formatOverdueDays = (days: number) => `${days} ${days === 1 ? 'dia' : 'dias'}`;
-
   const today = getLocalISODate();
   const isInstallmentOverdue = (installment: Installment) => (
     normalizeInstallmentStatus(installment.status) !== 'PAID' &&
@@ -87,6 +72,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
     if (effectiveLoanStatus(loan) !== 'ACTIVE') return false;
     return loan.installments.some(isInstallmentOverdue);
   });
+  const overdueCustomers = buildOverdueCustomerCards(overdueLoans, new Date(), dailyLateFeeRate);
   const overdueAmount = roundMoney(overdueLoans.reduce(
     (loanSum, loan) => loanSum + loan.installments
       .filter(isInstallmentOverdue)
@@ -319,7 +305,7 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
       </div>
 
       {/* CONTRATOS EM ATRASO */}
-      {overdueLoans.length > 0 && (
+      {overdueCustomers.length > 0 && (
         <div id="overdue-section" className="bg-red-500/5 border border-red-500/20 p-8 rounded-[2.5rem] relative overflow-hidden">
           <div className="absolute top-0 right-0 p-8 opacity-10">
             <Activity size={120} className="text-red-500" />
@@ -335,34 +321,33 @@ const Dashboard: React.FC<DashboardProps> = ({ loans, dailyLateFeeRate, onNaviga
               </div>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {overdueLoans.map((loan) => {
-                const overdueInstallments = loan.installments.filter(isInstallmentOverdue);
-                const overdueCount = overdueInstallments.length;
-                const overdueValue = roundMoney(
-                  overdueInstallments.reduce((sum, i) => sum + getRemainingInstallmentValue(i), 0),
-                );
-                const overdueDays = getMaxOverdueDays(overdueInstallments);
-
+              {overdueCustomers.map((customer) => {
+                const severityClass = customer.maxOverdueDays >= 16
+                  ? 'text-red-500 bg-red-500/10'
+                  : customer.maxOverdueDays >= 8
+                    ? 'text-orange-400 bg-orange-500/10'
+                    : 'text-amber-400 bg-amber-500/10';
                 return (
                   <button
-                    key={loan.id}
-                    onClick={() => onNavigateToLoan(loan.id)}
+                    key={customer.customerId || customer.navigationLoanId}
+                    onClick={() => onNavigateToLoan(customer.navigationLoanId)}
                     className="flex flex-col p-6 bg-[#000000] border border-zinc-900 rounded-3xl hover:border-red-500/50 transition-all text-left group relative overflow-hidden"
                   >
                     <div className="absolute top-0 right-0 w-1 h-full bg-red-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                     <div className="flex justify-between items-start mb-4">
                       <div>
-                        <p className="text-[10px] font-black text-white uppercase group-hover:text-red-500 transition-colors break-words">{loan.customerName}</p>
-                        <p className="text-[8px] text-zinc-500 uppercase tracking-widest mt-1 break-all">ID: {loan.id}</p>
+                        <p className="text-[10px] font-black text-white uppercase group-hover:text-red-500 transition-colors break-words">{customer.customerName}</p>
+                        <p className="text-[8px] text-zinc-500 uppercase tracking-widest mt-1 break-all">ID: {customer.loanIds.join(', ')}</p>
+                        {customer.overdueContractCount > 1 && <p className="mt-1 text-[8px] text-zinc-500 uppercase">{customer.overdueContractCount} contratos em atraso</p>}
                       </div>
-                      <span className="text-[8px] font-black text-red-500 bg-red-500/10 px-2 py-1 rounded-lg uppercase whitespace-nowrap">
-                        {overdueCount}x - {formatOverdueDays(overdueDays)}
+                      <span className={`text-[8px] font-black px-2 py-1 rounded-lg uppercase whitespace-nowrap ${severityClass}`}>
+                        {customer.overdueInstallmentCount}x • {customer.maxOverdueDays} {customer.maxOverdueDays === 1 ? 'dia' : 'dias'}
                       </span>
                     </div>
                     <div className="mt-auto">
                       <p className="text-[9px] text-zinc-500 uppercase tracking-widest">Valor em Atraso</p>
                       <p className="text-sm font-black text-white mt-1">
-                        R$ {overdueValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        R$ {customer.overdueAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                       </p>
                     </div>
                     <div className="mt-4 flex items-center gap-2 text-[8px] font-black text-red-500 uppercase tracking-widest opacity-0 group-hover:opacity-100 transition-all transform translate-y-2 group-hover:translate-y-0">

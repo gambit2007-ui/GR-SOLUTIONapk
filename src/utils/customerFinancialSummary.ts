@@ -4,13 +4,17 @@ import {
   installmentAmount,
   installmentPaidAmount,
   normalizeInstallmentStatus,
-} from './loanCompat';
-import { getInstallmentOutstanding } from './financialEngine';
+} from './loanCompat.js';
+import { getInstallmentOutstanding } from './financialEngine.js';
 
 export interface CustomerFinancialSummary {
   totalBorrowed: number;
   totalReceived: number;
+  principalRecovered: number;
   realProfit: number;
+  roi: number;
+  discountsGranted: number;
+  renewals: number;
   projectedProfit: number;
   openAmount: number;
   overdueAmount: number;
@@ -23,7 +27,11 @@ export interface CustomerFinancialSummary {
 const emptySummary: CustomerFinancialSummary = {
   totalBorrowed: 0,
   totalReceived: 0,
+  principalRecovered: 0,
   realProfit: 0,
+  roi: 0,
+  discountsGranted: 0,
+  renewals: 0,
   projectedProfit: 0,
   openAmount: 0,
   overdueAmount: 0,
@@ -115,13 +123,14 @@ export const calculateCustomerFinancialSummary = (
   customerId: string,
   loans: Loan[],
   dailyLateFeeRate?: number,
+  referenceDate = new Date(),
 ): CustomerFinancialSummary => {
   if (!customerId) return { ...emptySummary };
 
-  const today = new Date();
+  const today = new Date(referenceDate);
   today.setHours(0, 0, 0, 0);
 
-  return loans
+  const summary = loans
     .filter((loan) => loan.customerId === customerId)
     .reduce<CustomerFinancialSummary>((summary, loan) => {
       const status = effectiveLoanStatus(loan);
@@ -131,6 +140,7 @@ export const calculateCustomerFinancialSummary = (
       summary.totalContracts += 1;
       if (status === 'COMPLETED') summary.completedContracts += 1;
       if (status === 'ACTIVE') summary.activeContracts += 1;
+      summary.renewals += Math.max(Number(loan.renewCount || 0), loan.renewalHistory?.length || 0);
 
       let loanOpenAmount = 0;
       let loanOverdueAmount = 0;
@@ -146,6 +156,10 @@ export const calculateCustomerFinancialSummary = (
       installments.forEach((installment) => {
         const breakdown = getInstallmentPaymentBreakdown(installment);
         summary.totalReceived = roundMoney(summary.totalReceived + breakdown.totalPaid);
+        if ((installment.paymentEntries?.length || 0) > 0 || installment.paymentBreakdown) {
+          summary.principalRecovered = roundMoney(summary.principalRecovered + breakdown.principalPaid);
+          summary.discountsGranted = roundMoney(summary.discountsGranted + breakdown.discountApplied);
+        }
         summary.realProfit = roundMoney(
           summary.realProfit + breakdown.interestPaid + breakdown.lateFeePaid + breakdown.serviceFeePaid,
         );
@@ -163,6 +177,8 @@ export const calculateCustomerFinancialSummary = (
 
       (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
         summary.totalReceived = roundMoney(summary.totalReceived + Number(entry.totalPaid || 0));
+        summary.principalRecovered = roundMoney(summary.principalRecovered + Number(entry.principalPaid || 0));
+        summary.discountsGranted = roundMoney(summary.discountsGranted + Number(entry.discountApplied || 0));
         summary.realProfit = roundMoney(
           summary.realProfit + Number(entry.interestPaid || 0) + Number(entry.lateFeePaid || 0) + Number(entry.serviceFeePaid || 0),
         );
@@ -183,4 +199,8 @@ export const calculateCustomerFinancialSummary = (
 
       return summary;
     }, { ...emptySummary });
+  summary.roi = summary.totalBorrowed > 0
+    ? roundMoney((summary.realProfit / summary.totalBorrowed) * 100)
+    : 0;
+  return summary;
 };

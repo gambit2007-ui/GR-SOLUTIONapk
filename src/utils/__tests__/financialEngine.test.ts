@@ -4,6 +4,7 @@ import { addCalendarMonthsClamped, buildInstallmentDueDate } from '../dateTime';
 import {
   applyLoanPaymentToCurrentLoan,
   buildEarlySettlementQuote,
+  buildNegotiatedInstallmentDiscountQuote,
   getInstallmentOutstanding,
   reverseLatestInstallmentPayment,
 } from '../financialEngine';
@@ -48,6 +49,12 @@ describe('motor financeiro', () => {
   it('mantem o ultimo dia valido ao avancar meses', () => {
     expect(addCalendarMonthsClamped('2026-01-31', 1)).toBe('2026-02-28');
     expect(buildInstallmentDueDate('2024-01-31', 1, 'MONTHLY')).toBe('2024-02-29');
+  });
+
+  it('pula dias nao selecionados em contratos diarios', () => {
+    expect(buildInstallmentDueDate('2026-10-02', 1, 'DAILY', [1, 2, 3, 4, 5, 6])).toBe('2026-10-03');
+    expect(buildInstallmentDueDate('2026-10-02', 2, 'DAILY', [1, 2, 3, 4, 5, 6])).toBe('2026-10-05');
+    expect(buildInstallmentDueDate('2026-10-02', 1, 'DAILY', [1, 2, 3, 4, 5])).toBe('2026-10-05');
   });
 
   it('calcula multa por trechos depois de pagamento parcial', () => {
@@ -111,6 +118,111 @@ describe('motor financeiro', () => {
       (sum, installment) => sum + Number(installment.paymentBreakdown?.principalPaid || 0),
       0,
     )).toBe(200);
+  });
+
+  it('quita apenas a parcela negociada e registra o desconto sem aumenta-lo no caixa', () => {
+    const loan = buildLoan([
+      { number: 1, amount: 670.08, dueDate: '2026-09-20', status: 'PENDENTE' },
+      { number: 2, amount: 100, dueDate: '2026-10-20', status: 'PENDENTE' },
+    ], { amount: 500, interestType: 'SIMPLES' });
+    const quote = buildNegotiatedInstallmentDiscountQuote(loan, 0, 633.19, new Date('2026-09-14T12:00:00'), 0);
+
+    expect(quote).toMatchObject({ totalOutstanding: 670.08, payoffAmount: 633.19, discount: 36.89 });
+
+    const result = applyLoanPaymentToCurrentLoan(loan, {
+      operationId: 'negotiated-settlement-1',
+      amount: 633.19,
+      installmentIndex: 0,
+      applyMode: 'INSTALLMENT_DISCOUNT',
+      processedAt: '2026-09-14T12:00:00.000Z',
+    }, 0);
+
+    expect(result.loan.status).toBe('ATIVO');
+    expect(result.loan.installments[0].status).toBe('PAGO');
+    expect(result.loan.installments[1].status).toBe('PENDENTE');
+    expect(result.appliedAmount).toBe(633.19);
+    expect(result.discountApplied).toBe(36.89);
+    expect(result.loan.installments[0].paymentBreakdown).toMatchObject({
+      totalPaid: 633.19,
+      discountApplied: 36.89,
+    });
+  });
+
+  it('registra desconto manual em uma parcela sem transforma-lo em entrada de caixa', () => {
+    const loan = buildLoan([
+      { number: 1, amount: 100, dueDate: '2026-11-20', status: 'PENDENTE' },
+    ], { interestType: 'SIMPLES' });
+
+    const result = applyLoanPaymentToCurrentLoan(loan, {
+      operationId: 'manual-discount-installment',
+      amount: 80,
+      discountApplied: 20,
+      installmentIndex: 0,
+      applyMode: 'INSTALLMENTS',
+      processedAt: '2026-11-01T12:00:00.000Z',
+    }, 0);
+
+    expect(result.appliedAmount).toBe(80);
+    expect(result.discountApplied).toBe(20);
+    expect(result.loan.status).toBe('QUITADO');
+    expect(result.loan.installments[0].paymentBreakdown).toMatchObject({
+      totalPaid: 80,
+      discountApplied: 20,
+    });
+  });
+
+  it('permite desconto manual ao abater o saldo total de contrato direto', () => {
+    const loan = buildLoan([
+      { number: 1, amount: 100, dueDate: '2026-11-20', status: 'PENDENTE' },
+      { number: 2, amount: 100, dueDate: '2026-12-20', status: 'PENDENTE' },
+    ], { amount: 200, interestType: 'SIMPLES' });
+
+    const result = applyLoanPaymentToCurrentLoan(loan, {
+      operationId: 'manual-discount-total-balance',
+      amount: 150,
+      discountApplied: 50,
+      installmentIndex: 0,
+      applyMode: 'TOTAL_BALANCE',
+      processedAt: '2026-11-01T12:00:00.000Z',
+    }, 0);
+
+    expect(result.appliedAmount).toBe(150);
+    expect(result.discountApplied).toBe(50);
+    expect(result.loan.status).toBe('QUITADO');
+  });
+
+  it('mantem multa devida quando o desconto manual quita somente a base', () => {
+    const loan = buildLoan([
+      { number: 1, amount: 100, dueDate: '2026-01-01', status: 'PENDENTE' },
+    ], { interestType: 'SIMPLES' });
+
+    const result = applyLoanPaymentToCurrentLoan(loan, {
+      operationId: 'manual-discount-with-late-fee',
+      amount: 10,
+      discountApplied: 100,
+      installmentIndex: 0,
+      applyMode: 'INSTALLMENTS',
+      processedAt: '2026-01-11T12:00:00.000Z',
+    }, 0.01);
+
+    expect(result.appliedAmount).toBe(10);
+    expect(result.discountApplied).toBe(100);
+    expect(result.loan.installments[0].status).toBe('PAGO');
+  });
+
+  it('rejeita desconto maior que a base das parcelas selecionadas', () => {
+    const loan = buildLoan([
+      { number: 1, amount: 100, dueDate: '2026-11-20', status: 'PENDENTE' },
+    ], { interestType: 'SIMPLES' });
+
+    expect(() => applyLoanPaymentToCurrentLoan(loan, {
+      operationId: 'manual-discount-too-high',
+      amount: 1,
+      discountApplied: 101,
+      installmentIndex: 0,
+      applyMode: 'INSTALLMENTS',
+      processedAt: '2026-11-01T12:00:00.000Z',
+    }, 0)).toThrow('DESCONTO_ACIMA_DO_SALDO');
   });
 
   it('registra composicao fiscal ao abater e redividir', () => {

@@ -64,6 +64,7 @@ export interface CashMovement {
   createdByEmail?: string;
   createdByName?: string;
   operationId?: string;
+  reversalOfMovementId?: string;
   discountApplied?: number;
   recordedAt?: FirestoreTimestampLike | Date | number | string;
   value?: number;
@@ -246,6 +247,8 @@ export interface Loan {
   installmentCount?: number;
   installmentsCount?: number;
   frequency: Frequency;
+  /** Weekdays used by direct daily contracts (0 = Sunday through 6 = Saturday). */
+  dailyChargeDays?: number[];
   interestType: InterestType;
   monthlyPaidInterestRate?: number;
   monthlyAccruedInterestRate?: number;
@@ -258,6 +261,7 @@ export interface Loan {
   installments: Installment[];
   status: LoanStatus;
   paidAmount?: number;
+  maxHistoricalOverdueDays?: number;
   renewCount?: number;
   lastRenewAt?: string;
   allowInterestOnlyRenewal?: boolean;
@@ -324,11 +328,14 @@ export type PaymentApplyMode =
   | 'INSTALLMENTS'
   | 'TOTAL_BALANCE'
   | 'REDISTRIBUTE_BALANCE'
-  | 'EARLY_SETTLEMENT';
+  | 'EARLY_SETTLEMENT'
+  | 'INSTALLMENT_DISCOUNT';
 
 export interface LoanPaymentRequest {
   operationId: string;
   amount?: number;
+  /** Negotiated write-off recorded separately from cash actually received. */
+  discountApplied?: number;
   installmentIndex: number;
   applyMode: PaymentApplyMode;
   processedAt: string;

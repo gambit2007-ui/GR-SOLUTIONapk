@@ -71,3 +71,25 @@ export const resolveCashOutflowCategory = (movement: CashMovement): CashOutflowR
 
   return 'SEM_CATEGORIA';
 };
+
+// Financial result is distinct from cash flow: lending and returning capital
+// reduce cash, but do not represent operating expenses.
+export const isOperatingExpenseCategory = (category: CashOutflowReportCategory): boolean =>
+  category !== 'EMPRESTIMO' &&
+  category !== 'DEVOLUCAO_APORTE' &&
+  category !== 'PAGAMENTO_EMPRESTIMO_EXTERNO';
+
+export const isOperatingExpenseMovement = (movement: CashMovement): boolean => {
+  const type = String(movement.type || '').trim().toUpperCase();
+  if (type !== 'SAIDA' && type !== 'RETIRADA') return false;
+  return isOperatingExpenseCategory(resolveCashOutflowCategory(movement));
+};
+
+export const sumOperatingExpensesByCategory = (
+  totals: Partial<Record<CashOutflowReportCategory, number>>,
+): number => Number(Object.entries(totals).reduce(
+  (sum, [category, amount]) => isOperatingExpenseCategory(category as CashOutflowReportCategory)
+    ? sum + Number(amount || 0)
+    : sum,
+  0,
+).toFixed(2));

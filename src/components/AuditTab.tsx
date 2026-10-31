@@ -20,7 +20,11 @@ import type { CredigrupoHomologationAudit, CredigrupoRuntimeDiagnostics } from '
 import { formatDateTimeBR } from '../utils/dateTime';
 import { resolveCashDelta } from '../utils/domainParsers';
 import { buildFinancialAudit } from '../utils/financialAudit';
+import { getReversedCashMovementIds, groupCashBookMonthMovements } from '../utils/cashBookPresentation';
 import { effectiveLoanStatus } from '../utils/loanCompat';
+import { listRecentCreditRiskDecisions, type CreditRiskDecisionRecord } from '../services/creditRiskAuditService';
+import { listRecentFinancialAuditEvents, type FinancialAuditEvent } from '../services/financialAuditEventService';
+import BankStatementAudit from './BankStatementAudit';
 
 interface AuditTabProps {
   loans: Loan[];
@@ -39,8 +43,6 @@ const loanStatusLabel: Record<string, string> = {
   COMPLETED: 'Concluido',
   CANCELLED: 'Cancelado',
 };
-
-const cashEntryTypes = new Set(['APORTE', 'PAGAMENTO', 'ENTRADA']);
 
 const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
@@ -96,6 +98,36 @@ const AuditTab: React.FC<AuditTabProps> = ({
   const [expandedMonthLoans, setExpandedMonthLoans] = useState<string | null>(null);
   const [expandedMonthMovements, setExpandedMonthMovements] = useState<string | null>(null);
   const [selectedCashMovement, setSelectedCashMovement] = useState<CashMovement | null>(null);
+  const [creditRiskDecisions, setCreditRiskDecisions] = useState<CreditRiskDecisionRecord[] | null>(null);
+  const [isLoadingCreditRiskDecisions, setIsLoadingCreditRiskDecisions] = useState(false);
+  const [financialEvents, setFinancialEvents] = useState<FinancialAuditEvent[] | null>(null);
+  const [isLoadingFinancialEvents, setIsLoadingFinancialEvents] = useState(false);
+
+  const loadCreditRiskDecisions = async () => {
+    if (!isAdmin || isLoadingCreditRiskDecisions) return;
+    setIsLoadingCreditRiskDecisions(true);
+    try {
+      setCreditRiskDecisions(await listRecentCreditRiskDecisions());
+    } catch (error) {
+      console.error('Falha ao consultar auditoria de credito:', error);
+      showToast('Nao foi possivel carregar decisoes de credito', 'error');
+    } finally {
+      setIsLoadingCreditRiskDecisions(false);
+    }
+  };
+
+  const loadFinancialEvents = async () => {
+    if (!isAdmin || isLoadingFinancialEvents) return;
+    setIsLoadingFinancialEvents(true);
+    try {
+      setFinancialEvents(await listRecentFinancialAuditEvents());
+    } catch (error) {
+      console.error('Falha ao consultar eventos financeiros:', error);
+      showToast('Nao foi possivel carregar a trilha financeira', 'error');
+    } finally {
+      setIsLoadingFinancialEvents(false);
+    }
+  };
 
   const financialAudit = useMemo(() => buildFinancialAudit({
     loans,
@@ -106,6 +138,10 @@ const AuditTab: React.FC<AuditTabProps> = ({
   const loansByMonth = useMemo(() => groupByMonth(loans, (loan) => loan.startDate), [loans]);
   const movementsByMonth = useMemo(
     () => groupByMonth(cashMovements, (movement) => movement.date),
+    [cashMovements],
+  );
+  const reversedMovementIds = useMemo(
+    () => getReversedCashMovementIds(cashMovements),
     [cashMovements],
   );
 
@@ -265,6 +301,84 @@ const AuditTab: React.FC<AuditTabProps> = ({
           <ScanSearch size={14} /> {isAuditingLegacyPayments ? 'Auditando...' : 'Auditar Legado'}
         </button>
       </div>
+
+      {isAdmin && (
+        <BankStatementAudit
+          loans={loans}
+          cashMovements={cashMovements}
+          cashMovementsStatus={cashMovementsStatus}
+          currentUserUid={currentUserUid}
+          showToast={showToast}
+        />
+      )}
+
+      {isAdmin && (
+        <section className="rounded-[2rem] border border-[#BF953F]/20 bg-[#050505] p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-[9px] font-black uppercase tracking-widest text-[#BF953F]">Decisoes de risco de credito</h3>
+              <p className="mt-1 text-[9px] text-zinc-500">Concessoes com exposicao e liberacoes excepcionais registradas no servidor.</p>
+            </div>
+            <button type="button" onClick={() => { void loadCreditRiskDecisions(); }} disabled={isLoadingCreditRiskDecisions} className="rounded-xl border border-zinc-800 px-4 py-2 text-[8px] font-black uppercase text-zinc-300 disabled:opacity-50">
+              {isLoadingCreditRiskDecisions ? 'Carregando...' : 'Consultar ultimas 50'}
+            </button>
+          </div>
+          {creditRiskDecisions !== null && (
+            <div className="mt-4 max-h-96 space-y-2 overflow-y-auto">
+              {creditRiskDecisions.length === 0 && <p className="text-[9px] text-zinc-500">Nenhuma decisao registrada.</p>}
+              {creditRiskDecisions.map((decision) => (
+                <div key={decision.id} className="rounded-xl border border-zinc-800 p-3 text-[9px] text-zinc-300">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <p className="font-black uppercase text-white">{decision.action === 'EXCEPTIONAL_CREDIT_RELEASE' ? 'Liberacao excepcional de credito' : decision.action === 'NEW_GRANT_WITH_EXISTING_EXPOSURE' ? 'Nova concessao com exposicao existente' : 'Nova concessao de credito'}</p>
+                    <span className="text-zinc-500">{decision.createdAt?.toDate?.().toLocaleString('pt-BR') || 'Sem data'}</span>
+                  </div>
+                  <p className="mt-1">Cliente: {decision.customerName || decision.customerId} · Responsavel: {decision.actorName || decision.actorEmail || 'Nao identificado'}</p>
+                  <p className="mt-1">Contratos ativos: {decision.activeLoanIds?.join(', ') || 'nenhum'} · Saldo: {formatCurrency(decision.openAmount)} · Vencido: {formatCurrency(decision.overdueAmount)}</p>
+                  <p className="mt-1">Atraso atual: {decision.maxCurrentOverdueDays} dias · Historico: {decision.maxHistoricalOverdueDays} dias · Situacao: {decision.status || 'registrada'}</p>
+                  <p className="mt-1">Contrato: {decision.loanId || 'aguardando'} · Operacao: {decision.operationId || decision.id}</p>
+                  {decision.justification && <p className="mt-2 border-t border-zinc-800 pt-2 text-amber-400">Motivo: {decision.justification}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {isAdmin && (
+        <section className="rounded-[2rem] border border-zinc-900 bg-[#050505] p-5 sm:p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-[9px] font-black uppercase tracking-widest text-[#BF953F]">Trilha permanente de alteracoes</h3>
+              <p className="mt-1 text-[9px] text-zinc-500">Edicoes, cancelamentos e exclusoes seguros de contratos. Pagamentos e estornos permanecem no livro caixa; fechamentos mensais sao imutaveis.</p>
+            </div>
+            <button type="button" onClick={() => { void loadFinancialEvents(); }} disabled={isLoadingFinancialEvents} className="rounded-xl border border-zinc-800 px-4 py-2 text-[8px] font-black uppercase text-zinc-300 disabled:opacity-50">
+              {isLoadingFinancialEvents ? 'Carregando...' : 'Consultar ultimos 50'}
+            </button>
+          </div>
+          {financialEvents !== null && (
+            <div className="mt-4 max-h-96 space-y-2 overflow-y-auto">
+              {financialEvents.length === 0 && <p className="text-[9px] text-zinc-500">Nenhuma alteracao registrada desde a ativacao desta trilha.</p>}
+              {financialEvents.map((event) => (
+                <div key={event.id} className="rounded-xl border border-zinc-800 p-3 text-[9px] text-zinc-300">
+                  <div className="flex flex-wrap justify-between gap-2">
+                    <p className="font-black uppercase text-white">{{
+                      CONTRACT_EDIT: 'Edicao de contrato',
+                      CANCELLATION: 'Cancelamento de contrato',
+                      LOAN_DELETION: 'Exclusao segura de contrato',
+                      CASH_RECONCILIATION: 'Conciliacao de caixa',
+                    }[event.type]}</p>
+                    <span className="text-zinc-500">{event.recordedAt?.toDate?.().toLocaleString('pt-BR') || 'Sem data'}</span>
+                  </div>
+                  <p className="mt-1">Contrato: {event.loanId || '—'} · Responsavel: {event.actorName || event.actorEmail || event.actorUid}</p>
+                  {event.previousAmount !== undefined && <p className="mt-1">Principal anterior: {formatCurrency(event.previousAmount)}{event.newAmount !== undefined ? ` · Novo principal: ${formatCurrency(event.newAmount)}` : ''}</p>}
+                  {event.previousCash !== undefined && <p className="mt-1">Caixa: {formatCurrency(event.previousCash)} → {formatCurrency(event.newCash || 0)}</p>}
+                  {event.reason && <p className="mt-1 text-amber-400">Motivo: {event.reason}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {migrationPreview && (
         <div className="bg-[#050505] border border-zinc-900 rounded-2xl p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -530,14 +644,19 @@ const AuditTab: React.FC<AuditTabProps> = ({
           <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em] mb-6">Livro Caixa</h3>
           <div className="space-y-3">
             {Object.entries(movementsByMonth).map(([month, monthMovements]) => {
-              const entryMovements = monthMovements.filter((movement) => cashEntryTypes.has(movement.type));
-              const exitMovements = monthMovements.filter((movement) => !cashEntryTypes.has(movement.type));
+              const { entryMovements, exitMovements, reversalMovements } = groupCashBookMonthMovements(
+                monthMovements, reversedMovementIds,
+              );
               const entryTotal = entryMovements.reduce(
                 (total, movement) => total + getMovementDisplayAmount(movement),
                 0,
               );
               const exitTotal = exitMovements.reduce(
                 (total, movement) => total + getMovementDisplayAmount(movement),
+                0,
+              );
+              const reversalNet = reversalMovements.reduce(
+                (total, movement) => roundMoney(total + resolveCashDelta(movement)),
                 0,
               );
               const { openingBalance, closingBalance } = getMonthCashBalance(monthMovements);
@@ -575,7 +694,7 @@ const AuditTab: React.FC<AuditTabProps> = ({
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div className="space-y-2">
                           <div className="flex items-center justify-between mb-3 px-1 gap-3">
-                            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em]">Entradas</span>
+                            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-[0.2em]">Entradas não estornadas</span>
                             <span className="text-[8px] font-black text-zinc-600 uppercase">Total: {formatCurrency(entryTotal)}</span>
                           </div>
                           {entryMovements.map((movement) => (
@@ -603,7 +722,7 @@ const AuditTab: React.FC<AuditTabProps> = ({
 
                         <div className="space-y-2">
                           <div className="flex items-center justify-between mb-3 px-1 gap-3">
-                            <span className="text-[8px] font-black text-red-500 uppercase tracking-[0.2em]">Saidas</span>
+                            <span className="text-[8px] font-black text-red-500 uppercase tracking-[0.2em]">Saídas sem estornos</span>
                             <span className="text-[8px] font-black text-zinc-600 uppercase">Total: {formatCurrency(exitTotal)}</span>
                           </div>
                           {exitMovements.map((movement) => (
@@ -629,6 +748,45 @@ const AuditTab: React.FC<AuditTabProps> = ({
                           )}
                         </div>
                       </div>
+                      {reversalMovements.length > 0 && (
+                        <div className="mt-5 border-t border-zinc-900 pt-5">
+                          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+                            <span className="text-[8px] font-black uppercase tracking-[0.2em] text-amber-400">Lançamentos estornados</span>
+                            <span className="text-[8px] font-black uppercase text-zinc-500">
+                              Efeito no mês: {reversalNet >= 0 ? '+' : '-'} {formatCurrency(Math.abs(reversalNet))}
+                            </span>
+                          </div>
+                          <p className="mb-3 px-1 text-[8px] text-zinc-500">
+                            Original e estorno continuam no histórico. O saldo mensal considera cada movimento na data em que ocorreu.
+                          </p>
+                          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                            {reversalMovements.map((movement) => {
+                              const isReversal = movement.type === 'ESTORNO' || Boolean(movement.reversalOfMovementId);
+                              return (
+                                <button
+                                  key={movement.id}
+                                  type="button"
+                                  onClick={() => setSelectedCashMovement(movement)}
+                                  className="flex w-full items-start justify-between gap-3 rounded-xl border border-amber-500/20 bg-zinc-950/50 p-3 text-left transition-colors hover:border-amber-500/40"
+                                >
+                                  <div className="min-w-0 flex-1">
+                                    <p className="break-words text-[9px] font-black uppercase text-zinc-300">{movement.description}</p>
+                                    <p className="mt-1 text-[7px] font-black uppercase tracking-wider text-amber-400">
+                                      {isReversal ? 'Estorno registrado' : 'Lançamento estornado'}
+                                    </p>
+                                    <p className="break-words text-[7px] uppercase text-zinc-500">
+                                      {formatDateTimeBR(movement.date)} - POR: {getMovementActorLabel(movement)}
+                                    </p>
+                                  </div>
+                                  <span className="whitespace-nowrap text-[9px] font-black text-zinc-400">
+                                    {resolveCashDelta(movement) >= 0 ? '+' : '-'} {formatCurrency(getMovementDisplayAmount(movement))}
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -661,6 +819,12 @@ const AuditTab: React.FC<AuditTabProps> = ({
                 <h4 className="text-xl font-black text-white uppercase leading-tight break-words">
                   {selectedCashMovement.description}
                 </h4>
+                {(selectedCashMovement.type === 'ESTORNO' || selectedCashMovement.reversalOfMovementId || reversedMovementIds.has(selectedCashMovement.id || '')) && (
+                  <p className="mt-2 text-xs font-black uppercase tracking-wider text-amber-400">
+                    {selectedCashMovement.type === 'ESTORNO' || selectedCashMovement.reversalOfMovementId
+                      ? 'Estorno registrado' : 'Lançamento estornado'}
+                  </p>
+                )}
               </div>
               <button
                 type="button"
@@ -691,6 +855,12 @@ const AuditTab: React.FC<AuditTabProps> = ({
                 <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Responsavel</p>
                 <p className="text-sm font-black text-white uppercase mt-2 break-words">{getMovementActorLabel(selectedCashMovement)}</p>
               </div>
+              {selectedCashMovement.reversalOfMovementId && (
+                <div className="sm:col-span-2 bg-black border border-zinc-900 rounded-2xl p-4">
+                  <p className="text-[8px] font-black text-zinc-500 uppercase tracking-[0.2em]">Movimento original estornado</p>
+                  <p className="text-sm font-black text-white mt-2 break-all">{selectedCashMovement.reversalOfMovementId}</p>
+                </div>
+              )}
               {selectedCashMovement.loanId && (
                 <button
                   type="button"

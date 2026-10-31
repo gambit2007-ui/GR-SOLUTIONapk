@@ -1,0 +1,11 @@
+audit-output/
+.env
+.env.*
+.agents/
+.codex/
+.git/
+.vercel/
+.firebase/
+node_modules/
+dist/
+*.log

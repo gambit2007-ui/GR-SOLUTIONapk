@@ -308,6 +308,44 @@ export const buildEarlySettlementQuote = (
   };
 };
 
+export interface NegotiatedInstallmentDiscountQuote {
+  loanId: string;
+  totalOutstanding: number;
+  payoffAmount: number;
+  discount: number;
+  entries: EarlySettlementEntry[];
+}
+
+/** Applies a negotiated discount to exactly one installment, never as cash. */
+export const buildNegotiatedInstallmentDiscountQuote = (
+  loan: Loan,
+  installmentIndex: number,
+  negotiatedAmount: number,
+  referenceDate = new Date(),
+  dailyLateFeeRate?: number,
+): NegotiatedInstallmentDiscountQuote | null => {
+  const payoffAmount = roundMoney(Number(negotiatedAmount || 0));
+  if (!Number.isFinite(payoffAmount) || payoffAmount <= 0) return null;
+
+  const installments = Array.isArray(loan.installments) ? loan.installments : [];
+  const installment = installments[installmentIndex];
+  if (!installment) return null;
+  const outstanding = getInstallmentOutstanding(installment, referenceDate, dailyLateFeeRate);
+  if (outstanding.total <= 0 || payoffAmount > outstanding.total + 0.001) return null;
+  if (payoffAmount + 0.001 < outstanding.lateFee) return null;
+
+  const discount = roundMoney(outstanding.total - payoffAmount);
+  if (discount > outstanding.base + 0.001) return null;
+
+  return {
+    loanId: loan.id,
+    totalOutstanding: outstanding.total,
+    payoffAmount,
+    discount,
+    entries: [{ installmentIndex, outstanding: outstanding.total, payable: payoffAmount, discount }],
+  };
+};
+
 const splitAmountEvenly = (total: number, count: number): number[] => {
   const safeCount = Math.max(Math.trunc(count), 0);
   if (safeCount === 0) return [];
@@ -353,10 +391,24 @@ export const applyLoanPaymentToCurrentLoan = (
   let appliedAmount = 0;
   let discountApplied = 0;
   let requestedAmount = roundMoney(Number(request.amount || 0));
+  const rawRequestedDiscount = Number(request.discountApplied ?? 0);
+  if (!Number.isFinite(rawRequestedDiscount) || rawRequestedDiscount < 0) {
+    throw new Error('DESCONTO_INVALIDO');
+  }
+  const requestedDiscount = roundMoney(rawRequestedDiscount);
   const fiscalEntries: InstallmentPaymentEntry[] = [];
 
-  if (request.applyMode === 'EARLY_SETTLEMENT') {
-    const quote = buildEarlySettlementQuote(currentLoan, processedAtDate, dailyLateFeeRate);
+  if (request.applyMode === 'EARLY_SETTLEMENT' || request.applyMode === 'INSTALLMENT_DISCOUNT') {
+    if (requestedDiscount > 0) throw new Error('DESCONTO_MANUAL_NAO_PERMITIDO_NESTE_MODO');
+    const quote = request.applyMode === 'EARLY_SETTLEMENT'
+      ? buildEarlySettlementQuote(currentLoan, processedAtDate, dailyLateFeeRate)
+      : buildNegotiatedInstallmentDiscountQuote(
+          currentLoan,
+          request.installmentIndex,
+          requestedAmount,
+          processedAtDate,
+          dailyLateFeeRate,
+        );
     if (!quote) throw new Error('QUITACAO_INDISPONIVEL');
     requestedAmount = quote.payoffAmount;
     quote.entries.forEach((quoteEntry, index) => {
@@ -380,9 +432,16 @@ export const applyLoanPaymentToCurrentLoan = (
       ? installments.map((_, index) => index).reverse()
       : installments.map((_, index) => index).filter((index) => index >= request.installmentIndex);
     let remaining = requestedAmount;
+    let remainingDiscount = requestedDiscount;
 
     for (const index of indexes) {
-      if (remaining <= 0) break;
+      if (remaining <= 0 && remainingDiscount <= 0) break;
+      const outstanding = getInstallmentOutstanding(
+        installments[index],
+        processedAtDate,
+        dailyLateFeeRate,
+      );
+      const installmentDiscount = roundMoney(Math.min(remainingDiscount, outstanding.base));
       const applied = applyAmountToInstallment(
         currentLoan,
         installments[index],
@@ -391,10 +450,14 @@ export const applyLoanPaymentToCurrentLoan = (
         `installment-${index}`,
         request.processedAt,
         dailyLateFeeRate,
+        installmentDiscount,
       );
       installments[index] = applied.installment;
       remaining = roundMoney(remaining - applied.appliedAmount);
       appliedAmount = roundMoney(appliedAmount + applied.appliedAmount);
+      const installmentDiscountApplied = Number(applied.breakdown?.discountApplied || 0);
+      discountApplied = roundMoney(discountApplied + installmentDiscountApplied);
+      remainingDiscount = roundMoney(remainingDiscount - installmentDiscountApplied);
       if (request.applyMode === 'REDISTRIBUTE_BALANCE' && applied.breakdown) {
         fiscalEntries.push({
           id: `${request.operationId}-redistribution-${index}`,
@@ -406,6 +469,8 @@ export const applyLoanPaymentToCurrentLoan = (
         });
       }
     }
+
+    if (remainingDiscount > 0.01) throw new Error('DESCONTO_ACIMA_DO_SALDO');
 
     if (request.applyMode === 'REDISTRIBUTE_BALANCE') {
       const count = Math.trunc(Number(request.redistributionInstallmentsCount || 0));
@@ -449,7 +514,7 @@ export const applyLoanPaymentToCurrentLoan = (
             number: baseNumber + index,
             amount,
             value: amount,
-            dueDate: buildInstallmentDueDate(startDate, index, frequency) || startDate,
+            dueDate: buildInstallmentDueDate(startDate, index, frequency, currentLoan.dailyChargeDays) || startDate,
             status: 'PENDENTE',
             paidAmount: 0,
             partialPaid: 0,

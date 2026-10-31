@@ -3,6 +3,7 @@ import { permitsRealFinancialEffects } from '../../../../src/lib/creditProviders
 import { applyLoanPaymentToCurrentLoan } from '../../../../src/utils/financialEngine.js';
 import { parseLoan } from '../../../../src/utils/domainParsers.js';
 import { resolveBancarizedCashDelta } from '../../../../src/utils/creditFunding.js';
+import { nextMaxHistoricalOverdueDays } from '../../../../src/utils/creditRisk.js';
 import {
   resolveCredigrupoLifecycleTransition,
   type CredigrupoLifecycleEventType,
@@ -88,12 +89,17 @@ const activateFundedLoan = async (
     const loanRef = adminDb.doc(`loans/${loanId}`);
     const counterRef = adminDb.doc('settings/contractCounter');
     const caixaRef = adminDb.doc('settings/caixa');
+    const riskAuditRef = adminDb.doc(`creditRiskDecisions/${operationRef.id}`);
     const reads: Promise<FirebaseFirestore.DocumentSnapshot>[] = [
       transaction.get(loanRef),
       transaction.get(counterRef),
     ];
     if (operation.fundingSource === 'GR') reads.push(transaction.get(caixaRef));
-    const [loanSnapshot, counterSnapshot, caixaSnapshot] = await Promise.all(reads);
+    reads.push(transaction.get(riskAuditRef));
+    const snapshots = await Promise.all(reads);
+    const [loanSnapshot, counterSnapshot] = snapshots;
+    const caixaSnapshot = operation.fundingSource === 'GR' ? snapshots[2] : undefined;
+    const riskAuditSnapshot = snapshots[snapshots.length - 1];
 
     if (!loanSnapshot.exists) {
       const lastNumber = Math.trunc(Number(counterSnapshot.data()?.lastNumber || 0));
@@ -130,6 +136,7 @@ const activateFundedLoan = async (
         installments,
         status: 'ATIVO',
         paidAmount: 0,
+        maxHistoricalOverdueDays: 0,
         version: 0,
         hasFinancialHistory: false,
         formalizationType: 'BANCARIZED',
@@ -209,6 +216,11 @@ const activateFundedLoan = async (
       fundedAt: processingTimestamp,
       updatedAt: FieldValue.serverTimestamp(),
     }, { merge: true });
+    if (riskAuditSnapshot.exists) {
+      transaction.update(riskAuditRef, {
+        loanId, status: 'CONTRACT_CREATED', updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
     markEvent(transaction, eventRef, { status: 'PROCESSED', processedAt: FieldValue.serverTimestamp(), localLoanId: loanId });
   });
 };
@@ -377,6 +389,9 @@ const applyInstallmentPayment = async (
     transaction.update(loanRef, removeUndefined({
       ...loanUpdate,
       installments,
+      maxHistoricalOverdueDays: nextMaxHistoricalOverdueDays(
+        currentLoan, { ...result.loan, installments }, new Date(asText(event.data.paidAt)),
+      ),
       hasFinancialHistory: true,
       lastOperationId: operationId,
       lastOperationType: 'CREDIGRUPO_PAYMENT',

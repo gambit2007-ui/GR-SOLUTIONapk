@@ -21,6 +21,7 @@ import {
   requireCredigrupoCustomerForEnvironment,
   requireCredigrupoRecordForEnvironment,
 } from './dataScope.js';
+import { buildCreditRiskAudit, getCustomerCreditRisk, requireCreditRiskDecision } from '../../creditRisk.js';
 
 export interface StoredCredigrupoOperation extends CreditDataScope {
   formalizationType?: 'BANCARIZED';
@@ -141,16 +142,19 @@ export const reserveCredigrupoOperation = async (
   const { environment } = getCredigrupoServerConfig();
   const operationRef = adminDb.doc(`creditOperations/${request.operationId}`);
   const simulationRef = adminDb.doc(`creditSimulations/${request.simulationId}`);
+  const riskAuditRef = adminDb.doc(`creditRiskDecisions/${request.operationId}`);
 
   return adminDb.runTransaction(async (transaction) => {
-    const [existingOperation, simulationSnapshot] = await Promise.all([
+    const [existingOperation, simulationSnapshot, existingRiskAudit] = await Promise.all([
       transaction.get(operationRef),
       transaction.get(simulationRef),
+      transaction.get(riskAuditRef),
     ]);
 
     if (existingOperation.exists) {
       return { duplicate: true, operation: existingOperation.data() as StoredCredigrupoOperation };
     }
+    if (existingRiskAudit.exists) throw new ApiError(409, 'OPERATION_ID_CONFLICT', 'Identificador ja utilizado.');
     if (!simulationSnapshot.exists) throw new ApiError(404, 'SIMULATION_NOT_FOUND', 'Simulacao nao encontrada.');
 
     const simulation = simulationSnapshot.data() as StoredCredigrupoSimulation;
@@ -172,6 +176,8 @@ export const reserveCredigrupoOperation = async (
     if (request.fundingSource !== 'GR' || simulation.accountMode !== CREDIGRUPO_ACCOUNT_MODE) {
       throw new ApiError(409, 'ACCOUNT_MODE_CHANGED', 'A conta Credigrupo mudou. Gere uma nova simulacao.');
     }
+    const risk = await getCustomerCreditRisk(simulation.customerId, transaction);
+    requireCreditRiskDecision(risk, request.riskDecision, actor);
 
     const operation: StoredCredigrupoOperation = {
       environment,
@@ -208,6 +214,13 @@ export const reserveCredigrupoOperation = async (
     transaction.update(simulationRef, {
       usedByOperationId: request.operationId,
       usedAt: FieldValue.serverTimestamp(),
+    });
+    transaction.create(riskAuditRef, {
+      ...buildCreditRiskAudit(risk, request.riskDecision, actor, 'BANCARIZED_PROPOSAL'),
+      customerName: simulation.customerName,
+      operationId: request.operationId,
+      status: 'RESERVED',
+      createdAt: FieldValue.serverTimestamp(),
     });
     return { duplicate: false, operation };
   });

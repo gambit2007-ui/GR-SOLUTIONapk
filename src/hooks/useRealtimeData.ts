@@ -21,6 +21,7 @@ interface RealtimeDataState {
   monthlySnapshots: MonthlySnapshot[];
   feeSettings: FeeSettings;
   caixa: number;
+  cashBalanceStatus: 'idle' | 'loading' | 'ready' | 'error';
   isCustomersLoading: boolean;
   cashMovementsStatus: 'idle' | 'loading' | 'ready' | 'error';
 }
@@ -34,6 +35,7 @@ const initialState: RealtimeDataState = {
     dailyLateFeeRate: DEFAULT_DAILY_LATE_FEE_RATE,
   },
   caixa: 0,
+  cashBalanceStatus: 'idle',
   isCustomersLoading: false,
   cashMovementsStatus: 'idle',
 };
@@ -70,6 +72,8 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
       setState(initialState);
       return;
     }
+
+    setState((previous) => ({ ...previous, cashBalanceStatus: 'loading' }));
 
     let clientesListener = () => {};
 
@@ -121,11 +125,11 @@ export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptio
       doc(db, 'settings', 'caixa'),
       (snapshot) => {
         const caixa = snapshot.exists() ? Number(snapshot.data().value) || 0 : 0;
-        setState((previous) => ({ ...previous, caixa }));
+        setState((previous) => ({ ...previous, caixa, cashBalanceStatus: 'ready' }));
       },
       (error) => {
         reportRealtimeError('settings/caixa', error, onError);
-        setState((previous) => ({ ...previous, caixa: 0 }));
+        setState((previous) => ({ ...previous, caixa: 0, cashBalanceStatus: 'error' }));
       },
     );
 

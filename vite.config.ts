@@ -13,13 +13,12 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
+        globPatterns: ['**/*.{js,mjs,css,html,ico,png,svg}'],
         globIgnores: [
           '**/assets/annualCashReportPdf-*.js',
           '**/assets/charts-vendor-*.js',
-          '**/assets/contractGenerator-*.js',
           '**/assets/firebase-storage-*.js',
           '**/assets/html2canvas*.js',
-          '**/assets/jspdf*.js',
         ],
       },
       manifest: {

@@ -7,6 +7,10 @@ import { handleApiError, sendJson } from '../_lib/http.js';
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   try {
+    if (request.query.route === 'bank-statement-preview') {
+      const { handleBankStatementPreview } = await import('../_lib/bankStatementPreview.js');
+      return handleBankStatementPreview(request, response);
+    }
     if (request.method !== 'GET') return sendJson(response, 405, { error: 'METHOD_NOT_ALLOWED' });
     await requireAuthorizedActor(request);
     const { environment } = getCredigrupoServerConfig({ allowWhenDisabled: true });

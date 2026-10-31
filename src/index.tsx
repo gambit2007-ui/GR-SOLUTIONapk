@@ -10,6 +10,14 @@ const updateSW = registerSW({
   onNeedRefresh() {
     updateSW(true);
   },
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return;
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        void registration.update().catch(() => undefined);
+      }
+    });
+  },
 });
 
 const rootElement = document.getElementById('root');

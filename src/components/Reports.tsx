@@ -48,8 +48,12 @@ import {
   CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS,
   CashOutflowReportCategory,
   isLoanCashOutflowMovement,
+  isOperatingExpenseMovement,
   resolveCashOutflowCategory,
+  sumOperatingExpensesByCategory,
 } from '../utils/cashCategories';
+import { assessLiquidityReserve, MINIMUM_CASH_RESERVE } from '../utils/liquidityReserve';
+import { calculatePortfolioPerformance } from '../utils/portfolioPerformance';
 import { enableAccessControlForCurrentUser } from '../services/accessControlService';
 import { getCustomerCount } from '../services/customerService';
 import type { BackupPayload } from '../services/backupService';
@@ -99,6 +103,8 @@ interface MonthlyData {
   movementCount: number;
   createdLoansCount: number;
   manualWithdrawals: number;
+  operatingExpenses: number;
+  operatingResult: number;
   loanOutflows: number;
   reversals: number;
   overdueAmount: number;
@@ -132,6 +138,8 @@ const Reports: React.FC<ReportsProps> = ({
   });
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+  const formatCurrency = (value: number) =>
+    Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
   const createEmptyOutflowCategoryTotals = (): OutflowCategoryTotals =>
     CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS.reduce((totals, option) => {
@@ -535,6 +543,8 @@ const Reports: React.FC<ReportsProps> = ({
         movementCount: 0,
         createdLoansCount: 0,
         manualWithdrawals: 0,
+        operatingExpenses: 0,
+        operatingResult: 0,
         loanOutflows: 0,
         reversals: 0,
         overdueAmount: 0,
@@ -571,6 +581,10 @@ const Reports: React.FC<ReportsProps> = ({
         months[key].reversals = roundMoney(months[key].reversals + amount);
       } else if (!isEntrada) {
         months[key].manualWithdrawals = roundMoney(months[key].manualWithdrawals + amount);
+      }
+
+      if (isOperatingExpenseMovement(movement)) {
+        months[key].operatingExpenses = roundMoney(months[key].operatingExpenses + amount);
       }
 
       if (isCategorizedOutflowMovement(movement)) {
@@ -646,12 +660,16 @@ const Reports: React.FC<ReportsProps> = ({
           movementCount: snapshot.movementCount,
           createdLoansCount: snapshot.createdLoansCount,
           manualWithdrawals: snapshot.manualWithdrawals ?? months[key].manualWithdrawals,
+          operatingExpenses: snapshot.outflowCategoryTotals
+            ? sumOperatingExpensesByCategory(snapshot.outflowCategoryTotals)
+            : months[key].operatingExpenses,
           loanOutflows: snapshot.loanOutflows ?? months[key].loanOutflows,
           reversals: snapshot.reversals ?? months[key].reversals,
           overdueAmount: snapshot.overdueAmount ?? months[key].overdueAmount,
           projectedProfit: snapshot.projectedProfit ?? months[key].projectedProfit,
         };
       }
+      months[key].operatingResult = roundMoney(months[key].lucro - months[key].operatingExpenses);
     });
 
     return Object.keys(months)
@@ -669,6 +687,15 @@ const Reports: React.FC<ReportsProps> = ({
     [cashMovements, currentMonthIndex, currentYear, dailyLateFeeRate, fiscalData.monthly, loans, monthlySnapshots, reportYear],
   );
   const chartData = monthlyData;
+  const yearlyDre = monthlyData.reduce((totals, month) => ({
+    revenue: roundMoney(totals.revenue + month.lucro),
+    expenses: roundMoney(totals.expenses + month.operatingExpenses),
+    result: roundMoney(totals.result + month.operatingResult),
+  }), { revenue: 0, expenses: 0, result: 0 });
+  const portfolioPerformance = useMemo(
+    () => calculatePortfolioPerformance(loans, cashMovements, reportYear),
+    [cashMovements, loans, reportYear],
+  );
   const [expandedMonth, setExpandedMonth] = useState<string | null>(currentMonthLabel);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -951,95 +978,106 @@ const Reports: React.FC<ReportsProps> = ({
   return (
     <div className="space-y-8">
       {/* Cartao principal de caixa */}
-      <div className="bg-[#050505] border border-zinc-900 p-6 sm:p-8 md:p-12 rounded-[3rem] relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-8">
+      <div className="bg-[#050505] border border-zinc-900 p-6 sm:p-8 md:p-12 rounded-[3rem] relative overflow-hidden flex flex-col xl:flex-row xl:items-center justify-between gap-8 xl:gap-10">
         <div className="absolute top-0 right-0 p-8 opacity-5">
           <Wallet size={160} className="text-[#BF953F]" />
         </div>
-        <div className="relative z-10">
-          <p className="text-[10px] font-black text-zinc-500 uppercase tracking-[0.3em] mb-4">Saldo Consolidado em Caixa</p>
-          <h2 className="text-3xl sm:text-4xl md:text-6xl font-black gold-text tracking-tighter break-words">
+        <div className="relative z-10 min-w-0 flex-1">
+          <p className="text-sm sm:text-base font-black text-zinc-400 uppercase tracking-[0.14em] mb-3">Saldo Consolidado em Caixa</p>
+          <h2 className="text-4xl sm:text-5xl lg:text-6xl font-black gold-text tracking-tight break-words">
             R$ {caixa.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
           </h2>
-          <div className="flex items-center gap-6 mt-6">
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-3 mt-5">
             <button 
               onClick={onRecalculateCash}
-              className="flex items-center gap-2 text-[9px] font-black text-zinc-500 uppercase tracking-widest hover:text-[#BF953F] transition-colors"
+              className="flex min-h-[44px] items-center gap-2 text-xs sm:text-sm font-black text-zinc-400 uppercase tracking-wide hover:text-[#BF953F] transition-colors"
             >
-              <RefreshCcw size={12} /> Sincronizar Saldo
+              <RefreshCcw size={16} /> Sincronizar Saldo
             </button>
-            <div className="h-4 w-[1px] bg-zinc-800" />
+            <div className="hidden sm:block h-5 w-[1px] bg-zinc-800" />
             <div className="flex items-center gap-2">
-              <TrendingUp size={12} className="text-emerald-500" />
-              <span className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">Operacao Ativa</span>
+              <TrendingUp size={16} className="text-emerald-500" />
+              <span className="text-xs sm:text-sm font-black text-emerald-500 uppercase tracking-wide">Operacao Ativa</span>
             </div>
           </div>
-          <div className="mt-4 inline-flex items-center gap-3 px-4 py-2.5 bg-zinc-900/40 border border-zinc-800 rounded-2xl">
-            <span className="text-[8px] font-black text-zinc-500 uppercase tracking-widest">Faturamento do Ano</span>
-            <span className="text-[11px] font-black text-[#BF953F]">
+          <div className="mt-4 inline-flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 bg-zinc-900/40 border border-zinc-800 rounded-2xl">
+            <span className="text-xs font-black text-zinc-400 uppercase tracking-wide">Faturamento do Ano</span>
+            <span className="text-base font-black text-[#F5D77B]">
               R$ {faturamentoAno.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
             </span>
           </div>
         </div>
         
-        <div className="relative z-10 shrink-0 flex flex-col sm:flex-row sm:flex-wrap sm:items-end sm:justify-end gap-2">
-          <div className="flex flex-col gap-1">
-            <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest ml-1">
-              Ano do relatorio
-            </span>
-            <select
-              value={reportYear}
-              onChange={(event) => setReportYear(Number(event.target.value))}
-              className="min-h-[42px] px-3 bg-zinc-950/80 border border-zinc-800 text-white rounded-xl font-black uppercase text-[9px] tracking-widest outline-none focus:border-[#BF953F]"
-            >
-              {reportYearOptions.map((year) => (
-                <option key={year} value={year}>
-                  {year}
-                </option>
-              ))}
-            </select>
+        <div className="relative z-10 flex w-full flex-col gap-4 xl:max-w-[760px]">
+          <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="report-year" className="text-xs font-black text-zinc-400 uppercase tracking-wide">
+                Ano do relatorio
+              </label>
+              <select
+                id="report-year"
+                value={reportYear}
+                onChange={(event) => setReportYear(Number(event.target.value))}
+                className="min-h-[44px] px-3 bg-zinc-950/80 border border-zinc-800 text-white rounded-xl font-black uppercase text-sm tracking-wide outline-none focus:border-[#BF953F]"
+              >
+                {reportYearOptions.map((year) => (
+                  <option key={year} value={year}>
+                    {year}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-wrap gap-x-5 gap-y-2 pb-1 text-xs sm:text-sm font-black uppercase tracking-wide">
+              <span className="text-zinc-400">Reserva minima: {formatCurrency(MINIMUM_CASH_RESERVE)}</span>
+              <span className={caixa <= MINIMUM_CASH_RESERVE ? 'text-amber-400' : 'text-emerald-500'}>
+                Disponivel para emprestar: {formatCurrency(assessLiquidityReserve(caixa, 0).availableToLend)}
+              </span>
+            </div>
           </div>
-          <button 
-            onClick={() => { setFormData({ ...formData, type: 'ENTRADA' }); setIsModalOpen(true); }}
-            className="min-h-[42px] px-4 bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] rounded-xl font-black uppercase text-[9px] tracking-[0.16em] hover:bg-[#BF953F]/20 transition-colors flex items-center justify-center gap-2"
-          >
-            <Plus size={14} /> Novo Lancamento
-          </button>
-          <button
-            onClick={handleBackupDownload}
-            disabled={isDownloadingBackup}
-            className="min-h-[42px] px-4 bg-zinc-950/80 border border-zinc-800 text-zinc-300 rounded-xl font-black uppercase text-[9px] tracking-[0.14em] hover:border-[#BF953F]/40 hover:text-white transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <Download size={14} /> {isDownloadingBackup ? 'Gerando...' : 'Backup'}
-          </button>
-          <input
-            ref={backupValidationInputRef}
-            type="file"
-            accept="application/json,.json"
-            className="hidden"
-            onChange={(event) => { void handleBackupValidation(event.target.files?.[0]); }}
-          />
-          <button
-            onClick={() => backupValidationInputRef.current?.click()}
-            title="Verificar checksum e contagens de um backup"
-            className="min-h-[42px] px-3 bg-zinc-950/80 border border-zinc-800 text-zinc-500 rounded-xl font-black uppercase text-[8px] tracking-[0.12em] hover:border-blue-500/30 hover:text-blue-400 transition-colors flex items-center justify-center gap-2"
-          >
-            <ShieldCheck size={13} /> Validar Backup
-          </button>
-          <button
-            onClick={() => { void handleAnnualReportDownload(); }}
-            disabled={isGeneratingAnnualReport}
-            className="min-h-[42px] px-4 bg-[#BF953F]/5 border border-[#BF953F]/25 text-[#BF953F] rounded-xl font-black uppercase text-[9px] tracking-[0.14em] hover:bg-[#BF953F]/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            <Download size={14} /> {isGeneratingAnnualReport ? 'Gerando...' : 'Relatorio Anual'}
-          </button>
-          <button
-            onClick={() => { void handleEnableAccessControl(); }}
-            disabled={isEnablingAccessControl || !currentUserUid}
-            title="Restringir banco e arquivos aos usuarios autorizados"
-            className="min-h-[42px] px-3 bg-zinc-950/80 border border-zinc-800 text-zinc-500 rounded-xl font-black uppercase text-[8px] tracking-[0.12em] hover:border-emerald-500/30 hover:text-emerald-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <ShieldCheck size={13} /> {isEnablingAccessControl ? 'Ativando...' : 'Proteger Acesso'}
-          </button>
+          <div className="flex flex-wrap gap-2.5">
+            <button
+              onClick={() => { setFormData({ ...formData, type: 'ENTRADA' }); setIsModalOpen(true); }}
+              className="min-h-[44px] px-4 bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] rounded-xl font-black uppercase text-xs sm:text-sm tracking-wide hover:bg-[#BF953F]/20 transition-colors flex items-center justify-center gap-2"
+            >
+              <Plus size={16} /> Novo Lancamento
+            </button>
+            <button
+              onClick={handleBackupDownload}
+              disabled={isDownloadingBackup}
+              className="min-h-[44px] px-4 bg-zinc-950/80 border border-zinc-800 text-zinc-300 rounded-xl font-black uppercase text-xs sm:text-sm tracking-wide hover:border-[#BF953F]/40 hover:text-white transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Download size={16} /> {isDownloadingBackup ? 'Gerando...' : 'Backup'}
+            </button>
+            <input
+              ref={backupValidationInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(event) => { void handleBackupValidation(event.target.files?.[0]); }}
+            />
+            <button
+              onClick={() => backupValidationInputRef.current?.click()}
+              title="Verificar checksum e contagens de um backup"
+              className="min-h-[44px] px-4 bg-zinc-950/80 border border-zinc-800 text-zinc-300 rounded-xl font-black uppercase text-xs sm:text-sm tracking-wide hover:border-blue-500/30 hover:text-blue-400 transition-colors flex items-center justify-center gap-2"
+            >
+              <ShieldCheck size={16} /> Validar Backup
+            </button>
+            <button
+              onClick={() => { void handleAnnualReportDownload(); }}
+              disabled={isGeneratingAnnualReport}
+              className="min-h-[44px] px-4 bg-[#BF953F]/5 border border-[#BF953F]/25 text-[#F5D77B] rounded-xl font-black uppercase text-xs sm:text-sm tracking-wide hover:bg-[#BF953F]/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Download size={16} /> {isGeneratingAnnualReport ? 'Gerando...' : 'Relatorio Anual'}
+            </button>
+            <button
+              onClick={() => { void handleEnableAccessControl(); }}
+              disabled={isEnablingAccessControl || !currentUserUid}
+              title="Restringir banco e arquivos aos usuarios autorizados"
+              className="min-h-[44px] px-4 bg-zinc-950/80 border border-zinc-800 text-zinc-300 rounded-xl font-black uppercase text-xs sm:text-sm tracking-wide hover:border-emerald-500/30 hover:text-emerald-500 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <ShieldCheck size={16} /> {isEnablingAccessControl ? 'Ativando...' : 'Proteger Acesso'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1054,6 +1092,34 @@ const Reports: React.FC<ReportsProps> = ({
           </div>
         ))}
       </div>
+
+      <section className="rounded-[2.5rem] border border-zinc-900 bg-[#050505] p-6 sm:p-8" aria-label="Performance da carteira">
+        <h3 className="text-xs font-black gold-text uppercase tracking-[0.2em]">Performance da carteira · {reportYear}</h3>
+        <p className="mt-1 text-[9px] text-zinc-500">Pagamentos discriminados por origem; principal e descontos nao sao receita.</p>
+        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4">
+          {[
+            ['Receita GR direta', formatCurrency(portfolioPerformance.directRevenue)],
+            ['Receita bancarizada', formatCurrency(portfolioPerformance.bancarizedRevenue)],
+            ['Principal recuperado', formatCurrency(portfolioPerformance.principalRecovered)],
+            ['Receita em renovacoes (juros + multa)', formatCurrency(portfolioPerformance.renewalRevenue)],
+            ['Multas recebidas', formatCurrency(portfolioPerformance.lateFeesReceived)],
+            ['Descontos concedidos', formatCurrency(portfolioPerformance.discountsGranted)],
+            ['Recuperacao / concessoes', portfolioPerformance.recoveryOnConcessionsPercent === null
+              ? 'N/D'
+              : formatPercentage(portfolioPerformance.recoveryOnConcessionsPercent)],
+          ].map(([label, value]) => (
+            <div key={label} className="rounded-2xl border border-zinc-800 bg-black p-4">
+              <p className="text-[8px] font-black uppercase tracking-widest text-zinc-500">{label}</p>
+              <p className="mt-2 text-sm font-black text-white">{value}</p>
+            </div>
+          ))}
+        </div>
+        {portfolioPerformance.undatedLegacyPayments > 0 && (
+          <p className="mt-4 text-[9px] text-amber-400">
+            {portfolioPerformance.undatedLegacyPayments} pagamento(s) legado(s) sem discriminacao/data suficiente nao foram atribuidos a este periodo.
+          </p>
+        )}
+      </section>
 
       <div className="bg-[#050505] border border-zinc-900 rounded-[2.5rem] p-6 sm:p-8">
         <div className="flex items-center justify-between gap-4 mb-5">
@@ -1123,6 +1189,20 @@ const Reports: React.FC<ReportsProps> = ({
       </div>
 
       {/* Desempenho mensal */}
+      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3" aria-label="DRE gerencial do ano">
+        {[
+          ['Receita operacional', yearlyDre.revenue, 'text-emerald-500'],
+          ['Despesas operacionais', yearlyDre.expenses, 'text-red-500'],
+          ['Resultado operacional', yearlyDre.result, yearlyDre.result >= 0 ? 'text-[#BF953F]' : 'text-red-500'],
+        ].map(([label, value, color]) => (
+          <div key={String(label)} className="rounded-2xl border border-zinc-900 bg-[#050505] p-5">
+            <p className="text-[9px] font-black uppercase tracking-widest text-zinc-500">{label}</p>
+            <p className={`mt-2 text-xl font-black ${color}`}>{formatCurrency(Number(value))}</p>
+          </div>
+        ))}
+        <p className="sm:col-span-3 text-[9px] text-zinc-500">Caixa e DRE sao distintos: emprestimos concedidos, aportes, devolucoes de aporte e pagamentos de emprestimo externo nao entram nas despesas operacionais.</p>
+      </section>
+
       <div className="bg-[#050505] border border-zinc-900 rounded-[3rem] p-6 sm:p-8 md:p-10">
         <div className="flex items-center justify-between mb-12">
           <div>

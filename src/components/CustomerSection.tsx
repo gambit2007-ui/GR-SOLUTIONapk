@@ -9,6 +9,7 @@ import {
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { calculateCustomerFinancialSummary } from '../utils/customerFinancialSummary';
+import { assessCustomerCreditRisk } from '../utils/creditRisk';
 import { normalizeSearchText } from '../utils/search';
 import { auth } from '../firebase';
 import { storage, storageAppspotFallback, storageFirebasestorageFallback } from '../firebaseStorage';
@@ -98,6 +99,12 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
       viewingDetails
         ? calculateCustomerFinancialSummary(viewingDetails.id, loans, dailyLateFeeRate)
         : null,
+    [dailyLateFeeRate, loans, viewingDetails],
+  );
+  const viewingRisk = React.useMemo(
+    () => viewingDetails
+      ? assessCustomerCreditRisk(viewingDetails.id, loans, new Date(), dailyLateFeeRate)
+      : null,
     [dailyLateFeeRate, loans, viewingDetails],
   );
 
@@ -1137,6 +1144,11 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                       valueClassName: 'text-emerald-500',
                     },
                     {
+                      label: 'Principal recuperado identificado',
+                      value: formatCurrency(viewingFinancialSummary.principalRecovered),
+                      valueClassName: 'text-emerald-500',
+                    },
+                    {
                       label: '💰 Lucro real gerado',
                       value: formatCurrency(viewingFinancialSummary.realProfit),
                       valueClassName: 'text-[#BF953F]',
@@ -1145,6 +1157,33 @@ const CustomerSection: React.FC<CustomerSectionProps> = ({
                       label: '📈 Lucro projetado',
                       value: formatCurrency(viewingFinancialSummary.projectedProfit),
                       valueClassName: 'text-blue-400',
+                    },
+                    {
+                      label: 'ROI sobre principal concedido',
+                      value: `${viewingFinancialSummary.roi.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}%`,
+                      valueClassName: 'text-[#BF953F]',
+                    },
+                    {
+                      label: 'Descontos concedidos',
+                      value: formatCurrency(viewingFinancialSummary.discountsGranted),
+                      valueClassName: 'text-amber-400',
+                    },
+                    {
+                      label: 'Renovacoes',
+                      value: formatCount(viewingFinancialSummary.renewals),
+                      valueClassName: 'text-blue-400',
+                    },
+                    {
+                      label: 'Maior atraso atual',
+                      value: `${viewingRisk?.maxCurrentOverdueDays || 0} dias`,
+                      valueClassName: viewingRisk?.maxCurrentOverdueDays ? 'text-red-500' : 'text-zinc-300',
+                    },
+                    {
+                      label: 'Maior atraso historico',
+                      value: viewingRisk?.historyIncomplete
+                        ? `${viewingRisk.maxHistoricalOverdueDays} dias (revisar legado)`
+                        : `${viewingRisk?.maxHistoricalOverdueDays || 0} dias`,
+                      valueClassName: viewingRisk?.maxHistoricalOverdueDays ? 'text-amber-400' : 'text-zinc-300',
                     },
                     {
                       label: '🚶 Valor em aberto',
