@@ -1209,7 +1209,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const applyMode: PaymentApplyMode = directApplyMode || activeModal?.applyMode || 'INSTALLMENTS';
     const parsedDiscount = applyMode === 'INSTALLMENT_DISCOUNT'
       ? 0
-      : parseMoneyInput(activeModal?.discount ?? 0);
+      // An empty optional discount means no discount, not invalid payment data.
+      : parseMoneyInput(activeModal?.discount || 0);
     if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0) {
       showToast('Desconto invalido', 'error');
       return;
