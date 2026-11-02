@@ -126,7 +126,9 @@ const Reports: React.FC<ReportsProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
   const [isGeneratingAnnualReport, setIsGeneratingAnnualReport] = useState(false);
+  const [isGeneratingMonthlyReport, setIsGeneratingMonthlyReport] = useState(false);
   const [reportYear, setReportYear] = useState(() => new Date().getFullYear());
+  const [reportMonth, setReportMonth] = useState(() => new Date().getMonth() + 1);
   const [closingMonth, setClosingMonth] = useState<string | null>(null);
   const [isEnablingAccessControl, setIsEnablingAccessControl] = useState(false);
   const backupValidationInputRef = useRef<HTMLInputElement | null>(null);
@@ -800,6 +802,26 @@ const Reports: React.FC<ReportsProps> = ({
     }
   };
 
+  const handleMonthlyReportDownload = async () => {
+    setIsGeneratingMonthlyReport(true);
+    try {
+      const { generateMonthlyCashReportPdf } = await import('../utils/monthlyCashReportPdf');
+      await generateMonthlyCashReportPdf({
+        year: reportYear,
+        month: reportMonth,
+        cashMovements,
+        loans,
+        monthlySnapshots,
+      });
+      showToast('Relatorio mensal gerado com sucesso', 'success');
+    } catch (error) {
+      console.error('Falha ao gerar relatorio mensal do caixa:', error);
+      showToast('Erro ao gerar relatorio mensal', 'error');
+    } finally {
+      setIsGeneratingMonthlyReport(false);
+    }
+  };
+
   const handleCloseMonth = async (data: MonthlyData) => {
     if (isMonthClosed(data.key)) {
       showToast('Este mes ja esta fechado', 'error');
@@ -1027,6 +1049,23 @@ const Reports: React.FC<ReportsProps> = ({
                 ))}
               </select>
             </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="report-month" className="text-xs font-black text-zinc-400 uppercase tracking-wide">
+                Mes do relatorio
+              </label>
+              <select
+                id="report-month"
+                value={reportMonth}
+                onChange={(event) => setReportMonth(Number(event.target.value))}
+                className="min-h-[44px] px-3 bg-zinc-950/80 border border-zinc-800 text-white rounded-xl font-black uppercase text-sm tracking-wide outline-none focus:border-[#BF953F]"
+              >
+                {monthNamesUpper.map((monthLabel, monthIndex) => (
+                  <option key={monthLabel} value={monthIndex + 1}>
+                    {monthLabel}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div className="flex flex-wrap gap-x-5 gap-y-2 pb-1 text-xs sm:text-sm font-black uppercase tracking-wide">
               <span className="text-zinc-400">Reserva minima: {formatCurrency(MINIMUM_CASH_RESERVE)}</span>
               <span className={caixa <= MINIMUM_CASH_RESERVE ? 'text-amber-400' : 'text-emerald-500'}>
@@ -1068,6 +1107,13 @@ const Reports: React.FC<ReportsProps> = ({
               className="min-h-[44px] px-4 bg-[#BF953F]/5 border border-[#BF953F]/25 text-[#F5D77B] rounded-xl font-black uppercase text-xs sm:text-sm tracking-wide hover:bg-[#BF953F]/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <Download size={16} /> {isGeneratingAnnualReport ? 'Gerando...' : 'Relatorio Anual'}
+            </button>
+            <button
+              onClick={() => { void handleMonthlyReportDownload(); }}
+              disabled={isGeneratingMonthlyReport}
+              className="min-h-[44px] px-4 bg-[#BF953F]/5 border border-[#BF953F]/25 text-[#F5D77B] rounded-xl font-black uppercase text-xs sm:text-sm tracking-wide hover:bg-[#BF953F]/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Download size={16} /> {isGeneratingMonthlyReport ? 'Gerando...' : 'Relatorio Mensal'}
             </button>
             <button
               onClick={() => { void handleEnableAccessControl(); }}

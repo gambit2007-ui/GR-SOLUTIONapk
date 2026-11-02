@@ -61,6 +61,21 @@ const parseLongDate = (day: string, month: string, year: string): string => {
   return `${year}-${String(monthNumber).padStart(2, '0')}-${day.padStart(2, '0')}`;
 };
 
+const parseNumericDate = (day: string, month: string, year: string): string => {
+  const dayNumber = Number(day);
+  const monthNumber = Number(month);
+  const yearNumber = Number(year.length === 2 ? `20${year}` : year);
+  const date = new Date(Date.UTC(yearNumber, monthNumber - 1, dayNumber));
+  if (
+    date.getUTCFullYear() !== yearNumber
+    || date.getUTCMonth() !== monthNumber - 1
+    || date.getUTCDate() !== dayNumber
+  ) {
+    throw new Error('DATA_DO_EXTRATO_INVALIDA');
+  }
+  return date.toISOString().slice(0, 10);
+};
+
 const resolveShortDate = (shortDate: string, periodStart: string, periodEnd: string): string => {
   const [day, month] = shortDate.split('/').map(Number);
   const startYear = Number(periodStart.slice(0, 4));
@@ -78,24 +93,41 @@ const resolveShortDate = (shortDate: string, periodStart: string, periodEnd: str
 export const parseC6StatementLines = (pages: string[][]): ParsedBankStatement => {
   const lines = pages.flat().map((line) => line.replace(/\u00a0/g, ' ').replace(/\s+/g, ' ').trim()).filter(Boolean);
   const header = lines.join('\n');
-  if (!/Extrato exportado no dia/i.test(header) || !/Ag[eê]ncia:.*Conta:/i.test(header)) {
+  const isLegacyC6Layout = /Extrato exportado no dia/i.test(header);
+  const isCurrentC6Layout = /Extrato da conta/i.test(header) && /\bC6\s+Bank\b/i.test(header);
+  if ((!isLegacyC6Layout && !isCurrentC6Layout) || !/Ag[eê]ncia:.*Conta:/i.test(header)) {
     throw new Error('FORMATO_C6_NAO_RECONHECIDO');
   }
 
-  const period = header.match(/Per[ií]odo\s*[•·-]?\s*(\d{1,2}) de ([A-Za-zÀ-ÿ]+) de (\d{4}) at[eé] (\d{1,2}) de ([A-Za-zÀ-ÿ]+) de (\d{4})/i);
-  if (!period) throw new Error('PERIODO_DO_EXTRATO_NAO_ENCONTRADO');
-  const periodStart = parseLongDate(period[1], period[2], period[3]);
-  const periodEnd = parseLongDate(period[4], period[5], period[6]);
+  const longPeriod = header.match(/Per[ií]odo\s*[•·-]?\s*(\d{1,2}) de ([A-Za-zÀ-ÿ]+) de (\d{4}) at[eé] (\d{1,2}) de ([A-Za-zÀ-ÿ]+) de (\d{4})/i);
+  const numericPeriod = header.match(/\(?\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*(?:-|–|a|at[eé])\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*\)?/i);
+  if (!longPeriod && !numericPeriod) throw new Error('PERIODO_DO_EXTRATO_NAO_ENCONTRADO');
+  const periodStart = longPeriod
+    ? parseLongDate(longPeriod[1], longPeriod[2], longPeriod[3])
+    : parseNumericDate(numericPeriod![1], numericPeriod![2], numericPeriod![3]);
+  const periodEnd = longPeriod
+    ? parseLongDate(longPeriod[4], longPeriod[5], longPeriod[6])
+    : parseNumericDate(numericPeriod![4], numericPeriod![5], numericPeriod![6]);
   if (periodStart > periodEnd) throw new Error('PERIODO_DO_EXTRATO_INVALIDO');
 
-  const closingMatch = header.match(/Saldo do dia\s*[•·-]?\s*\d{1,2} de [A-Za-zÀ-ÿ]+ de \d{4}\s*[•·-]?\s*(-?R\$\s*[\d.]+,\d{2})/i);
-  if (!closingMatch) throw new Error('SALDO_FINAL_NAO_ENCONTRADO');
-  const closingBalanceCents = parseBrazilianMoneyCents(closingMatch[1]);
+  const longClosingMatch = header.match(/Saldo do dia\s*[•·-]?\s*\d{1,2} de [A-Za-zÀ-ÿ]+ de \d{4}\s*[•·-]?\s*(-?R\$\s*[\d.]+,\d{2})/i);
+  const exportClosingMatch = header.match(/Saldo no dia da exporta[çc][aã]o\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*(?:-|–|a|at[eé])\s*\d{1,2}\/\d{1,2}\/\d{2,4}\s*(-?R\$\s*[\d.]+,\d{2})/i);
+  const shortClosingMatches = [...header.matchAll(/Saldo(?:\s+cont[aá]bil)? do dia\s*(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s*(-?R\$\s*[\d.]+,\d{2})/gi)];
+  const periodEndClosingMatch = shortClosingMatches.find((match) =>
+    parseNumericDate(match[1], match[2], match[3]) === periodEnd,
+  );
+  const closingBalanceCents = longClosingMatch
+    ? parseBrazilianMoneyCents(longClosingMatch[1])
+    : exportClosingMatch
+      ? parseBrazilianMoneyCents(exportClosingMatch[1])
+    : periodEndClosingMatch
+      ? parseBrazilianMoneyCents(periodEndClosingMatch[4])
+      : (() => { throw new Error('SALDO_FINAL_NAO_ENCONTRADO'); })();
 
-  const monthSummaries = [...header.matchAll(/(?:^|\n)([A-Za-zÀ-ÿ]+)\s+\d{4}\s*\([^\n]*?\)\s*Entradas:\s*(R\$\s*[\d.]+,\d{2})\s*[•·-]?\s*Sa[ií]das:\s*(R\$\s*[\d.]+,\d{2})/gim)];
+  const monthSummaries = [...header.matchAll(/Entradas:\s*(R\$\s*[\d.]+,\d{2})\s*[•·-]?\s*Sa[ií]das:\s*(R\$\s*[\d.]+,\d{2})/gim)];
   if (monthSummaries.length === 0) throw new Error('TOTAIS_DO_EXTRATO_NAO_ENCONTRADOS');
-  const reportedIncomeCents = monthSummaries.reduce((sum, match) => sum + parseBrazilianMoneyCents(match[2]), 0);
-  const reportedExpenseCents = monthSummaries.reduce((sum, match) => sum + parseBrazilianMoneyCents(match[3]), 0);
+  const reportedIncomeCents = monthSummaries.reduce((sum, match) => sum + parseBrazilianMoneyCents(match[1]), 0);
+  const reportedExpenseCents = monthSummaries.reduce((sum, match) => sum + parseBrazilianMoneyCents(match[2]), 0);
 
   const rows: BankStatementRow[] = [];
   const transactionPrefix = /^\d{2}\/\d{2}\s+\d{2}\/\d{2}\s+(Entrada|Sa[ií]da)\b/i;

@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import type { StatementPdfPreview } from '../../utils/c6Pdf';
 import { isLocalPdfRuntimeFailure, readC6StatementPdfWithFallback } from '../c6PdfPreviewService';
 
+vi.mock('../../utils/c6Pdf', () => ({ readC6StatementPdf: vi.fn() }));
+
 const preview: StatementPdfPreview = {
   sha256: 'a'.repeat(64),
   statement: {
@@ -20,6 +22,17 @@ describe('fallback do extrato no iPhone', () => {
     expect(server).toHaveBeenCalledOnce();
     expect(server).toHaveBeenCalledWith(file, 'senha');
     expect(isLocalPdfRuntimeFailure(new Error('Setting up fake worker failed'))).toBe(true);
+  });
+
+  it('aciona leitura alternativa quando o PDF.js do navegador rejeita um PDF valido', async () => {
+    const localError = new Error('Invalid PDF structure.');
+    localError.name = 'InvalidPDFException';
+    const local = vi.fn().mockRejectedValue(localError);
+    const server = vi.fn().mockResolvedValue(preview);
+
+    await expect(readC6StatementPdfWithFallback(file, 'senha', local, server)).resolves.toEqual(preview);
+    expect(server).toHaveBeenCalledOnce();
+    expect(isLocalPdfRuntimeFailure(localError)).toBe(true);
   });
 
   it('nao envia PDF e senha ao servidor para erro de formato ou de negocio', async () => {

@@ -6,7 +6,9 @@ const MAX_FALLBACK_BYTES = 3 * 1024 * 1024;
 export const isLocalPdfRuntimeFailure = (error: unknown): boolean => {
   if (error instanceof TypeError) return true;
   const message = error instanceof Error ? error.message : '';
-  return /Setting up fake worker failed|undefined is not a function|worker was destroyed/i.test(message);
+  const name = error instanceof Error ? error.name : '';
+  return name === 'InvalidPDFException'
+    || /Setting up fake worker failed|undefined is not a function|worker was destroyed|Invalid PDF structure/i.test(message);
 };
 
 const readPdfBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
