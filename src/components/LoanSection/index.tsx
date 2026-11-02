@@ -1209,7 +1209,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const applyMode: PaymentApplyMode = directApplyMode || activeModal?.applyMode || 'INSTALLMENTS';
     const parsedDiscount = applyMode === 'INSTALLMENT_DISCOUNT'
       ? 0
-      : parseMoneyInput(activeModal?.discount);
+      : parseMoneyInput(activeModal?.discount ?? 0);
     if (!Number.isFinite(parsedDiscount) || parsedDiscount < 0) {
       showToast('Desconto invalido', 'error');
       return;
@@ -1862,34 +1862,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
                                     ? 'bg-zinc-900 text-zinc-700 cursor-not-allowed' 
                                     : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
                                 }`}
-                                title="Registrar pagamento parcial ou aplicar desconto negociado"
+                                title="Registrar pagamento parcial, total ou com desconto negociado"
                               >
-                                 <DollarSign size={10} /> Pagar / desconto
-                               </button>
-                               <button
-                                 disabled={isLocked || !!processingPayment}
-                                 onClick={(e) => {
-                                   e.stopPropagation();
-                                   const pendingCountFromCurrent = getPendingInstallmentIndexes(loanInstallments, idx).length;
-                                   setPaymentModal({
-                                     isOpen: true,
-                                     loanId: loan.id,
-                                     installmentIndex: idx,
-                                     amount: Math.max(remaining, 0).toFixed(2),
-                                      discount: '',
-                                     applyMode: 'INSTALLMENT_DISCOUNT',
-                                     redistributionStartDate: getLocalISODate(),
-                                     redistributionInstallmentsCount: String(Math.max(pendingCountFromCurrent, 1)),
-                                   });
-                                 }}
-                                 className={`flex-1 py-2 rounded-xl text-[7px] font-black uppercase tracking-widest flex items-center justify-center gap-1 transition-all ${
-                                   isLocked || !!processingPayment
-                                     ? 'bg-zinc-900 text-zinc-700 cursor-not-allowed'
-                                     : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500 hover:text-black'
-                                 }`}
-                                 title="Quitar somente esta parcela pelo valor negociado, registrando o desconto"
-                               >
-                                 <Percent size={10} /> Desconto
+                                 <DollarSign size={10} /> Pagar
                                </button>
                              </div>
                           )}
