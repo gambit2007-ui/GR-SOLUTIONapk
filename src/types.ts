@@ -36,10 +36,22 @@ export type CashOutflowCategory =
   | 'REPASSE_INVESTIDOR_PARCEIRO'
   | 'PRO_LABORE'
   | 'DESPESA_OPERACIONAL'
+  | 'DAS'
+  | 'DESPESA_CONTABIL'
+  // Mantido somente para leitura de lancamentos historicos.
   | 'IMPOSTO_MEI'
   | 'MARKETING'
   | 'COMISSAO'
   | 'REINVESTIMENTO';
+
+export type CashInflowCategory =
+  | 'APORTE_PROPRIO'
+  | 'APORTE_INVESTIDOR_PARCEIRO'
+  | 'RECEITA_SERVICO'
+  | 'REEMBOLSO'
+  | 'OUTRAS_ENTRADAS';
+
+export type CashMovementCategory = CashOutflowCategory | CashInflowCategory;
 
 export interface FirestoreTimestampLike {
   toDate: () => Date;
@@ -58,7 +70,7 @@ export interface CashMovement {
   amount: number;
   description: string;
   date: string;
-  category?: CashOutflowCategory;
+  category?: CashMovementCategory;
   loanId?: string;
   createdByUid?: string;
   createdByEmail?: string;

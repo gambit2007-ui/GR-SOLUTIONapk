@@ -8,8 +8,8 @@ import {
   Transaction,
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { CashMovement, CashOutflowCategory, MovementType } from '../types';
-import { parseCashOutflowCategory } from '../utils/cashCategories';
+import { CashMovement, CashMovementCategory, MovementType } from '../types';
+import { parseCashInflowCategory, parseCashOutflowCategory } from '../utils/cashCategories';
 import { parseCashMovement, parseMovementType, resolveCashDelta } from '../utils/domainParsers';
 import { sanitizeFirestorePayload } from '../utils/firestoreSanitizer';
 
@@ -23,7 +23,7 @@ export interface CashMovementPayload {
   type: MovementType;
   amount: number;
   description: string;
-  category?: CashOutflowCategory;
+  category?: CashMovementCategory;
   loanId?: string;
   actor?: MovementActor;
   operationId?: string;
@@ -86,7 +86,9 @@ export const appendCashMovementInTransaction = async (
     date: new Date().toISOString(),
     category: type === 'SAIDA'
       ? parseCashOutflowCategory(payload.category) || 'DESPESA_OPERACIONAL'
-      : undefined,
+      : type === 'ENTRADA' || type === 'APORTE'
+        ? parseCashInflowCategory(payload.category) || 'OUTRAS_ENTRADAS'
+        : undefined,
     loanId: payload.loanId,
     operationId: payload.operationId,
     discountApplied: payload.discountApplied,

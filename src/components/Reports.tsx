@@ -2,6 +2,8 @@
 import {
   Loan,
   CashMovement,
+  CashInflowCategory,
+  CashMovementCategory,
   CashOutflowCategory,
   MovementType,
   PaymentBreakdown,
@@ -45,6 +47,7 @@ import { generateMonthlySnapshot, saveMonthlySnapshot } from '../services/monthl
 import {
   CASH_OUTFLOW_CATEGORY_LABELS,
   CASH_OUTFLOW_CATEGORY_OPTIONS,
+  CASH_INFLOW_CATEGORY_OPTIONS,
   CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS,
   CashOutflowReportCategory,
   isLoanCashOutflowMovement,
@@ -65,7 +68,7 @@ interface ReportsProps {
     type: MovementType,
     amount: number,
     description: string,
-    category?: CashOutflowCategory,
+    category?: CashMovementCategory,
   ) => Promise<void>;
   onRecalculateCash: () => Promise<void>;
   onDownloadBackup: () => Promise<void>;
@@ -128,7 +131,7 @@ const Reports: React.FC<ReportsProps> = ({
     type: 'ENTRADA' as MovementType,
     amount: '',
     description: '',
-    category: 'DESPESA_OPERACIONAL' as CashOutflowCategory,
+    category: 'OUTRAS_ENTRADAS' as CashMovementCategory,
   });
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
@@ -680,8 +683,8 @@ const Reports: React.FC<ReportsProps> = ({
       return;
     }
 
-    if (formData.type === 'SAIDA' && !formData.category) {
-      showToast('Selecione a categoria da saida', 'error');
+    if ((formData.type === 'SAIDA' || formData.type === 'ENTRADA') && !formData.category) {
+      showToast(`Selecione a categoria da ${formData.type === 'SAIDA' ? 'saida' : 'entrada'}`, 'error');
       return;
     }
 
@@ -690,14 +693,14 @@ const Reports: React.FC<ReportsProps> = ({
         formData.type,
         Number(amountValue.toFixed(2)),
         formData.description,
-        formData.type === 'SAIDA' ? formData.category : undefined,
+        formData.type === 'SAIDA' || formData.type === 'ENTRADA' ? formData.category : undefined,
       );
       setIsModalOpen(false);
       setFormData({
         type: 'ENTRADA',
         amount: '',
         description: '',
-        category: 'DESPESA_OPERACIONAL',
+        category: 'OUTRAS_ENTRADAS',
       });
     } catch (e) {
       // Erro tratado no App.tsx
@@ -1366,24 +1369,28 @@ const Reports: React.FC<ReportsProps> = ({
                     setFormData({
                       ...formData,
                       type: nextType,
-                      category: nextType === 'SAIDA' ? formData.category : 'DESPESA_OPERACIONAL',
+                      category: nextType === 'SAIDA'
+                        ? 'DESPESA_OPERACIONAL'
+                        : 'OUTRAS_ENTRADAS',
                     });
                   }}
                 >
-                  <option value="ENTRADA">ENTRADA / APORTE</option>
+                  <option value="ENTRADA">ENTRADA</option>
                   <option value="SAIDA">SAIDA / RETIRADA</option>
                 </select>
               </div>
-              {formData.type === 'SAIDA' && (
+              {(formData.type === 'SAIDA' || formData.type === 'ENTRADA') && (
                 <div className="space-y-1">
-                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">Categoria da Saida</label>
+                  <label className="text-[9px] font-black text-zinc-500 uppercase tracking-widest ml-1">
+                    Categoria da {formData.type === 'SAIDA' ? 'Saida' : 'Entrada'}
+                  </label>
                   <select
                     required
                     className="w-full bg-[#000000] border border-zinc-800 rounded-2xl p-4 text-white outline-none focus:border-[#BF953F] text-xs appearance-none"
                     value={formData.category}
-                    onChange={e => setFormData({ ...formData, category: e.target.value as CashOutflowCategory })}
+                    onChange={e => setFormData({ ...formData, category: e.target.value as CashMovementCategory })}
                   >
-                    {CASH_OUTFLOW_CATEGORY_OPTIONS.map((option) => (
+                    {(formData.type === 'SAIDA' ? CASH_OUTFLOW_CATEGORY_OPTIONS : CASH_INFLOW_CATEGORY_OPTIONS).map((option) => (
                       <option key={option.value} value={option.value}>
                         {option.label}
                       </option>
