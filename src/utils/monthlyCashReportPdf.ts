@@ -1,6 +1,11 @@
 import type { CashMovement, Loan, MonthlySnapshot } from '../types';
 import { resolveCashDelta } from './domainParsers';
-import { CASH_OUTFLOW_CATEGORY_LABELS, resolveCashOutflowCategory } from './cashCategories';
+import {
+  CASH_INFLOW_CATEGORY_LABELS,
+  CASH_OUTFLOW_CATEGORY_LABELS,
+  resolveCashInflowCategory,
+  resolveCashOutflowCategory,
+} from './cashCategories';
 
 interface MonthlyCashReportParams {
   year: number;
@@ -97,7 +102,7 @@ const getMovementTypeLabel = (movement: CashMovement) => {
 };
 
 const getMovementCategoryLabel = (movement: CashMovement, signedAmount: number) => {
-  if (signedAmount >= 0) return 'Entrada de caixa';
+  if (signedAmount >= 0) return CASH_INFLOW_CATEGORY_LABELS[resolveCashInflowCategory(movement)];
   return CASH_OUTFLOW_CATEGORY_LABELS[resolveCashOutflowCategory(movement)];
 };
 

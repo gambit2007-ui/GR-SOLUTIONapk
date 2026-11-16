@@ -13,7 +13,7 @@ import type {
   LoanStatus,
   PaymentBreakdown,
 } from '../types';
-import { parseCashOutflowCategory } from './cashCategories.js';
+import { parseCashInflowCategory, parseCashOutflowCategory } from './cashCategories.js';
 import { getLocalISODate } from './dateTime.js';
 import { isCredigrupoLoanStatus } from '../lib/creditProviders/loanStatus.js';
 
@@ -87,7 +87,11 @@ export const parseCashMovement = (id: string, raw: unknown): CashMovement => {
     value: amount,
     description,
     date,
-    category: parseCashOutflowCategory(payload.category),
+    category: type === 'SAIDA' || type === 'RETIRADA'
+      ? parseCashOutflowCategory(payload.category)
+      : type === 'ENTRADA' || type === 'APORTE'
+        ? parseCashInflowCategory(payload.category)
+        : undefined,
     loanId: toOptionalString(payload.loanId),
     createdByUid: toOptionalString(payload.createdByUid),
     createdByEmail: toOptionalString(payload.createdByEmail),

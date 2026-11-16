@@ -11,6 +11,8 @@ import { calculatePortfolioRoi } from './portfolioRoi';
 import { resolveCashDelta } from './domainParsers';
 import {
   CASH_OUTFLOW_CATEGORY_LABELS,
+  CASH_INFLOW_CATEGORY_LABELS,
+  resolveCashInflowCategory,
   isOperatingExpenseMovement,
   parseCashOutflowCategory,
   sumOperatingExpensesByCategory,
@@ -269,6 +271,9 @@ const getMovementTime = (movement: CashMovement) => {
 };
 
 const getMovementCategoryLabel = (movement: CashMovement) => {
+  if (resolveCashDelta(movement) >= 0) {
+    return CASH_INFLOW_CATEGORY_LABELS[resolveCashInflowCategory(movement)];
+  }
   const category = parseCashOutflowCategory(movement.category);
   return category ? CASH_OUTFLOW_CATEGORY_LABELS[category] : 'Sem categoria';
 };
