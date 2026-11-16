@@ -6,7 +6,7 @@ import {
 import { FirebaseError } from 'firebase/app';
 
 import {
-  CashOutflowCategory,
+  CashMovementCategory,
   CreatedLoanResult,
   Customer,
   Loan,
@@ -187,7 +187,7 @@ const App: React.FC = () => {
     type: MovementType,
     amount: number,
     description: string,
-    category?: CashOutflowCategory,
+    category?: CashMovementCategory,
   ) => {
     const valor = Number(amount);
     const motivo = String(description ?? '').trim();
@@ -203,9 +203,9 @@ const App: React.FC = () => {
       throw new Error('MOTIVO_OBRIGATORIO');
     }
 
-    if (normalizedType === 'SAIDA' && !category) {
-      showToast('Selecione a categoria da saida', 'error');
-      throw new Error('CATEGORIA_SAIDA_OBRIGATORIA');
+    if ((normalizedType === 'SAIDA' || normalizedType === 'ENTRADA') && !category) {
+      showToast(`Selecione a categoria da ${normalizedType === 'SAIDA' ? 'saida' : 'entrada'}`, 'error');
+      throw new Error(normalizedType === 'SAIDA' ? 'CATEGORIA_SAIDA_OBRIGATORIA' : 'CATEGORIA_ENTRADA_OBRIGATORIA');
     }
 
     try {
@@ -218,7 +218,9 @@ const App: React.FC = () => {
             type: movementType,
             amount: valor,
             description: motivo,
-            category: movementType === 'SAIDA' ? category : undefined,
+            category: movementType === 'SAIDA' || movementType === 'ENTRADA' || movementType === 'APORTE'
+              ? category
+              : undefined,
             actor: movementActor,
           });
           showToast('Caixa atualizado!', 'success');
