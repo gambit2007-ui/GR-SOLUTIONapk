@@ -7,7 +7,7 @@ import {
   serverTimestamp,
   where,
 } from 'firebase/firestore';
-import { db } from '../firebase';
+import { auth, db } from '../firebase';
 import { Installment, Loan, LoanDraft, LoanType, MovementType } from '../types';
 import type {
   CreatedLoanResult,
@@ -149,52 +149,30 @@ const enrichPriceInstallments = (loanDraft: LoanDraft): LoanDraft => {
   };
 };
 
-export const createLoan = async (loanDraft: LoanDraft, actor?: MovementActor): Promise<CreatedLoanResult> => {
+class DirectLoanApiError extends Error {
+  constructor(public readonly code: string) {
+    super(code);
+  }
+}
+
+export const createLoan = async (loanDraft: LoanDraft, _actor?: MovementActor): Promise<CreatedLoanResult> => {
   const normalizedLoanDraft = enrichPriceInstallments(loanDraft);
-  const safeLoanData = sanitizeFirestorePayload(normalizedLoanDraft);
-  const amount = Number(normalizedLoanDraft.amount || 0);
+  const user = auth.currentUser;
+  if (!user) throw new DirectLoanApiError('AUTH_REQUIRED');
 
-  const createdLoan = await runTransaction(db, async (tx) => {
-    const loanRef = doc(collection(db, 'loans'));
-    const operationId = `loan-created-${loanRef.id}`;
-    const contractCounterRef = doc(db, 'settings', 'contractCounter');
-    const counterSnapshot = await tx.get(contractCounterRef);
-    const saldoAtual = await readCashBalanceInTransaction(tx);
-    const requestedNumber = Math.trunc(Number(normalizedLoanDraft.contractNumber || 0));
-    const lastNumber = counterSnapshot.exists()
-      ? Math.trunc(Number(counterSnapshot.data().lastNumber || 0))
-      : 0;
-    const contractNumber = Math.max(lastNumber + 1, requestedNumber, 2026001);
-
-    await appendCashMovementInTransaction(tx, {
-      type: 'RETIRADA',
-      amount,
-      description: `EMPRESTIMO: ${normalizedLoanDraft.customerName}`,
-      loanId: loanRef.id,
-      operationId,
-      actor,
-    }, { currentCashBalance: saldoAtual, movementId: operationId });
-
-    tx.set(loanRef, {
-      ...safeLoanData,
-      contractNumber: String(contractNumber),
-      version: 0,
-      hasFinancialHistory: false,
-      createdAt: serverTimestamp(),
-      ...buildLoanOperationAudit(operationId, 'LOAN_CREATED', actor),
-    });
-    tx.set(contractCounterRef, {
-      lastNumber: contractNumber,
-      lastContractNumber: String(contractNumber),
-      lastLoanId: loanRef.id,
-      updatedByUid: actor?.uid || undefined,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-
-    return { id: loanRef.id, contractNumber: String(contractNumber) };
+  const response = await fetch('/api/loans', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${await user.getIdToken()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ loan: normalizedLoanDraft }),
   });
-
-  return createdLoan;
+  const payload = await response.json().catch(() => ({})) as Partial<CreatedLoanResult> & { error?: unknown };
+  if (!response.ok || typeof payload.id !== 'string' || typeof payload.contractNumber !== 'string') {
+    throw new DirectLoanApiError(String(payload.error || `HTTP_${response.status}`));
+  }
+  return { id: payload.id, contractNumber: payload.contractNumber };
 };
 
 export const updateLoan = async (loanId: string, payload: Partial<Loan>, actor?: MovementActor) => {
