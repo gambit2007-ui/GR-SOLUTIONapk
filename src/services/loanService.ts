@@ -175,6 +175,13 @@ export const createLoan = async (loanDraft: LoanDraft, _actor?: MovementActor): 
   return { id: payload.id, contractNumber: payload.contractNumber };
 };
 
+export const listLoansByCustomer = async (customerId: string): Promise<Loan[]> => {
+  const safeCustomerId = String(customerId || '').trim();
+  if (!safeCustomerId) return [];
+  const snapshot = await getDocs(query(collection(db, 'loans'), where('customerId', '==', safeCustomerId)));
+  return snapshot.docs.map((loanSnapshot) => parseLoan(loanSnapshot.id, loanSnapshot.data()));
+};
+
 export const updateLoan = async (loanId: string, payload: Partial<Loan>, actor?: MovementActor) => {
   await runTransaction(db, async (tx) => {
     const loanRef = doc(db, 'loans', loanId);

@@ -24,6 +24,7 @@ import {
 import { buildInstallmentDueDate, getLocalISODate } from '../../utils/dateTime';
 import { calculateInstallmentLateFee } from '../../utils/lateFee';
 import { normalizeSearchText } from '../../utils/search';
+import { buildOverdueCustomerCards } from '../../utils/overdueCustomers';
 import {
   buildEarlySettlementQuote,
   EarlySettlementQuote,
@@ -43,6 +44,7 @@ import BancarizationFields, {
 import BancarizationOperations from './BancarizationOperations';
 import BancarizedInstallmentActions from './BancarizedInstallmentActions';
 import { createBancarizedLoan, getCredigrupoStatus, reconcileCredigrupoOperation } from '../../services/credigrupoService';
+import { listLoansByCustomer } from '../../services/loanService';
 import { formatCredigrupoFormalizationStatus } from '../../lib/creditProviders/loanStatus';
 
 interface LoanSectionProps {
@@ -1236,7 +1238,7 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     }
   };
 
-  const handleWhatsApp = (loan: Loan) => {
+  const handleWhatsApp = async (loan: Loan) => {
     if (effectiveLoanStatus(loan) !== 'ACTIVE') {
       showToast('Contrato concluido/cancelado. Cobranca indisponivel.', 'error');
       return;
@@ -1248,28 +1250,49 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     if (!phoneValue) {
       return showToast('Cliente sem telefone cadastrado', 'error');
     }
+    const whatsappWindow = window.open('about:blank', '_blank');
+    if (!whatsappWindow) {
+      showToast('Permita a abertura de nova aba para enviar a cobranca', 'error');
+      return;
+    }
+    whatsappWindow.opener = null;
+    let customerLoans: Loan[];
+    try {
+      customerLoans = await listLoansByCustomer(loan.customerId);
+    } catch {
+      whatsappWindow.close();
+      showToast('Nao foi possivel consolidar os contratos do cliente para cobranca', 'error');
+      return;
+    }
+    const overdueSummary = buildOverdueCustomerCards(customerLoans, new Date(), dailyLateFeeRate)
+      .find((card) => card.customerId === loan.customerId);
     const targetInstallment = (Array.isArray(loan.installments) ? loan.installments : []).find(
       (installment) => getRemainingInstallmentValue(installment) > 0,
     );
-    if (!targetInstallment) {
+    if (!targetInstallment && !overdueSummary) {
+      whatsappWindow.close();
       return showToast('Contrato sem parcela pendente para cobranca', 'error');
     }
 
-    const installmentValue = getRemainingInstallmentValue(targetInstallment);
-    const dueDate = targetInstallment.dueDate
+    const installmentValue = targetInstallment ? getRemainingInstallmentValue(targetInstallment) : 0;
+    const dueDate = targetInstallment?.dueDate
       ? new Date(`${targetInstallment.dueDate}T12:00:00`).toLocaleDateString('pt-BR')
       : 'Nao informada';
+    const paymentReminder = overdueSummary
+      ? `Identificamos ${overdueSummary.overdueInstallmentCount} ${overdueSummary.overdueInstallmentCount === 1 ? 'parcela em atraso' : 'parcelas em atraso'}, com valor total atualizado de R$ ${overdueSummary.overdueAmount.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}.\n\n` +
+        `O vencimento mais antigo foi em ${overdueSummary.oldestOverdueDate ? new Date(`${overdueSummary.oldestOverdueDate}T12:00:00`).toLocaleDateString('pt-BR') : 'data nao informada'}.\n\n`
+      : `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n`;
     const phone = phoneValue.replace(/\D/g, '');
     const text = encodeURIComponent(
       `Ol\u00e1, ${customerName}. Tudo bem?\n\n` +
       `Aqui \u00e9 da GR SOLUTION.\n\n` +
-      `Estou entrando em contato para lembrar sobre sua parcela no valor de R$ ${installmentValue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}, com vencimento em ${dueDate}.\n\n` +
+      paymentReminder +
       `Caso j\u00e1 tenha realizado o pagamento, por favor envie o comprovante para darmos baixa em nosso sistema.\n\n` +
       `Qualquer d\u00favida, estou \u00e0 disposi\u00e7\u00e3o.\n\n` +
       `Atenciosamente,\n` +
       `GR SOLUTION`
     );
-    window.open(`https://wa.me/55${phone}?text=${text}`, '_blank');
+    whatsappWindow.location.replace(`https://wa.me/55${phone}?text=${text}`);
   };
 
   const openCredigrupoUrl = (value?: string) => {

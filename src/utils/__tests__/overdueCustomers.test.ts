@@ -38,7 +38,7 @@ describe('overdue customer cards', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]).toMatchObject({
       maxOverdueDays: 22, overdueAmount: 600, overdueInstallmentCount: 3,
-      overdueContractCount: 2, navigationLoanId: 'b',
+      overdueContractCount: 2, navigationLoanId: 'b', oldestOverdueDate: '2026-08-31',
     });
   });
 

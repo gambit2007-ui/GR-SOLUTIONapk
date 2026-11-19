@@ -12,6 +12,7 @@ export interface OverdueCustomerCard {
   overdueInstallmentCount: number;
   maxOverdueDays: number;
   overdueAmount: number;
+  oldestOverdueDate: string | null;
 }
 
 const calculateOverdueDays = (dueDate: string, referenceDate: Date): number => {
@@ -36,7 +37,11 @@ export const buildOverdueCustomerCards = (
       if (normalizeInstallmentStatus(installment.status) === 'PAID' || installment.dueDate >= today) return [];
       const amount = getInstallmentOutstanding(installment, referenceDate, dailyLateFeeRate).total;
       if (amount <= 0) return [];
-      return [{ amount, days: calculateOverdueDays(installment.dueDate, referenceDate) }];
+      return [{
+        amount,
+        dueDate: installment.dueDate,
+        days: calculateOverdueDays(installment.dueDate, referenceDate),
+      }];
     });
     if (overdueInstallments.length === 0) return;
 
@@ -53,6 +58,7 @@ export const buildOverdueCustomerCards = (
       overdueInstallmentCount: 0,
       maxOverdueDays: 0,
       overdueAmount: 0,
+      oldestOverdueDate: null,
     };
     if (loanDays > existing.maxOverdueDays ||
       (loanDays === existing.maxOverdueDays && loanAmount > existing.navigationAmount) ||
@@ -65,6 +71,13 @@ export const buildOverdueCustomerCards = (
     existing.overdueInstallmentCount += overdueInstallments.length;
     existing.maxOverdueDays = Math.max(existing.maxOverdueDays, loanDays);
     existing.overdueAmount = roundMoney(existing.overdueAmount + loanAmount);
+    const oldestLoanDueDate = overdueInstallments.reduce(
+      (oldest, installment) => !oldest || installment.dueDate < oldest ? installment.dueDate : oldest,
+      null as string | null,
+    );
+    if (oldestLoanDueDate && (!existing.oldestOverdueDate || oldestLoanDueDate < existing.oldestOverdueDate)) {
+      existing.oldestOverdueDate = oldestLoanDueDate;
+    }
     groups.set(key, existing);
   });
 
