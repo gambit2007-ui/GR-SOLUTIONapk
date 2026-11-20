@@ -123,7 +123,9 @@ const Reports: React.FC<ReportsProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isDownloadingBackup, setIsDownloadingBackup] = useState(false);
   const [isGeneratingAnnualReport, setIsGeneratingAnnualReport] = useState(false);
+  const [isGeneratingMonthlyReport, setIsGeneratingMonthlyReport] = useState(false);
   const [reportYear, setReportYear] = useState(() => new Date().getFullYear());
+  const [reportMonth, setReportMonth] = useState(() => new Date().getMonth() + 1);
   const [closingMonth, setClosingMonth] = useState<string | null>(null);
   const [isEnablingAccessControl, setIsEnablingAccessControl] = useState(false);
   const backupValidationInputRef = useRef<HTMLInputElement | null>(null);
@@ -776,6 +778,26 @@ const Reports: React.FC<ReportsProps> = ({
     }
   };
 
+  const handleMonthlyReportDownload = async () => {
+    setIsGeneratingMonthlyReport(true);
+    try {
+      const { generateMonthlyCashReportPdf } = await import('../utils/monthlyCashReportPdf');
+      await generateMonthlyCashReportPdf({
+        year: reportYear,
+        month: reportMonth,
+        cashMovements,
+        loans,
+        monthlySnapshots,
+      });
+      showToast('Relatorio mensal gerado com sucesso', 'success');
+    } catch (error) {
+      console.error('Falha ao gerar relatorio mensal do caixa:', error);
+      showToast('Erro ao gerar relatorio mensal', 'error');
+    } finally {
+      setIsGeneratingMonthlyReport(false);
+    }
+  };
+
   const handleCloseMonth = async (data: MonthlyData) => {
     if (isMonthClosed(data.key)) {
       showToast('Este mes ja esta fechado', 'error');
@@ -1001,6 +1023,22 @@ const Reports: React.FC<ReportsProps> = ({
               ))}
             </select>
           </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest ml-1">
+              Mes do relatorio
+            </span>
+            <select
+              value={reportMonth}
+              onChange={(event) => setReportMonth(Number(event.target.value))}
+              className="min-h-[42px] px-3 bg-zinc-950/80 border border-zinc-800 text-white rounded-xl font-black uppercase text-[9px] tracking-widest outline-none focus:border-[#BF953F]"
+            >
+              {monthNamesUpper.map((monthLabel, monthIndex) => (
+                <option key={monthLabel} value={monthIndex + 1}>
+                  {monthLabel}
+                </option>
+              ))}
+            </select>
+          </div>
           <button 
             onClick={() => { setFormData({ ...formData, type: 'ENTRADA' }); setIsModalOpen(true); }}
             className="min-h-[42px] px-4 bg-[#BF953F]/15 border border-[#BF953F]/30 text-[#F5D77B] rounded-xl font-black uppercase text-[9px] tracking-[0.16em] hover:bg-[#BF953F]/20 transition-colors flex items-center justify-center gap-2"
@@ -1034,6 +1072,13 @@ const Reports: React.FC<ReportsProps> = ({
             className="min-h-[42px] px-4 bg-[#BF953F]/5 border border-[#BF953F]/25 text-[#BF953F] rounded-xl font-black uppercase text-[9px] tracking-[0.14em] hover:bg-[#BF953F]/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             <Download size={14} /> {isGeneratingAnnualReport ? 'Gerando...' : 'Relatorio Anual'}
+          </button>
+          <button
+            onClick={() => { void handleMonthlyReportDownload(); }}
+            disabled={isGeneratingMonthlyReport}
+            className="min-h-[42px] px-4 bg-[#BF953F]/5 border border-[#BF953F]/25 text-[#BF953F] rounded-xl font-black uppercase text-[9px] tracking-[0.14em] hover:bg-[#BF953F]/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            <Download size={14} /> {isGeneratingMonthlyReport ? 'Gerando...' : 'Relatorio Mensal'}
           </button>
           <button
             onClick={() => { void handleEnableAccessControl(); }}
