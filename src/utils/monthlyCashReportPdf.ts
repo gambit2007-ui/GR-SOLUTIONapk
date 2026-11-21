@@ -1,6 +1,10 @@
 import type { CashMovement, Loan, MonthlySnapshot } from '../types';
 import { resolveCashDelta } from './domainParsers';
-import { CASH_OUTFLOW_CATEGORY_LABELS, resolveCashOutflowCategory } from './cashCategories';
+import {
+  CASH_OUTFLOW_CATEGORY_LABELS,
+  resolveCashOutflowCategory,
+} from './cashCategories';
+import { normalizeInstallmentStatus } from './loanCompat';
 
 interface MonthlyCashReportParams {
   year: number;
@@ -10,6 +14,10 @@ interface MonthlyCashReportParams {
   monthlySnapshots: MonthlySnapshot[];
   generatedAt?: Date;
 }
+
+type MonthlyCashReportCalculationParams = Omit<MonthlyCashReportParams, 'generatedAt' | 'loans'> & {
+  loans?: Loan[];
+};
 
 interface MonthlyCashReportRow {
   movement: CashMovement;
@@ -26,6 +34,10 @@ export interface MonthlyCashReportData {
   netChange: number;
   closingCash: number;
   movementCount: number;
+  principalRecovered: number;
+  realizedFinancialRevenue: number;
+  operatingExpenses: number;
+  operatingResult: number;
   closedSnapshot?: MonthlySnapshot;
   rows: MonthlyCashReportRow[];
 }
@@ -97,12 +109,45 @@ const getMovementCategoryLabel = (movement: CashMovement, signedAmount: number) 
     ? 'Entrada de caixa'
     : CASH_OUTFLOW_CATEGORY_LABELS[resolveCashOutflowCategory(movement)];
 
+const NON_OPERATING_OUTFLOW_CATEGORIES = new Set([
+  'EMPRESTIMO',
+  'DEVOLUCAO_APORTE',
+  'PAGAMENTO_EMPRESTIMO_EXTERNO',
+  'REPASSE_INVESTIDOR_PARCEIRO',
+  'REINVESTIMENTO',
+]);
+
+const isOperatingExpense = (movement: CashMovement) =>
+  !NON_OPERATING_OUTFLOW_CATEGORIES.has(resolveCashOutflowCategory(movement));
+
+const getMonthKey = (value: unknown): string | null => {
+  const date = toDate(value);
+  if (!date) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+
+const getNumber = (value: unknown) => roundMoney(Number(value || 0));
+
+const addBreakdownToMetrics = (
+  metrics: { principalRecovered: number; realizedFinancialRevenue: number },
+  breakdown: { principalPaid?: unknown; interestPaid?: unknown; lateFeePaid?: unknown; serviceFeePaid?: unknown },
+) => {
+  metrics.principalRecovered = roundMoney(metrics.principalRecovered + getNumber(breakdown.principalPaid));
+  metrics.realizedFinancialRevenue = roundMoney(
+    metrics.realizedFinancialRevenue
+      + getNumber(breakdown.interestPaid)
+      + getNumber(breakdown.lateFeePaid)
+      + getNumber(breakdown.serviceFeePaid),
+  );
+};
+
 export const buildMonthlyCashReportData = ({
   year,
   month,
   cashMovements,
   monthlySnapshots,
-}: Omit<MonthlyCashReportParams, 'loans' | 'generatedAt'>): MonthlyCashReportData => {
+  loans = [],
+}: MonthlyCashReportCalculationParams): MonthlyCashReportData => {
   if (!Number.isInteger(month) || month < 1 || month > 12) {
     throw new Error('MES_DE_RELATORIO_INVALIDO');
   }
@@ -124,6 +169,54 @@ export const buildMonthlyCashReportData = ({
   const totalEntries = roundMoney(rows.reduce((total, row) => total + Math.max(row.signedAmount, 0), 0));
   const totalExits = roundMoney(rows.reduce((total, row) => total + Math.abs(Math.min(row.signedAmount, 0)), 0));
   const netChange = roundMoney(totalEntries - totalExits);
+  const financialMetrics = { principalRecovered: 0, realizedFinancialRevenue: 0 };
+  const movementDatesByOperationId = new Map<string, string>();
+  cashMovements.forEach((movement) => {
+    const operationId = String(movement.operationId || movement.id || '').trim();
+    if (operationId && movement.date) movementDatesByOperationId.set(operationId, String(movement.date));
+  });
+  const matchesSelectedMonth = (operationId: string | undefined, fallback: unknown) =>
+    getMonthKey(operationId ? movementDatesByOperationId.get(operationId) || fallback : fallback) === periodKey;
+
+  loans.forEach((loan) => {
+    (Array.isArray(loan.installments) ? loan.installments : []).forEach((installment) => {
+      const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
+      if (paymentEntries.length > 0) {
+        paymentEntries.forEach((entry) => {
+          if (matchesSelectedMonth(entry.operationId, entry.recordedAt)) addBreakdownToMetrics(financialMetrics, entry);
+        });
+        return;
+      }
+      if (normalizeInstallmentStatus(installment.status) === 'PAID' && installment.paymentBreakdown) {
+        const paymentDate = installment.paidAt || installment.paymentDate || installment.lastPaymentDate;
+        if (matchesSelectedMonth(undefined, paymentDate)) addBreakdownToMetrics(financialMetrics, installment.paymentBreakdown);
+      }
+    });
+
+    (Array.isArray(loan.renewalHistory) ? loan.renewalHistory : []).forEach((renewal) => {
+      if (!matchesSelectedMonth(undefined, renewal.paymentDate)) return;
+      financialMetrics.realizedFinancialRevenue = roundMoney(
+        financialMetrics.realizedFinancialRevenue
+          + getNumber(renewal.interestPaid ?? renewal.amount)
+          + getNumber(renewal.lateFeePaid),
+      );
+    });
+
+    (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
+      if (matchesSelectedMonth(entry.operationId, entry.recordedAt)) addBreakdownToMetrics(financialMetrics, entry);
+    });
+  });
+
+  const operatingExpenses = roundMoney(rows.reduce(
+    (total, row) => row.signedAmount < 0 && isOperatingExpense(row.movement)
+      ? total + Math.abs(row.signedAmount)
+      : total,
+    0,
+  ));
+  const snapshot = monthlySnapshots.find((item) => item.month === periodKey);
+  const realizedFinancialRevenue = snapshot
+    ? roundMoney(snapshot.realProfit)
+    : financialMetrics.realizedFinancialRevenue;
 
   return {
     periodLabel: `${monthNames[month - 1]} de ${year}`,
@@ -134,7 +227,11 @@ export const buildMonthlyCashReportData = ({
     netChange,
     closingCash: roundMoney(openingCash + netChange),
     movementCount: rows.length,
-    closedSnapshot: monthlySnapshots.find((snapshot) => snapshot.month === periodKey),
+    principalRecovered: snapshot ? roundMoney(snapshot.principalReceived) : financialMetrics.principalRecovered,
+    realizedFinancialRevenue,
+    operatingExpenses,
+    operatingResult: roundMoney(realizedFinancialRevenue - operatingExpenses),
+    closedSnapshot: snapshot,
     rows,
   };
 };
@@ -210,6 +307,10 @@ export const generateMonthlyCashReportPdf = async ({
       ['Variacao do periodo', formatCurrency(report.netChange, true)],
       ['Saldo final calculado', formatCurrency(report.closingCash)],
       ['Quantidade de movimentacoes', String(report.movementCount)],
+      ['Principal recuperado (nao e lucro)', formatCurrency(report.principalRecovered)],
+      ['Receita financeira realizada', formatCurrency(report.realizedFinancialRevenue)],
+      ['Despesas operacionais', formatCurrency(report.operatingExpenses)],
+      ['Lucro realizado (apos despesas operacionais)', formatCurrency(report.operatingResult)],
       report.closedSnapshot
         ? ['Saldo final do fechamento registrado', formatCurrency(report.closedSnapshot.closingCash)]
         : ['Fechamento mensal', 'Nao registrado'],
