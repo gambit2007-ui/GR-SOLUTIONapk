@@ -1365,7 +1365,7 @@ const Reports: React.FC<ReportsProps> = ({
 
                       <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
                         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Operacional do Mes</p>
-                        <p className={`text-2xl font-black ${data.operatingResult >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                        <p className={`text-2xl font-black ${data.operatingResult >= 0 ? 'text-blue-400' : 'text-red-500'}`}>
                           R$ {data.operatingResult.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
                         <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
@@ -1409,7 +1409,7 @@ const Reports: React.FC<ReportsProps> = ({
                         </div>
                         <div className="flex items-center justify-between gap-4 border-b border-[#BF953F]/30 pb-2 text-[10px]">
                           <span className="font-black text-[#F5D77B]">(=) Lucro operacional</span>
-                          <strong className={data.operatingResult >= 0 ? 'text-emerald-400' : 'text-red-400'}>{formatCurrency(data.operatingResult)}</strong>
+                          <strong className={data.operatingResult >= 0 ? 'text-blue-400' : 'text-red-400'}>{formatCurrency(data.operatingResult)}</strong>
                         </div>
                         <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
                           <span className="text-zinc-400">(-) Custo de captacao</span>
@@ -1481,20 +1481,20 @@ const Reports: React.FC<ReportsProps> = ({
                             iconSize={8}
                             wrapperStyle={{ paddingBottom: '20px', fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}
                           />
-                          <Bar dataKey="entradas" name="Entradas" fill="#10b981" radius={[6, 6, 0, 0]} barSize={28}>
+                          <Bar dataKey="entradas" name="Entradas" fill="#60a5fa" radius={[6, 6, 0, 0]} barSize={28}>
                             <LabelList 
                               dataKey="entradas" 
                               position="top" 
                               formatter={formatChartLabel}
-                              style={{ fill: '#10b981', fontSize: '9px', fontWeight: 900 }}
+                              style={{ fill: '#60a5fa', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
-                          <Bar dataKey="recebimentosPrevistos" name="Previsao Receb." fill="#38bdf8" radius={[6, 6, 0, 0]} barSize={28}>
+                          <Bar dataKey="recebimentosPrevistos" name="Previsao Receb." fill="#cbd5e1" radius={[6, 6, 0, 0]} barSize={28}>
                             <LabelList
                               dataKey="recebimentosPrevistos"
                               position="top"
                               formatter={formatChartLabel}
-                              style={{ fill: '#38bdf8', fontSize: '9px', fontWeight: 900 }}
+                              style={{ fill: '#cbd5e1', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
                           <Bar dataKey="saidas" name="Saidas" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={28}>
