@@ -7,13 +7,18 @@ import {
   normalizeInstallmentStatus,
 } from './loanCompat';
 import { getInstallmentOutstanding } from './financialEngine';
-import { calculatePortfolioRoi } from './portfolioRoi';
+import { calculateNetProfit, calculateNetRoi } from './netProfit';
 import { resolveCashDelta } from './domainParsers';
 import {
   CASH_INFLOW_CATEGORY_LABELS,
   CASH_OUTFLOW_CATEGORY_LABELS,
+  isFundingCostCategory,
+  isOperatingExpenseCategory,
   resolveCashInflowCategory,
   parseCashOutflowCategory,
+  resolveCashOutflowCategory,
+  sumFundingCostsByCategory,
+  sumOperatingExpensesByCategory,
 } from './cashCategories';
 
 interface AnnualCashReportParams {
@@ -39,6 +44,8 @@ interface MonthSummary extends PaymentMetrics {
   capitalBorrowed: number;
   projectedProfit: number;
   manualWithdrawals: number;
+  operatingExpenses: number;
+  fundingCost: number;
   loanOutflows: number;
   reversals: number;
   outflows: number;
@@ -305,6 +312,8 @@ const buildMonthlySummaries = (
     realRevenue: 0,
     projectedProfit: 0,
     manualWithdrawals: 0,
+    operatingExpenses: 0,
+    fundingCost: 0,
     loanOutflows: 0,
     reversals: 0,
     outflows: 0,
@@ -339,6 +348,13 @@ const buildMonthlySummaries = (
         month.reversals = roundMoney(month.reversals + outflowAmount);
       } else {
         month.manualWithdrawals = roundMoney(month.manualWithdrawals + outflowAmount);
+        const category = resolveCashOutflowCategory(movement);
+        if (isOperatingExpenseCategory(category)) {
+          month.operatingExpenses = roundMoney(month.operatingExpenses + outflowAmount);
+        }
+        if (isFundingCostCategory(category)) {
+          month.fundingCost = roundMoney(month.fundingCost + outflowAmount);
+        }
       }
     }
   });
@@ -447,7 +463,7 @@ const buildMonthlySummaries = (
         0,
       ),
     );
-    month.result = roundMoney(month.realRevenue - month.manualWithdrawals);
+    month.result = calculateNetProfit(month.realRevenue, month.operatingExpenses, month.fundingCost);
 
     const snapshot = monthlySnapshots.find(
       (item) => item.month === `${year}-${String(month.monthIndex + 1).padStart(2, '0')}`,
@@ -456,16 +472,25 @@ const buildMonthlySummaries = (
       month.capitalBorrowed = snapshot.lentAmount;
       month.principalRecovered = snapshot.principalReceived;
       month.totalReceived = snapshot.totalReceived ?? month.totalReceived;
-      month.realRevenue = snapshot.realProfit;
+      month.realRevenue = snapshot.financialRevenue ?? snapshot.realProfit;
       month.projectedProfit = snapshot.projectedProfit ?? month.projectedProfit;
       month.manualWithdrawals = snapshot.manualWithdrawals ?? month.manualWithdrawals;
+      month.operatingExpenses = snapshot.operatingExpenses
+        ?? (snapshot.outflowCategoryTotals
+          ? sumOperatingExpensesByCategory(snapshot.outflowCategoryTotals)
+          : month.operatingExpenses);
+      month.fundingCost = snapshot.fundingCost
+        ?? (snapshot.outflowCategoryTotals
+          ? sumFundingCostsByCategory(snapshot.outflowCategoryTotals)
+          : month.fundingCost);
       month.loanOutflows = snapshot.loanOutflows ?? month.loanOutflows;
       month.reversals = snapshot.reversals ?? month.reversals;
       month.outflows = snapshot.totalExpense;
       month.overdueAmount = snapshot.overdueAmount ?? month.overdueAmount;
       month.closingCash = snapshot.closingCash;
       month.contractsCount = snapshot.createdLoansCount;
-      month.result = roundMoney(month.realRevenue - month.manualWithdrawals);
+      month.result = snapshot.netProfit
+        ?? calculateNetProfit(month.realRevenue, month.operatingExpenses, month.fundingCost);
     }
   });
 
@@ -540,7 +565,9 @@ const buildAnnualMetrics = (
   const totalEmprestimos = roundMoney(months.reduce((sum, month) => sum + month.loanOutflows, 0));
   const totalEstornos = roundMoney(months.reduce((sum, month) => sum + month.reversals, 0));
   const totalOutflows = roundMoney(totalRetiradas + totalEmprestimos + totalEstornos);
-  const resultAfterExpenses = roundMoney(realRevenue - totalRetiradas);
+  const operatingExpenses = roundMoney(months.reduce((sum, month) => sum + month.operatingExpenses, 0));
+  const fundingCost = roundMoney(months.reduce((sum, month) => sum + month.fundingCost, 0));
+  const netProfit = roundMoney(months.reduce((sum, month) => sum + month.result, 0));
 
   return {
     caixa,
@@ -549,7 +576,9 @@ const buildAnnualMetrics = (
     totalReceived,
     realRevenue,
     projectedProfit,
-    resultAfterExpenses,
+    operatingExpenses,
+    fundingCost,
+    netProfit,
     totalAReceber,
     valorEmRua,
     valorEmAtraso,
@@ -558,7 +587,7 @@ const buildAnnualMetrics = (
     totalEmprestimos,
     totalEstornos,
     totalOutflows,
-    roi: calculatePortfolioRoi(realRevenue, capitalBorrowed),
+    netRoi: calculateNetRoi(netProfit, capitalBorrowed),
     contractsCreated: months.reduce((sum, month) => sum + month.contractsCount, 0),
     contractsCompleted: loans.filter((loan) => effectiveLoanStatus(loan) === 'COMPLETED').length,
     contractsActive: loans.filter((loan) => effectiveLoanStatus(loan) === 'ACTIVE').length,
@@ -723,7 +752,9 @@ export const generateAnnualCashReportPdf = async ({
       ['Total recebido dos clientes', formatCurrency(annual.totalReceived)],
       ['Faturamento real do ano', formatCurrency(annual.realRevenue)],
       ['Lucro projetado do ano', formatCurrency(annual.projectedProfit)],
-      ['Resultado operacional apos retiradas', formatCurrency(annual.resultAfterExpenses)],
+      ['Despesas operacionais', formatCurrency(annual.operatingExpenses)],
+      ['Custo de captacao', formatCurrency(annual.fundingCost)],
+      ['Lucro liquido realizado', formatCurrency(annual.netProfit)],
       ['Total a receber', formatCurrency(annual.totalAReceber)],
       ['Valor em rua', formatCurrency(annual.valorEmRua)],
       ['Valor em atraso', formatCurrency(annual.valorEmAtraso)],
@@ -732,7 +763,7 @@ export const generateAnnualCashReportPdf = async ({
       ['Total emprestado via caixa', formatCurrency(annual.totalEmprestimos)],
       ['Total de estornos', formatCurrency(annual.totalEstornos)],
       ['Total geral de saidas do caixa', formatCurrency(annual.totalOutflows)],
-      ['ROI da carteira', formatPercentage(annual.roi)],
+      ['ROI liquido das concessoes', annual.netRoi === null ? 'N/D' : formatPercentage(annual.netRoi)],
       ['Quantidade de contratos criados', String(annual.contractsCreated)],
       ['Quantidade de contratos quitados', String(annual.contractsCompleted)],
       ['Quantidade de contratos ativos', String(annual.contractsActive)],

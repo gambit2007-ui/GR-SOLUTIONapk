@@ -34,6 +34,7 @@ export type CashOutflowCategory =
   | 'DEVOLUCAO_APORTE'
   | 'PAGAMENTO_EMPRESTIMO_EXTERNO'
   | 'REPASSE_INVESTIDOR_PARCEIRO'
+  | 'CUSTO_CAPTACAO'
   | 'PRO_LABORE'
   | 'DESPESA_OPERACIONAL'
   | 'DAS'
@@ -96,7 +97,13 @@ export interface MonthlySnapshot {
   interestReceived: number;
   lateFeesReceived: number;
   serviceFeesReceived: number;
+  // Legacy field kept for snapshots created before financialRevenue was introduced.
   realProfit: number;
+  financialRevenue?: number;
+  operatingExpenses?: number;
+  fundingCost?: number;
+  netProfit?: number;
+  netRoi?: number;
   lentAmount: number;
   roi: number;
   movementCount: number;

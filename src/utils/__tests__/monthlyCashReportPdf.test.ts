@@ -74,6 +74,7 @@ describe('buildMonthlyCashReportData', () => {
       cashMovements: [
         { ...movement('despesa', 'SAIDA', 15, '2026-10-09'), category: 'DESPESA_OPERACIONAL' },
         { ...movement('repasse', 'RETIRADA', 50, '2026-10-10'), category: 'REPASSE_INVESTIDOR_PARCEIRO' },
+        { ...movement('captacao', 'SAIDA', 4, '2026-10-11'), category: 'CUSTO_CAPTACAO' },
       ],
       monthlySnapshots: [],
     });
@@ -82,6 +83,8 @@ describe('buildMonthlyCashReportData', () => {
     expect(report.realizedFinancialRevenue).toBe(27);
     expect(report.operatingExpenses).toBe(15);
     expect(report.operatingResult).toBe(12);
+    expect(report.fundingCost).toBe(4);
+    expect(report.netProfit).toBe(8);
   });
 
   it('rejeita um mes invalido sem gerar relatorio', () => {
