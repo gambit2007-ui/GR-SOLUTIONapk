@@ -280,7 +280,7 @@ export const generateMonthlyCashReportPdf = async ({
 }: MonthlyCashReportParams) => {
   const [{ jsPDF }, autoTableModule] = await Promise.all([import('jspdf'), import('jspdf-autotable')]);
   const autoTable = autoTableModule.default as AutoTableFn;
-  const report = buildMonthlyCashReportData({ year, month, cashMovements, monthlySnapshots });
+  const report = buildMonthlyCashReportData({ year, month, cashMovements, loans, monthlySnapshots });
   const loanById = new Map(loans.map((loan) => [loan.id, loan]));
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageWidth = doc.internal.pageSize.getWidth();
