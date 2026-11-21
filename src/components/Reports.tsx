@@ -90,6 +90,12 @@ interface MonthlyData {
   key: string;
   month: string;
   lucro: number;
+  principalRecovered: number;
+  interestReceived: number;
+  lateFeesReceived: number;
+  serviceFeesReceived: number;
+  operatingExpenses: number;
+  operatingResult: number;
   recebido: number;
   recebimentosPrevistos: number;
   emprestado: number;
@@ -107,6 +113,16 @@ interface MonthlyData {
   overdueAmount: number;
   projectedProfit: number;
 }
+
+const OPERATING_EXPENSE_CATEGORIES = new Set<CashOutflowReportCategory>([
+  'PRO_LABORE',
+  'DESPESA_OPERACIONAL',
+  'DAS',
+  'IMPOSTO_MEI',
+  'DESPESA_CONTABIL',
+  'MARKETING',
+  'COMISSAO',
+]);
 
 const Reports: React.FC<ReportsProps> = ({
   loans,
@@ -137,6 +153,8 @@ const Reports: React.FC<ReportsProps> = ({
   });
 
   const roundMoney = (value: number) => Number((Number.isFinite(value) ? value : 0).toFixed(2));
+  const formatCurrency = (value: number) =>
+    Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   const monthNamesUpper = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
   const createEmptyOutflowCategoryTotals = (): OutflowCategoryTotals =>
     CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS.reduce((totals, option) => {
@@ -524,10 +542,24 @@ const Reports: React.FC<ReportsProps> = ({
 
     for (let monthIndex = 0; monthIndex <= lastMonthIndex; monthIndex += 1) {
       const key = `${reportYear}-${String(monthIndex + 1).padStart(2, '0')}`;
+      const fiscalMetrics = fiscalData.monthly[key] || {
+        principalRecovered: 0,
+        interestReceived: 0,
+        lateFeesReceived: 0,
+        serviceFeesReceived: 0,
+        taxableRevenue: 0,
+        totalPaid: 0,
+      };
       months[key] = {
         key,
         month: getMonthShortLabel(monthIndex, reportYear),
-        lucro: roundMoney(Number(fiscalData.monthly[key]?.taxableRevenue || 0)),
+        lucro: roundMoney(Number(fiscalMetrics.taxableRevenue || 0)),
+        principalRecovered: roundMoney(Number(fiscalMetrics.principalRecovered || 0)),
+        interestReceived: roundMoney(Number(fiscalMetrics.interestReceived || 0)),
+        lateFeesReceived: roundMoney(Number(fiscalMetrics.lateFeesReceived || 0)),
+        serviceFeesReceived: roundMoney(Number(fiscalMetrics.serviceFeesReceived || 0)),
+        operatingExpenses: 0,
+        operatingResult: 0,
         recebido: 0,
         recebimentosPrevistos: 0,
         emprestado: 0,
@@ -581,6 +613,9 @@ const Reports: React.FC<ReportsProps> = ({
       if (isCategorizedOutflowMovement(movement)) {
         const category = resolveCashOutflowCategory(movement);
         months[key].saidasPorCategoria[category] = roundMoney(months[key].saidasPorCategoria[category] + amount);
+        if (OPERATING_EXPENSE_CATEGORIES.has(category)) {
+          months[key].operatingExpenses = roundMoney(months[key].operatingExpenses + amount);
+        }
       }
     });
 
@@ -637,6 +672,10 @@ const Reports: React.FC<ReportsProps> = ({
         months[key] = {
           ...months[key],
           lucro: snapshot.realProfit,
+          principalRecovered: snapshot.principalReceived,
+          interestReceived: snapshot.interestReceived,
+          lateFeesReceived: snapshot.lateFeesReceived,
+          serviceFeesReceived: snapshot.serviceFeesReceived,
           recebido: snapshot.totalReceived ?? months[key].recebido,
           recebimentosPrevistos: snapshot.projectedReceipts ?? months[key].recebimentosPrevistos,
           emprestado: snapshot.lentAmount,
@@ -657,6 +696,7 @@ const Reports: React.FC<ReportsProps> = ({
           projectedProfit: snapshot.projectedProfit ?? months[key].projectedProfit,
         };
       }
+      months[key].operatingResult = roundMoney(months[key].lucro - months[key].operatingExpenses);
     });
 
     return Object.keys(months)
@@ -1288,14 +1328,59 @@ const Reports: React.FC<ReportsProps> = ({
 
                     <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
-                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Real do Mes</p>
+                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Receita Financeira Realizada</p>
                         <p className={`text-2xl font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
                           R$ {data.lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
                         <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
-                          Baseado em juros, multas e taxas
+                          Juros + multas + taxas efetivamente recebidos
                         </p>
                       </div>
+
+                      <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
+                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Realizado do Mes</p>
+                        <p className={`text-2xl font-black ${data.operatingResult >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                          R$ {data.operatingResult.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </p>
+                        <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
+                          Receita financeira menos despesas operacionais
+                        </p>
+                      </div>
+                    <section className="rounded-2xl border border-[#BF953F]/20 bg-[#BF953F]/[0.04] p-4 sm:col-span-2" aria-label="Composicao do lucro mensal">
+                      <div className="mb-4">
+                        <h4 className="text-[10px] font-black text-[#F5D77B] uppercase tracking-widest">Como o lucro realizado e calculado</h4>
+                        <p className="mt-1 text-[9px] text-zinc-500">Somente valores efetivamente registrados no mes entram no resultado.</p>
+                      </div>
+                      <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
+                        <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
+                          <span className="text-zinc-400">(+) Juros recebidos</span>
+                          <strong className="text-[#F5D77B]">{formatCurrency(data.interestReceived)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
+                          <span className="text-zinc-400">(+) Multas recebidas</span>
+                          <strong className="text-[#F5D77B]">{formatCurrency(data.lateFeesReceived)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
+                          <span className="text-zinc-400">(+) Taxas recebidas</span>
+                          <strong className="text-[#F5D77B]">{formatCurrency(data.serviceFeesReceived)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
+                          <span className="text-zinc-400">(=) Receita financeira realizada</span>
+                          <strong className="text-white">{formatCurrency(data.lucro)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
+                          <span className="text-zinc-400">(-) Despesas operacionais</span>
+                          <strong className="text-red-400">{formatCurrency(data.operatingExpenses)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-[#BF953F]/30 pb-2 text-[10px]">
+                          <span className="font-black text-[#F5D77B]">(=) Lucro realizado</span>
+                          <strong className={data.operatingResult >= 0 ? 'text-emerald-400' : 'text-red-400'}>{formatCurrency(data.operatingResult)}</strong>
+                        </div>
+                      </div>
+                      <p className="mt-4 text-[9px] leading-relaxed text-zinc-500">
+                        Principal recuperado: <strong className="text-zinc-300">{formatCurrency(data.principalRecovered)}</strong> recompõe o capital e nao entra como lucro. Aportes, emprestimos concedidos, reinvestimentos, repasses a investidores, devolucoes de aporte e estornos tambem ficam fora deste calculo.
+                      </p>
+                    </section>
 
                       <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl relative group cursor-help">
                         <div className="flex items-center justify-between gap-3 mb-2">
@@ -1312,7 +1397,7 @@ const Reports: React.FC<ReportsProps> = ({
                         <div className="absolute bottom-full left-0 mb-2 w-64 p-4 bg-[#0a0a0a] border border-zinc-800 rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl transform translate-y-2 group-hover:translate-y-0">
                           <p className="text-[8px] font-black text-[#BF953F] uppercase tracking-widest mb-2">ROI da Carteira</p>
                           <p className="text-[10px] text-zinc-500 leading-relaxed">
-                            Retorno percentual obtido sobre o capital emprestado no período selecionado.
+                            Receita financeira realizada sobre o capital emprestado no periodo selecionado.
                           </p>
                         </div>
                       </div>
@@ -1377,7 +1462,7 @@ const Reports: React.FC<ReportsProps> = ({
                               style={{ fill: '#ef4444', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
-                          <Bar dataKey="lucro" name="Lucro Real" fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
+                          <Bar dataKey="lucro" name="Receita Financ." fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
                             <LabelList 
                               dataKey="lucro" 
                               position="top" 
