@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CashMovement } from '../../types';
+import type { Loan } from '../../types';
 import { buildMonthlyCashReportData } from '../monthlyCashReportPdf';
 
 const movement = (id: string, type: CashMovement['type'], amount: number, date: string): CashMovement => ({
@@ -48,6 +49,39 @@ describe('buildMonthlyCashReportData', () => {
     expect(report.totalEntries).toBe(500);
     expect(report.totalExits).toBe(175);
     expect(report.closingCash).toBe(325);
+  });
+
+  it('separa principal recuperado, receita financeira e despesas operacionais', () => {
+    const loan = {
+      id: 'loan-1',
+      installments: [{
+        status: 'PAID',
+        paidAt: '2026-10-08',
+        paymentBreakdown: {
+          principalPaid: 100,
+          interestPaid: 20,
+          lateFeePaid: 5,
+          serviceFeePaid: 2,
+        },
+      }],
+      renewalHistory: [],
+      fiscalPaymentEntries: [],
+    } as unknown as Loan;
+    const report = buildMonthlyCashReportData({
+      year: 2026,
+      month: 10,
+      loans: [loan],
+      cashMovements: [
+        { ...movement('despesa', 'SAIDA', 15, '2026-10-09'), category: 'DESPESA_OPERACIONAL' },
+        { ...movement('repasse', 'RETIRADA', 50, '2026-10-10'), category: 'REPASSE_INVESTIDOR_PARCEIRO' },
+      ],
+      monthlySnapshots: [],
+    });
+
+    expect(report.principalRecovered).toBe(100);
+    expect(report.realizedFinancialRevenue).toBe(27);
+    expect(report.operatingExpenses).toBe(15);
+    expect(report.operatingResult).toBe(12);
   });
 
   it('rejeita um mes invalido sem gerar relatorio', () => {
