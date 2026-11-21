@@ -36,7 +36,6 @@ import {
 } from '../utils/loanCompat';
 import { getInstallmentOutstanding } from '../utils/financialEngine';
 import { canCloseMonth, getLocalISODate } from '../utils/dateTime';
-import { calculatePortfolioRoi } from '../utils/portfolioRoi';
 import {
   calculateNetReceivedFromCashMovements,
   groupReceivedCashByInvestor,
@@ -50,9 +49,14 @@ import {
   CASH_INFLOW_CATEGORY_OPTIONS,
   CASH_OUTFLOW_REPORT_CATEGORY_OPTIONS,
   CashOutflowReportCategory,
+  isFundingCostCategory,
+  isOperatingExpenseCategory,
   isLoanCashOutflowMovement,
   resolveCashOutflowCategory,
+  sumFundingCostsByCategory,
+  sumOperatingExpensesByCategory,
 } from '../utils/cashCategories';
+import { calculateNetProfit, calculateNetRoi } from '../utils/netProfit';
 import { enableAccessControlForCurrentUser } from '../services/accessControlService';
 import { getCustomerCount } from '../services/customerService';
 import type { BackupPayload } from '../services/backupService';
@@ -89,20 +93,22 @@ type OutflowCategoryTotals = Record<CashOutflowReportCategory, number>;
 interface MonthlyData {
   key: string;
   month: string;
-  lucro: number;
+  financialRevenue: number;
   principalRecovered: number;
   interestReceived: number;
   lateFeesReceived: number;
   serviceFeesReceived: number;
   operatingExpenses: number;
   operatingResult: number;
+  fundingCost: number;
+  netProfit: number;
   recebido: number;
   recebimentosPrevistos: number;
   emprestado: number;
   entradas: number;
   saidas: number;
   saidasPorCategoria: OutflowCategoryTotals;
-  roi: number;
+  roi: number | null;
   openingCash: number;
   closingCash: number;
   movementCount: number;
@@ -113,16 +119,6 @@ interface MonthlyData {
   overdueAmount: number;
   projectedProfit: number;
 }
-
-const OPERATING_EXPENSE_CATEGORIES = new Set<CashOutflowReportCategory>([
-  'PRO_LABORE',
-  'DESPESA_OPERACIONAL',
-  'DAS',
-  'IMPOSTO_MEI',
-  'DESPESA_CONTABIL',
-  'MARKETING',
-  'COMISSAO',
-]);
 
 const Reports: React.FC<ReportsProps> = ({
   loans,
@@ -161,13 +157,22 @@ const Reports: React.FC<ReportsProps> = ({
       totals[option.value] = 0;
       return totals;
     }, {} as OutflowCategoryTotals);
-  const formatPercentage = (value: number) =>
-    Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
+  const formatPercentage = (value: number | null) =>
+    value === null
+      ? 'N/D'
+      : Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + '%';
   const formatChartCurrency = (value: unknown) => {
     const parsed = Number(value || 0);
     return parsed > 0 ? `R$ ${parsed.toLocaleString('pt-BR')}` : '';
   };
-  const getRoiColorClass = (roi: number) => {
+  const formatChartLabel = (value: unknown) => {
+    const parsed = Number(value || 0);
+    if (parsed === 0) return '';
+    if (Math.abs(parsed) >= 1000) return `R$ ${(parsed / 1000).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}k`;
+    return `R$ ${parsed.toLocaleString('pt-BR', { maximumFractionDigits: 0 })}`;
+  };
+  const getRoiColorClass = (roi: number | null) => {
+    if (roi === null) return 'text-zinc-500';
     if (roi >= 15) return 'text-emerald-500';
     if (roi >= 8) return 'text-[#BF953F]';
     return 'text-red-500';
@@ -553,13 +558,15 @@ const Reports: React.FC<ReportsProps> = ({
       months[key] = {
         key,
         month: getMonthShortLabel(monthIndex, reportYear),
-        lucro: roundMoney(Number(fiscalMetrics.taxableRevenue || 0)),
+        financialRevenue: roundMoney(Number(fiscalMetrics.taxableRevenue || 0)),
         principalRecovered: roundMoney(Number(fiscalMetrics.principalRecovered || 0)),
         interestReceived: roundMoney(Number(fiscalMetrics.interestReceived || 0)),
         lateFeesReceived: roundMoney(Number(fiscalMetrics.lateFeesReceived || 0)),
         serviceFeesReceived: roundMoney(Number(fiscalMetrics.serviceFeesReceived || 0)),
         operatingExpenses: 0,
         operatingResult: 0,
+        fundingCost: 0,
+        netProfit: 0,
         recebido: 0,
         recebimentosPrevistos: 0,
         emprestado: 0,
@@ -613,8 +620,11 @@ const Reports: React.FC<ReportsProps> = ({
       if (isCategorizedOutflowMovement(movement)) {
         const category = resolveCashOutflowCategory(movement);
         months[key].saidasPorCategoria[category] = roundMoney(months[key].saidasPorCategoria[category] + amount);
-        if (OPERATING_EXPENSE_CATEGORIES.has(category)) {
+        if (isOperatingExpenseCategory(category)) {
           months[key].operatingExpenses = roundMoney(months[key].operatingExpenses + amount);
+        }
+        if (isFundingCostCategory(category)) {
+          months[key].fundingCost = roundMoney(months[key].fundingCost + amount);
         }
       }
     });
@@ -671,7 +681,7 @@ const Reports: React.FC<ReportsProps> = ({
       if (snapshot) {
         months[key] = {
           ...months[key],
-          lucro: snapshot.realProfit,
+          financialRevenue: snapshot.financialRevenue ?? snapshot.realProfit,
           principalRecovered: snapshot.principalReceived,
           interestReceived: snapshot.interestReceived,
           lateFeesReceived: snapshot.lateFeesReceived,
@@ -684,7 +694,16 @@ const Reports: React.FC<ReportsProps> = ({
           saidasPorCategoria: snapshot.outflowCategoryTotals
             ? { ...months[key].saidasPorCategoria, ...snapshot.outflowCategoryTotals }
             : months[key].saidasPorCategoria,
-          roi: snapshot.roi,
+          operatingExpenses: snapshot.operatingExpenses
+            ?? (snapshot.outflowCategoryTotals
+              ? sumOperatingExpensesByCategory(snapshot.outflowCategoryTotals)
+              : months[key].operatingExpenses),
+          fundingCost: snapshot.fundingCost
+            ?? (snapshot.outflowCategoryTotals
+              ? sumFundingCostsByCategory(snapshot.outflowCategoryTotals)
+              : months[key].fundingCost),
+          netProfit: snapshot.netProfit ?? months[key].netProfit,
+          roi: snapshot.netRoi ?? months[key].roi,
           openingCash: snapshot.openingCash,
           closingCash: snapshot.closingCash,
           movementCount: snapshot.movementCount,
@@ -696,17 +715,18 @@ const Reports: React.FC<ReportsProps> = ({
           projectedProfit: snapshot.projectedProfit ?? months[key].projectedProfit,
         };
       }
-      months[key].operatingResult = roundMoney(months[key].lucro - months[key].operatingExpenses);
+      months[key].operatingResult = roundMoney(months[key].financialRevenue - months[key].operatingExpenses);
+      months[key].netProfit = snapshot?.netProfit ?? calculateNetProfit(
+        months[key].financialRevenue,
+        months[key].operatingExpenses,
+        months[key].fundingCost,
+      );
+      months[key].roi = snapshot?.netRoi ?? calculateNetRoi(months[key].netProfit, months[key].emprestado);
     });
 
     return Object.keys(months)
       .sort()
-      .map((key) => ({
-        ...months[key],
-        roi: isMonthClosed(key)
-          ? months[key].roi
-          : calculatePortfolioRoi(months[key].lucro, months[key].emprestado),
-      }));
+      .map((key) => months[key]);
   };
 
   const monthlyData = useMemo(
@@ -872,9 +892,15 @@ const Reports: React.FC<ReportsProps> = ({
         interestReceived: fiscalMetrics.interestReceived,
         lateFeesReceived: fiscalMetrics.lateFeesReceived,
         serviceFeesReceived: fiscalMetrics.serviceFeesReceived,
-        realProfit: data.lucro,
+        // Preserves the legacy field while persisting explicit net-result metrics.
+        realProfit: data.financialRevenue,
+        financialRevenue: data.financialRevenue,
+        operatingExpenses: data.operatingExpenses,
+        fundingCost: data.fundingCost,
+        netProfit: data.netProfit,
+        netRoi: data.roi ?? undefined,
         lentAmount: data.emprestado,
-        roi: data.roi,
+        roi: data.roi ?? 0,
         movementCount: data.movementCount,
         createdLoansCount: data.createdLoansCount,
         totalReceived: data.recebido,
@@ -1173,14 +1199,14 @@ const Reports: React.FC<ReportsProps> = ({
                 <Info size={10} className="text-zinc-700" />
               </div>
               <p className="text-xl font-black text-white">
-                R$ {(chartData.reduce((acc, curr) => acc + curr.lucro, 0) / (chartData.length || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                R$ {(chartData.reduce((acc, curr) => acc + curr.netProfit, 0) / (chartData.length || 1)).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
               </p>
               
               {/* Tooltip */}
               <div className="absolute bottom-full left-0 mb-2 w-56 p-4 bg-[#0a0a0a] border border-zinc-800 rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl transform translate-y-2 group-hover:translate-y-0">
                 <p className="text-[8px] font-black text-[#BF953F] uppercase tracking-widest mb-2">Analise de Media</p>
                 <p className="text-[10px] text-zinc-500 leading-relaxed">
-                  Media aritmetica do lucro real (juros recebidos) nos ultimos {chartData.length} meses.
+                  Media aritmetica do lucro liquido realizado nos ultimos {chartData.length} meses.
                 </p>
               </div>
             </div>
@@ -1191,7 +1217,7 @@ const Reports: React.FC<ReportsProps> = ({
                 <Info size={10} className="text-zinc-700" />
               </div>
               <p className="text-xl font-black text-white">
-                {chartData.length > 0 ? chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).month : '---'}
+                {chartData.length > 0 ? chartData.reduce((prev, current) => (prev.netProfit > current.netProfit) ? prev : current).month : '---'}
               </p>
 
               {/* Tooltip */}
@@ -1199,7 +1225,7 @@ const Reports: React.FC<ReportsProps> = ({
                 <p className="text-[8px] font-black text-emerald-500 uppercase tracking-widest mb-2">Pico de Desempenho</p>
                 {chartData.length > 0 ? (
                   <p className="text-[10px] text-zinc-500 leading-relaxed">
-                    Mes com maior volume de juros recebidos: {chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).month} (R$ {chartData.reduce((prev, current) => (prev.lucro > current.lucro) ? prev : current).lucro.toLocaleString('pt-BR')})
+                    Mes com maior lucro liquido: {chartData.reduce((prev, current) => (prev.netProfit > current.netProfit) ? prev : current).month} (R$ {chartData.reduce((prev, current) => (prev.netProfit > current.netProfit) ? prev : current).netProfit.toLocaleString('pt-BR')})
                   </p>
                 ) : (
                   <p className="text-[10px] text-zinc-500">Dados insuficientes para analise.</p>
@@ -1244,9 +1270,9 @@ const Reports: React.FC<ReportsProps> = ({
                   </div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Lucro Real</span>
-                        <span className={`text-xs font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
-                          R$ {data.lucro.toLocaleString('pt-BR')}
+                        <span className="text-[8px] font-black text-zinc-600 uppercase tracking-widest block">Lucro Liquido</span>
+                        <span className={`text-xs font-black ${data.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                          R$ {data.netProfit.toLocaleString('pt-BR')}
                         </span>
                     </div>
                     <ChevronDown size={16} className={`text-zinc-500 transition-transform ${expandedMonth === data.month ? 'rotate-180' : ''}`} />
@@ -1326,11 +1352,11 @@ const Reports: React.FC<ReportsProps> = ({
                       </div>
                     </div>
 
-                    <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                       <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
                         <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Receita Financeira Realizada</p>
-                        <p className={`text-2xl font-black ${data.lucro >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
-                          R$ {data.lucro.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        <p className={`text-2xl font-black ${data.financialRevenue >= 0 ? 'text-[#BF953F]' : 'text-red-500'}`}>
+                          R$ {data.financialRevenue.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
                         <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
                           Juros + multas + taxas efetivamente recebidos
@@ -1338,7 +1364,7 @@ const Reports: React.FC<ReportsProps> = ({
                       </div>
 
                       <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
-                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Realizado do Mes</p>
+                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Operacional do Mes</p>
                         <p className={`text-2xl font-black ${data.operatingResult >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
                           R$ {data.operatingResult.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
                         </p>
@@ -1346,7 +1372,16 @@ const Reports: React.FC<ReportsProps> = ({
                           Receita financeira menos despesas operacionais
                         </p>
                       </div>
-                    <section className="rounded-2xl border border-[#BF953F]/20 bg-[#BF953F]/[0.04] p-4 sm:col-span-2" aria-label="Composicao do lucro mensal">
+                      <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl">
+                        <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest mb-2">Lucro Liquido Realizado</p>
+                        <p className={`text-2xl font-black ${data.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                          R$ {data.netProfit.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                        </p>
+                        <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
+                          Apos despesas operacionais e custo de captacao
+                        </p>
+                      </div>
+                    <section className="rounded-2xl border border-[#BF953F]/20 bg-[#BF953F]/[0.04] p-4 sm:col-span-2 lg:col-span-3" aria-label="Composicao do lucro mensal">
                       <div className="mb-4">
                         <h4 className="text-[10px] font-black text-[#F5D77B] uppercase tracking-widest">Como o lucro realizado e calculado</h4>
                         <p className="mt-1 text-[9px] text-zinc-500">Somente valores efetivamente registrados no mes entram no resultado.</p>
@@ -1366,38 +1401,46 @@ const Reports: React.FC<ReportsProps> = ({
                         </div>
                         <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
                           <span className="text-zinc-400">(=) Receita financeira realizada</span>
-                          <strong className="text-white">{formatCurrency(data.lucro)}</strong>
+                          <strong className="text-white">{formatCurrency(data.financialRevenue)}</strong>
                         </div>
                         <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
                           <span className="text-zinc-400">(-) Despesas operacionais</span>
                           <strong className="text-red-400">{formatCurrency(data.operatingExpenses)}</strong>
                         </div>
                         <div className="flex items-center justify-between gap-4 border-b border-[#BF953F]/30 pb-2 text-[10px]">
-                          <span className="font-black text-[#F5D77B]">(=) Lucro realizado</span>
+                          <span className="font-black text-[#F5D77B]">(=) Lucro operacional</span>
                           <strong className={data.operatingResult >= 0 ? 'text-emerald-400' : 'text-red-400'}>{formatCurrency(data.operatingResult)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-zinc-800 pb-2 text-[10px]">
+                          <span className="text-zinc-400">(-) Custo de captacao</span>
+                          <strong className="text-red-400">{formatCurrency(data.fundingCost)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between gap-4 border-b border-[#BF953F]/30 pb-2 text-[10px]">
+                          <span className="font-black text-[#F5D77B]">(=) Lucro liquido realizado</span>
+                          <strong className={data.netProfit >= 0 ? 'text-emerald-400' : 'text-red-400'}>{formatCurrency(data.netProfit)}</strong>
                         </div>
                       </div>
                       <p className="mt-4 text-[9px] leading-relaxed text-zinc-500">
-                        Principal recuperado: <strong className="text-zinc-300">{formatCurrency(data.principalRecovered)}</strong> recompõe o capital e nao entra como lucro. Aportes, emprestimos concedidos, reinvestimentos, repasses a investidores, devolucoes de aporte e estornos tambem ficam fora deste calculo.
+                        Principal recuperado: <strong className="text-zinc-300">{formatCurrency(data.principalRecovered)}</strong> recompõe o capital e nao entra como lucro. Aportes, emprestimos concedidos, reinvestimentos, repasses/devolucoes de capital e estornos ficam fora. A remuneracao de terceiros so reduz o resultado quando registrada como custo de captacao.
                       </p>
                     </section>
 
                       <div className="p-4 bg-[#000000]/50 border border-zinc-900 rounded-2xl relative group cursor-help">
                         <div className="flex items-center justify-between gap-3 mb-2">
-                          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">ROI da Carteira</p>
+                          <p className="text-[9px] font-black text-zinc-500 uppercase tracking-widest">ROI Liquido das Concessoes</p>
                           <Info size={12} className="text-zinc-700" />
                         </div>
                         <p className={`text-2xl font-black ${getRoiColorClass(data.roi)}`}>
                           {formatPercentage(data.roi)}
                         </p>
                         <p className="text-[9px] text-zinc-600 uppercase tracking-widest mt-3">
-                          Retorno sobre capital emprestado
+                          Lucro liquido sobre capital emprestado
                         </p>
 
                         <div className="absolute bottom-full left-0 mb-2 w-64 p-4 bg-[#0a0a0a] border border-zinc-800 rounded-2xl opacity-0 group-hover:opacity-100 transition-all pointer-events-none z-50 shadow-2xl transform translate-y-2 group-hover:translate-y-0">
-                          <p className="text-[8px] font-black text-[#BF953F] uppercase tracking-widest mb-2">ROI da Carteira</p>
+                          <p className="text-[8px] font-black text-[#BF953F] uppercase tracking-widest mb-2">ROI Liquido das Concessoes</p>
                           <p className="text-[10px] text-zinc-500 leading-relaxed">
-                            Receita financeira realizada sobre o capital emprestado no periodo selecionado.
+                            Lucro liquido realizado, apos despesas e custo de captacao, dividido pelo capital emprestado no periodo. Sem concessao no mes, o indicador fica como N/D.
                           </p>
                         </div>
                       </div>
@@ -1438,36 +1481,44 @@ const Reports: React.FC<ReportsProps> = ({
                             iconSize={8}
                             wrapperStyle={{ paddingBottom: '20px', fontSize: '9px', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em' }}
                           />
-                          <Bar dataKey="entradas" name="Entradas" fill="#10b981" radius={[6, 6, 0, 0]} barSize={45}>
+                          <Bar dataKey="entradas" name="Entradas" fill="#10b981" radius={[6, 6, 0, 0]} barSize={28}>
                             <LabelList 
                               dataKey="entradas" 
                               position="top" 
-                              formatter={formatChartCurrency}
+                              formatter={formatChartLabel}
                               style={{ fill: '#10b981', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
-                          <Bar dataKey="recebimentosPrevistos" name="Previsao Receb." fill="#38bdf8" radius={[6, 6, 0, 0]} barSize={45}>
+                          <Bar dataKey="recebimentosPrevistos" name="Previsao Receb." fill="#38bdf8" radius={[6, 6, 0, 0]} barSize={28}>
                             <LabelList
                               dataKey="recebimentosPrevistos"
                               position="top"
-                              formatter={formatChartCurrency}
+                              formatter={formatChartLabel}
                               style={{ fill: '#38bdf8', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
-                          <Bar dataKey="saidas" name="Saidas" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={45}>
+                          <Bar dataKey="saidas" name="Saidas" fill="#ef4444" radius={[6, 6, 0, 0]} barSize={28}>
                             <LabelList 
                               dataKey="saidas" 
                               position="top" 
-                              formatter={formatChartCurrency}
+                              formatter={formatChartLabel}
                               style={{ fill: '#ef4444', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
-                          <Bar dataKey="lucro" name="Receita Financ." fill="#BF953F" radius={[6, 6, 0, 0]} barSize={45}>
+                          <Bar dataKey="financialRevenue" name="Receita Financ." fill="#BF953F" radius={[6, 6, 0, 0]} barSize={28}>
                             <LabelList 
-                              dataKey="lucro" 
+                              dataKey="financialRevenue"
                               position="top" 
-                              formatter={formatChartCurrency}
+                              formatter={formatChartLabel}
                               style={{ fill: '#BF953F', fontSize: '9px', fontWeight: 900 }}
+                            />
+                          </Bar>
+                          <Bar dataKey="netProfit" name="Lucro Liquido" fill="#34d399" radius={[6, 6, 0, 0]} barSize={28}>
+                            <LabelList
+                              dataKey="netProfit"
+                              position="top"
+                              formatter={formatChartLabel}
+                              style={{ fill: '#34d399', fontSize: '9px', fontWeight: 900 }}
                             />
                           </Bar>
                         </BarChart>

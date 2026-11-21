@@ -2,9 +2,14 @@ import type { CashMovement, Loan, MonthlySnapshot } from '../types';
 import { resolveCashDelta } from './domainParsers';
 import {
   CASH_OUTFLOW_CATEGORY_LABELS,
+  isFundingCostCategory,
+  isOperatingExpenseCategory,
   resolveCashOutflowCategory,
+  sumFundingCostsByCategory,
+  sumOperatingExpensesByCategory,
 } from './cashCategories';
 import { normalizeInstallmentStatus } from './loanCompat';
+import { calculateNetProfit } from './netProfit';
 
 interface MonthlyCashReportParams {
   year: number;
@@ -38,6 +43,8 @@ export interface MonthlyCashReportData {
   realizedFinancialRevenue: number;
   operatingExpenses: number;
   operatingResult: number;
+  fundingCost: number;
+  netProfit: number;
   closedSnapshot?: MonthlySnapshot;
   rows: MonthlyCashReportRow[];
 }
@@ -108,17 +115,6 @@ const getMovementCategoryLabel = (movement: CashMovement, signedAmount: number) 
   signedAmount >= 0
     ? 'Entrada de caixa'
     : CASH_OUTFLOW_CATEGORY_LABELS[resolveCashOutflowCategory(movement)];
-
-const NON_OPERATING_OUTFLOW_CATEGORIES = new Set([
-  'EMPRESTIMO',
-  'DEVOLUCAO_APORTE',
-  'PAGAMENTO_EMPRESTIMO_EXTERNO',
-  'REPASSE_INVESTIDOR_PARCEIRO',
-  'REINVESTIMENTO',
-]);
-
-const isOperatingExpense = (movement: CashMovement) =>
-  !NON_OPERATING_OUTFLOW_CATEGORIES.has(resolveCashOutflowCategory(movement));
 
 const getMonthKey = (value: unknown): string | null => {
   const date = toDate(value);
@@ -207,16 +203,33 @@ export const buildMonthlyCashReportData = ({
     });
   });
 
-  const operatingExpenses = roundMoney(rows.reduce(
-    (total, row) => row.signedAmount < 0 && isOperatingExpense(row.movement)
+  const liveOperatingExpenses = roundMoney(rows.reduce(
+    (total, row) => row.signedAmount < 0 && isOperatingExpenseCategory(resolveCashOutflowCategory(row.movement))
+      ? total + Math.abs(row.signedAmount)
+      : total,
+    0,
+  ));
+  const liveFundingCost = roundMoney(rows.reduce(
+    (total, row) => row.signedAmount < 0 && isFundingCostCategory(resolveCashOutflowCategory(row.movement))
       ? total + Math.abs(row.signedAmount)
       : total,
     0,
   ));
   const snapshot = monthlySnapshots.find((item) => item.month === periodKey);
   const realizedFinancialRevenue = snapshot
-    ? roundMoney(snapshot.realProfit)
+    ? roundMoney(snapshot.financialRevenue ?? snapshot.realProfit)
     : financialMetrics.realizedFinancialRevenue;
+  const operatingExpenses = snapshot?.operatingExpenses
+    ?? (snapshot?.outflowCategoryTotals
+      ? sumOperatingExpensesByCategory(snapshot.outflowCategoryTotals)
+      : liveOperatingExpenses);
+  const fundingCost = snapshot?.fundingCost
+    ?? (snapshot?.outflowCategoryTotals
+      ? sumFundingCostsByCategory(snapshot.outflowCategoryTotals)
+      : liveFundingCost);
+  const operatingResult = roundMoney(realizedFinancialRevenue - operatingExpenses);
+  const netProfit = snapshot?.netProfit
+    ?? calculateNetProfit(realizedFinancialRevenue, operatingExpenses, fundingCost);
 
   return {
     periodLabel: `${monthNames[month - 1]} de ${year}`,
@@ -230,7 +243,9 @@ export const buildMonthlyCashReportData = ({
     principalRecovered: snapshot ? roundMoney(snapshot.principalReceived) : financialMetrics.principalRecovered,
     realizedFinancialRevenue,
     operatingExpenses,
-    operatingResult: roundMoney(realizedFinancialRevenue - operatingExpenses),
+    operatingResult,
+    fundingCost,
+    netProfit,
     closedSnapshot: snapshot,
     rows,
   };
@@ -310,7 +325,9 @@ export const generateMonthlyCashReportPdf = async ({
       ['Principal recuperado (nao e lucro)', formatCurrency(report.principalRecovered)],
       ['Receita financeira realizada', formatCurrency(report.realizedFinancialRevenue)],
       ['Despesas operacionais', formatCurrency(report.operatingExpenses)],
-      ['Lucro realizado (apos despesas operacionais)', formatCurrency(report.operatingResult)],
+      ['Lucro operacional', formatCurrency(report.operatingResult)],
+      ['Custo de captacao', formatCurrency(report.fundingCost)],
+      ['Lucro liquido realizado', formatCurrency(report.netProfit)],
       report.closedSnapshot
         ? ['Saldo final do fechamento registrado', formatCurrency(report.closedSnapshot.closingCash)]
         : ['Fechamento mensal', 'Nao registrado'],

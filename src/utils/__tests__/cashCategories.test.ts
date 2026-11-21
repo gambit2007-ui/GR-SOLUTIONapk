@@ -29,6 +29,12 @@ describe('categorias do caixa', () => {
     expect(CASH_OUTFLOW_CATEGORY_OPTIONS.some((option) => option.value === 'IMPOSTO_MEI')).toBe(false);
   });
 
+  it('classifica custo de captacao sem confundir com devolucao de capital', () => {
+    expect(parseCashOutflowCategory('CUSTO_CAPTACAO')).toBe('CUSTO_CAPTACAO');
+    expect(CASH_OUTFLOW_CATEGORY_LABELS.CUSTO_CAPTACAO)
+      .toBe('Custo de captação / remuneração de investidor');
+  });
+
   it('separa recebimento de contrato de entrada manual', () => {
     expect(resolveCashInflowCategory(movement({ loanId: 'loan-1', type: 'PAGAMENTO' })))
       .toBe('RECEBIMENTO_CONTRATO');

@@ -7,6 +7,7 @@ export const CASH_OUTFLOW_CATEGORY_OPTIONS: ReadonlyArray<{
   { value: 'DEVOLUCAO_APORTE', label: 'Devolução de aporte' },
   { value: 'PAGAMENTO_EMPRESTIMO_EXTERNO', label: 'Pagamento de empréstimo externo' },
   { value: 'REPASSE_INVESTIDOR_PARCEIRO', label: 'Repasse para investidor/parceiro' },
+  { value: 'CUSTO_CAPTACAO', label: 'Custo de captação / remuneração de investidor' },
   { value: 'PRO_LABORE', label: 'Pró-labore' },
   { value: 'DESPESA_OPERACIONAL', label: 'Despesa operacional' },
   { value: 'DAS', label: 'DAS' },
@@ -70,6 +71,38 @@ export const parseCashOutflowCategory = (value: unknown): CashOutflowCategory | 
   const normalized = String(value ?? '').trim().toUpperCase() as CashOutflowCategory;
   return CASH_OUTFLOW_CATEGORY_VALUES.has(normalized) ? normalized : undefined;
 };
+
+const OPERATING_EXPENSE_CATEGORY_VALUES = new Set<CashOutflowCategory>([
+  'PRO_LABORE',
+  'DESPESA_OPERACIONAL',
+  'DAS',
+  'IMPOSTO_MEI',
+  'DESPESA_CONTABIL',
+  'MARKETING',
+  'COMISSAO',
+]);
+
+export const isOperatingExpenseCategory = (category: CashOutflowReportCategory): boolean =>
+  OPERATING_EXPENSE_CATEGORY_VALUES.has(category as CashOutflowCategory);
+
+export const isFundingCostCategory = (category: CashOutflowReportCategory): boolean =>
+  category === 'CUSTO_CAPTACAO';
+
+export const sumOperatingExpensesByCategory = (
+  totals: Partial<Record<CashOutflowReportCategory, number>>,
+): number => Number(Object.entries(totals).reduce(
+  (sum, [category, amount]) => isOperatingExpenseCategory(category as CashOutflowReportCategory)
+    ? sum + Number(amount || 0)
+    : sum,
+0).toFixed(2));
+
+export const sumFundingCostsByCategory = (
+  totals: Partial<Record<CashOutflowReportCategory, number>>,
+): number => Number(Object.entries(totals).reduce(
+  (sum, [category, amount]) => isFundingCostCategory(category as CashOutflowReportCategory)
+    ? sum + Number(amount || 0)
+    : sum,
+0).toFixed(2));
 
 const CASH_INFLOW_CATEGORY_VALUES = new Set<CashInflowCategory>(
   CASH_INFLOW_CATEGORY_OPTIONS.map((option) => option.value),
