@@ -24,6 +24,8 @@ import {
 } from './utils/loanCompat';
 import { useAuthState } from './hooks/useAuthState';
 import { useRealtimeData } from './hooks/useRealtimeData';
+import { getViewDataStatus } from './utils/viewDataStatus';
+import { DataAvailability } from './components/DataAvailability';
 import { useToasts } from './hooks/useToasts';
 import { useViewport } from './hooks/useViewport';
 import { useAccessControlState } from './hooks/useAccessControlState';
@@ -83,7 +85,7 @@ const App: React.FC = () => {
   const handleRealtimeError = useCallback((message: string) => {
     showToast(message, 'error');
   }, [showToast]);
-  const activeDataUser = accessControl.authorized ? user : null;
+  const activeDataUser = !accessControl.loading && accessControl.authorized ? user : null;
   const {
     clientes: realtimeCustomers,
     contratos: realtimeLoans,
@@ -93,6 +95,8 @@ const App: React.FC = () => {
     caixa,
     isCustomersLoading: isRealtimeCustomersLoading,
     cashMovementsStatus,
+    statuses: dataStatuses,
+    reload: reloadData,
   } = useRealtimeData(activeDataUser, {
     loadCustomers: shouldLoadCustomers,
     loadLoans: shouldLoadLoans,
@@ -336,7 +340,10 @@ const App: React.FC = () => {
       );
     } catch (error: unknown) {
       reportAppError('cash.recalculate', error);
-      showToast('Erro ao recalcular o caixa', 'error');
+      const syncing = error instanceof Error && error.message === 'CAIXA_AGUARDANDO_SINCRONIZACAO';
+      showToast(syncing
+        ? 'Aguarde a sincronizacao dos movimentos e tente novamente. O saldo nao foi alterado.'
+        : 'Nao foi possivel concluir a reconciliacao. Atualize os dados e tente novamente.', 'error');
     }
   };
 
@@ -777,7 +784,9 @@ const App: React.FC = () => {
 
         <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#000000] p-3 sm:p-4 md:p-6">
           <Suspense fallback={<ViewLoadingFallback />}>
-            {renderCurrentView()}
+            <DataAvailability status={getViewDataStatus(currentView, dataStatuses)} onRetry={reloadData}>
+              {renderCurrentView()}
+            </DataAvailability>
           </Suspense>
         </div>
 

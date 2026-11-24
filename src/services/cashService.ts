@@ -1,10 +1,9 @@
 import {
   collection,
   doc,
-  getDocs,
+  getDocsFromServer,
   runTransaction,
   serverTimestamp,
-  setDoc,
   Transaction,
 } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -119,17 +118,24 @@ export const addCashMovement = async (payload: CashMovementPayload) => {
 };
 
 export const recalculateCashBalance = async (actor?: MovementActor): Promise<number> => {
-  const movementSnap = await getDocs(collection(db, 'cashMovement'));
-  const movements = movementSnap.docs.map((movementDoc) => parseCashMovement(movementDoc.id, movementDoc.data()));
+  return runTransaction(db, async (tx) => {
+    // Every financial writer updates caixa atomically with its movement. Read it
+    // first so a concurrent write retries this entire server-side ledger read.
+    await tx.get(caixaRef);
+    const movementSnap = await getDocsFromServer(collection(db, 'cashMovement'));
+    if (movementSnap.metadata.fromCache || movementSnap.metadata.hasPendingWrites) {
+      throw new Error('CAIXA_AGUARDANDO_SINCRONIZACAO');
+    }
+    const movements = movementSnap.docs.map((movementDoc) => parseCashMovement(movementDoc.id, movementDoc.data()));
+    const saldoCalculado = movements.reduce((acc, movement) => acc + resolveCashDelta(movement), 0);
+    const novoSaldo = Number(saldoCalculado.toFixed(2));
 
-  const saldoCalculado = movements.reduce((acc, movement) => acc + resolveCashDelta(movement), 0);
-  const novoSaldo = Number(saldoCalculado.toFixed(2));
-
-  await setDoc(caixaRef, {
-    value: novoSaldo,
-    reconciledByUid: actor?.uid || undefined,
-    reconciledAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
-  }, { merge: true });
-  return novoSaldo;
+    tx.set(caixaRef, sanitizeFirestorePayload({
+      value: novoSaldo,
+      reconciledByUid: actor?.uid || undefined,
+      reconciledAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    }), { merge: true });
+    return novoSaldo;
+  });
 };

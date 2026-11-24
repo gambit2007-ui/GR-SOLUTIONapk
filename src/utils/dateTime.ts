@@ -1,3 +1,40 @@
+// Date-only financial records represent a calendar day, not midnight UTC.
+// Timestamps retain their instant and continue to use the report's local zone.
+export const parseFinancialDate = (value: unknown): Date | null => {
+  if (value === null || value === undefined || value === '') return null;
+  let date: Date;
+  if (value instanceof Date) {
+    date = new Date(value);
+  } else if (typeof value === 'number') {
+    date = new Date(value);
+  } else if (typeof value === 'object' && typeof (value as { toDate?: unknown }).toDate === 'function') {
+    try {
+      const converted = (value as { toDate: () => unknown }).toDate();
+      if (!(converted instanceof Date)) return null;
+      date = new Date(converted);
+    } catch {
+      return null;
+    }
+  } else if (typeof value === 'string') {
+    const normalized = value.trim();
+    const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(normalized);
+    date = new Date(day ? `${normalized}T12:00:00` : normalized);
+    if (day && (
+      date.getFullYear() !== Number(day[1]) ||
+      date.getMonth() + 1 !== Number(day[2]) ||
+      date.getDate() !== Number(day[3])
+    )) return null;
+  } else {
+    return null;
+  }
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
+export const getFinancialMonthKey = (value: unknown): string | null => {
+  const date = parseFinancialDate(value);
+  return date ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}` : null;
+};
+
 export const getLocalISODate = (baseDate: Date = new Date()): string => {
   const date = new Date(baseDate);
   const year = date.getFullYear();

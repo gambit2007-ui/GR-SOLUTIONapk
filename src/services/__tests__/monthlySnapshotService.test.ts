@@ -1,6 +1,23 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canCloseMonth } from '../../utils/dateTime';
-import { generateMonthlySnapshot } from '../monthlySnapshotService';
+import { generateMonthlySnapshot, saveMonthlySnapshot } from '../monthlySnapshotService';
+
+const mocks = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }));
+vi.mock('../../firebase', () => ({ db: {} }));
+vi.mock('firebase/firestore', async (importOriginal) => ({
+  ...await importOriginal<typeof import('firebase/firestore')>(),
+  doc: (_db: unknown, ...path: string[]) => path.join('/'),
+  serverTimestamp: () => 'server-time',
+  runTransaction: async (_db: unknown, callback: (tx: typeof mocks) => Promise<void>) => callback(mocks),
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 7, 20, 12));
+  mocks.get.mockResolvedValue({ exists: () => false });
+});
+afterEach(() => vi.useRealTimers());
 
 describe('fechamento mensal', () => {
   const referenceDate = new Date(2026, 7, 20, 12, 0, 0);
@@ -16,7 +33,7 @@ describe('fechamento mensal', () => {
     expect(canCloseMonth('agosto-2026', referenceDate)).toBe(false);
   });
 
-  it('persiste receita e lucro liquido com campos distintos no fechamento', () => {
+  it('persiste receita, lucro liquido e a mesma versao gerada, sem reabrir o fechamento', async () => {
     const snapshot = generateMonthlySnapshot({
       month: '2026-07',
       openingCash: 1000,
@@ -47,5 +64,16 @@ describe('fechamento mensal', () => {
       netProfit: 100,
       netRoi: 10,
     });
+    const original = structuredClone(snapshot);
+    await saveMonthlySnapshot(snapshot);
+    expect(mocks.set).toHaveBeenCalledWith('monthlySnapshots/2026-07', expect.objectContaining({
+      schemaVersion: 3, financialRevenue: 135, netProfit: 100, netRoi: 10, status: 'CLOSED',
+    }));
+    expect(snapshot).toEqual(original);
+
+    mocks.set.mockClear();
+    mocks.get.mockResolvedValue({ exists: () => true });
+    await expect(saveMonthlySnapshot(snapshot)).rejects.toThrow('MES_JA_FECHADO');
+    expect(mocks.set).not.toHaveBeenCalled();
   });
 });

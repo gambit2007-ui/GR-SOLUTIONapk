@@ -1,42 +1,50 @@
-import { useEffect, useState } from 'react';
-import { User } from 'firebase/auth';
-import {
-  collection,
-  doc,
-  onSnapshot,
-  orderBy,
-  query,
-} from 'firebase/firestore';
+import { useCallback, useMemo, useState, useSyncExternalStore } from 'react';
+import type { User } from 'firebase/auth';
+import { collection, doc, onSnapshot, orderBy, query } from 'firebase/firestore';
 import { db } from '../firebase';
-import { CashMovement, Customer, FeeSettings, Loan, MonthlySnapshot } from '../types';
+import type { CashMovement, Customer, Loan, MonthlySnapshot } from '../types';
 import { parseMonthlySnapshot } from '../services/monthlySnapshotService';
-import { subscribeFeeSettings } from '../services/settingsService';
+import { parseFeeSettings } from '../services/settingsService';
 import { parseCashMovement, parseCustomer, parseLoan } from '../utils/domainParsers';
 import { DEFAULT_DAILY_LATE_FEE_RATE } from '../utils/lateFee';
+import { createRealtimeResource, type ResourceSubscription } from '../utils/realtimeResource';
 
-interface RealtimeDataState {
-  clientes: Customer[];
-  contratos: Loan[];
-  movimentacoes: CashMovement[];
-  monthlySnapshots: MonthlySnapshot[];
-  feeSettings: FeeSettings;
-  caixa: number;
-  isCustomersLoading: boolean;
-  cashMovementsStatus: 'idle' | 'loading' | 'ready' | 'error';
-}
+const emptyCustomers: Customer[] = [];
+const emptyLoans: Loan[] = [];
+const emptyMovements: CashMovement[] = [];
+const emptySnapshots: MonthlySnapshot[] = [];
+const defaultFees = { dailyLateFeeRate: DEFAULT_DAILY_LATE_FEE_RATE };
 
-const initialState: RealtimeDataState = {
-  clientes: [],
-  contratos: [],
-  movimentacoes: [],
-  monthlySnapshots: [],
-  feeSettings: {
-    dailyLateFeeRate: DEFAULT_DAILY_LATE_FEE_RATE,
-  },
-  caixa: 0,
-  isCustomersLoading: false,
-  cashMovementsStatus: 'idle',
-};
+const subscribeCustomers: ResourceSubscription<Customer[]> = (next, fail) => onSnapshot(
+  query(collection(db, 'clientes'), orderBy('createdAt', 'desc')), { includeMetadataChanges: true },
+  (snapshot) => next(snapshot.docs.map((item) => parseCustomer(item.id, item.data()))
+    .filter((item) => !item.archived && !item.archivedAt), !snapshot.metadata.fromCache), fail,
+);
+const subscribeLoans: ResourceSubscription<Loan[]> = (next, fail) => onSnapshot(
+  query(collection(db, 'loans'), orderBy('startDate', 'desc')), { includeMetadataChanges: true },
+  (snapshot) => next(snapshot.docs.map((item) => parseLoan(item.id, item.data())), !snapshot.metadata.fromCache), fail,
+);
+const subscribeMovements: ResourceSubscription<CashMovement[]> = (next, fail) => onSnapshot(
+  query(collection(db, 'cashMovement'), orderBy('date', 'desc')), { includeMetadataChanges: true },
+  (snapshot) => next(snapshot.docs.map((item) => parseCashMovement(item.id, item.data())), !snapshot.metadata.fromCache), fail,
+);
+const subscribeSnapshots: ResourceSubscription<MonthlySnapshot[]> = (next, fail) => onSnapshot(
+  query(collection(db, 'monthlySnapshots'), orderBy('month', 'desc')), { includeMetadataChanges: true },
+  (snapshot) => next(snapshot.docs.map((item) => parseMonthlySnapshot(item.id, item.data())), !snapshot.metadata.fromCache), fail,
+);
+const subscribeCash: ResourceSubscription<number> = (next, fail) => onSnapshot(
+  doc(db, 'settings', 'caixa'), { includeMetadataChanges: true },
+  (snapshot) => {
+    const raw = snapshot.exists() ? snapshot.data().value : 0;
+    const value = raw === null || raw === '' ? Number.NaN : Number(raw);
+    if (!Number.isFinite(value)) { fail(new Error('INVALID_CASH_BALANCE')); return; }
+    next(value, !snapshot.metadata.fromCache);
+  }, fail,
+);
+const subscribeFees: ResourceSubscription<typeof defaultFees> = (next, fail) => onSnapshot(
+  doc(db, 'settings', 'fees'), { includeMetadataChanges: true },
+  (snapshot) => next(snapshot.exists() ? parseFeeSettings(snapshot.data()) : defaultFees, !snapshot.metadata.fromCache), fail,
+);
 
 interface UseRealtimeDataOptions {
   loadCustomers?: boolean;
@@ -46,165 +54,33 @@ interface UseRealtimeDataOptions {
   onError?: (message: string) => void;
 }
 
-const reportRealtimeError = (
-  source: string,
-  error: unknown,
-  onError?: (message: string) => void,
+const useResource = <T>(
+  uid: string | undefined, enabled: boolean, retry: number, initial: T,
+  subscribe: ResourceSubscription<T>, label: string, onError?: (message: string) => void,
 ) => {
-  console.error(`[useRealtimeData] Erro ao carregar ${source}:`, error);
-  onError?.(`Erro ao carregar ${source}`);
+  // Stable identity prevents unrelated tab changes from reconnecting this resource.
+  const resource = useMemo(() => createRealtimeResource(initial, Boolean(uid) && enabled, subscribe,
+    () => onError?.(`Erro ao carregar ${label}`)), [uid, enabled, retry, initial, subscribe, label, onError]);
+  return useSyncExternalStore(resource.subscribe, resource.getSnapshot, resource.getSnapshot);
 };
 
 export const useRealtimeData = (user: User | null, options: UseRealtimeDataOptions = {}) => {
-  const [state, setState] = useState<RealtimeDataState>(initialState);
-  const {
-    loadCustomers = true,
-    loadLoans = true,
-    loadCashMovements = true,
-    loadMonthlySnapshots = true,
-    onError,
-  } = options;
-
-  useEffect(() => {
-    if (!user) {
-      setState(initialState);
-      return;
-    }
-
-    let clientesListener = () => {};
-
-    if (loadCustomers) {
-      setState((previous) => ({
-        ...previous,
-        isCustomersLoading: true,
-      }));
-
-      clientesListener = onSnapshot(
-        query(collection(db, 'clientes'), orderBy('createdAt', 'desc')),
-        (snapshot) => {
-          const clientes = snapshot.docs
-            .map((docSnap) => parseCustomer(docSnap.id, docSnap.data()))
-            .filter((customer) => !customer.archived && !customer.archivedAt);
-          setState((previous) => ({ ...previous, clientes, isCustomersLoading: false }));
-        },
-        (error) => {
-          reportRealtimeError('clientes', error, onError);
-          setState((previous) => ({ ...previous, clientes: [], isCustomersLoading: false }));
-        },
-      );
-    } else {
-      setState((previous) => (
-        previous.clientes.length > 0 || previous.isCustomersLoading
-          ? { ...previous, clientes: [], isCustomersLoading: false }
-          : previous
-      ));
-    }
-
-    const contratosListener = loadLoans
-      ? onSnapshot(
-          query(collection(db, 'loans'), orderBy('startDate', 'desc')),
-          (snapshot) => {
-            const contratos = snapshot.docs.map((docSnap) => parseLoan(docSnap.id, docSnap.data()));
-            setState((previous) => ({ ...previous, contratos }));
-          },
-          (error) => {
-            reportRealtimeError('contratos', error, onError);
-            setState((previous) => ({ ...previous, contratos: [] }));
-          },
-        )
-      : (() => {
-          setState((previous) => previous.contratos.length > 0 ? { ...previous, contratos: [] } : previous);
-          return () => {};
-        })();
-
-    const caixaListener = onSnapshot(
-      doc(db, 'settings', 'caixa'),
-      (snapshot) => {
-        const caixa = snapshot.exists() ? Number(snapshot.data().value) || 0 : 0;
-        setState((previous) => ({ ...previous, caixa }));
-      },
-      (error) => {
-        reportRealtimeError('settings/caixa', error, onError);
-        setState((previous) => ({ ...previous, caixa: 0 }));
-      },
-    );
-
-    const feesListener = subscribeFeeSettings(
-      (feeSettings) => {
-        setState((previous) => ({ ...previous, feeSettings }));
-      },
-      (error) => {
-        reportRealtimeError('settings/fees', error, onError);
-        setState((previous) => ({
-          ...previous,
-          feeSettings: {
-            dailyLateFeeRate: DEFAULT_DAILY_LATE_FEE_RATE,
-          },
-        }));
-      },
-    );
-
-    let movimentacoesListener = () => {};
-
-    if (loadCashMovements) {
-      setState((previous) => ({
-        ...previous,
-        cashMovementsStatus: 'loading',
-      }));
-
-      movimentacoesListener = onSnapshot(
-        query(collection(db, 'cashMovement'), orderBy('date', 'desc')),
-        (snapshot) => {
-          const movimentacoes = snapshot.docs.map((docSnap) => parseCashMovement(docSnap.id, docSnap.data()));
-          setState((previous) => ({
-            ...previous,
-            movimentacoes,
-            cashMovementsStatus: 'ready',
-          }));
-        },
-        (error) => {
-          reportRealtimeError('movimentacoes do caixa', error, onError);
-          setState((previous) => ({
-            ...previous,
-            movimentacoes: [],
-            cashMovementsStatus: 'error',
-          }));
-        },
-      );
-    } else {
-      setState((previous) => (
-        previous.movimentacoes.length > 0 || previous.cashMovementsStatus !== 'idle'
-          ? { ...previous, movimentacoes: [], cashMovementsStatus: 'idle' }
-          : previous
-      ));
-    }
-
-    const monthlySnapshotsListener = loadMonthlySnapshots
-      ? onSnapshot(
-          query(collection(db, 'monthlySnapshots'), orderBy('month', 'desc')),
-          (snapshot) => {
-            const monthlySnapshots = snapshot.docs.map((docSnap) => parseMonthlySnapshot(docSnap.id, docSnap.data()));
-            setState((previous) => ({ ...previous, monthlySnapshots }));
-          },
-          (error) => {
-            reportRealtimeError('fechamentos mensais', error, onError);
-            setState((previous) => ({ ...previous, monthlySnapshots: [] }));
-          },
-        )
-      : (() => {
-          setState((previous) => previous.monthlySnapshots.length > 0 ? { ...previous, monthlySnapshots: [] } : previous);
-          return () => {};
-        })();
-
-    return () => {
-      clientesListener();
-      contratosListener();
-      caixaListener();
-      feesListener();
-      movimentacoesListener();
-      monthlySnapshotsListener();
-    };
-  }, [loadCashMovements, loadCustomers, loadLoans, loadMonthlySnapshots, onError, user]);
-
-  return state;
+  const [retry, setRetry] = useState(0);
+  const reload = useCallback(() => setRetry((value) => value + 1), []);
+  const { loadCustomers = true, loadLoans = true, loadCashMovements = true, loadMonthlySnapshots = true, onError } = options;
+  const customers = useResource(user?.uid, loadCustomers, retry, emptyCustomers, subscribeCustomers, 'clientes', onError);
+  const loans = useResource(user?.uid, loadLoans, retry, emptyLoans, subscribeLoans, 'contratos', onError);
+  const movements = useResource(user?.uid, loadCashMovements, retry, emptyMovements, subscribeMovements, 'movimentacoes', onError);
+  const snapshots = useResource(user?.uid, loadMonthlySnapshots, retry, emptySnapshots, subscribeSnapshots, 'fechamentos', onError);
+  const cash = useResource(user?.uid, true, retry, 0, subscribeCash, 'caixa', onError);
+  const fees = useResource(user?.uid, true, retry, defaultFees, subscribeFees, 'taxas', onError);
+  return {
+    clientes: customers.data, contratos: loans.data, movimentacoes: movements.data,
+    monthlySnapshots: snapshots.data, caixa: cash.data, feeSettings: fees.data,
+    isCustomersLoading: customers.status === 'loading',
+    cashMovementsStatus: movements.status,
+    statuses: { customers: customers.status, loans: loans.status, movements: movements.status,
+      snapshots: snapshots.status, cash: cash.status, fees: fees.status },
+    reload,
+  };
 };

@@ -9,6 +9,8 @@ import {
 import { getInstallmentOutstanding } from './financialEngine';
 import { calculateNetProfit, calculateNetRoi } from './netProfit';
 import { resolveCashDelta } from './domainParsers';
+import { parseFinancialDate as toDate } from './dateTime';
+import { buildRealizedIncome } from './realizedIncome';
 import {
   CASH_INFLOW_CATEGORY_LABELS,
   CASH_OUTFLOW_CATEGORY_LABELS,
@@ -122,31 +124,8 @@ const formatDateTime = (date: Date) =>
     second: '2-digit',
   })}`;
 
-const toDate = (value: unknown): Date | null => {
-  if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  if (typeof value === 'number') {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-  if (typeof value === 'object' && typeof (value as { toDate?: unknown }).toDate === 'function') {
-    const parsed = (value as { toDate: () => Date }).toDate();
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-  const parsed = new Date(String(value));
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
 const getLoanCreatedDate = (loan: Loan): Date | null =>
-  toDate(loan.createdAt) || toDate(`${loan.startDate}T12:00:00`);
-
-const makeMonthKey = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-
-const makeMonthKeyFromValue = (value: unknown): string | null => {
-  const date = toDate(value);
-  return date ? makeMonthKey(date) : null;
-};
+  toDate(loan.createdAt) || toDate(loan.startDate);
 
 const getMonthRange = (year: number, monthIndex: number) => ({
   start: new Date(year, monthIndex, 1).getTime(),
@@ -271,7 +250,7 @@ const getOutflowKind = (movement: CashMovement): 'MANUAL' | 'LOAN' | 'ESTORNO' |
 
 const getMovementTime = (movement: CashMovement) => {
   const date = toDate(movement.date);
-  return date ? date.getTime() : 0;
+  return date ? date.getTime() : Number.NaN;
 };
 
 const getMovementCategoryLabel = (movement: CashMovement) => {
@@ -322,14 +301,6 @@ const buildMonthlySummaries = (
     closingCash: 0,
     contractsCount: 0,
   }));
-  const movementDatesByOperationId = new Map<string, string>();
-  cashMovements.forEach((movement) => {
-    const operationId = String(movement.operationId || movement.id || '').trim();
-    if (operationId && movement.date) movementDatesByOperationId.set(operationId, movement.date);
-  });
-  const resolveFiscalEntryDate = (operationId: string | undefined, fallback: string): string => (
-    operationId ? movementDatesByOperationId.get(operationId) || fallback : fallback
-  );
 
   cashMovements.forEach((movement) => {
     const date = toDate(movement.date);
@@ -390,70 +361,16 @@ const buildMonthlySummaries = (
         }
       }
 
-      const entries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
-      if (entries.length > 0) {
-        entries.forEach((entry) => {
-          const monthKey = makeMonthKeyFromValue(resolveFiscalEntryDate(entry.operationId, entry.recordedAt));
-          if (!monthKey) return;
-          const [entryYear, entryMonth] = monthKey.split('-').map(Number);
-          if (entryYear !== year) return;
-
-          const month = months[entryMonth - 1];
-          const breakdown = normalizeBreakdown(entry);
-          month.principalRecovered = roundMoney(month.principalRecovered + breakdown.principalPaid);
-          month.totalReceived = roundMoney(month.totalReceived + breakdown.totalPaid);
-          month.realRevenue = roundMoney(
-            month.realRevenue + breakdown.interestPaid + breakdown.lateFeePaid + breakdown.serviceFeePaid,
-          );
-        });
-        return;
-      }
-
-      if (normalizeInstallmentStatus(installment.status) !== 'PAID' || !installment.paymentBreakdown) return;
-      const paymentDate = installment.paidAt || installment.paymentDate || installment.lastPaymentDate;
-      const monthKey = makeMonthKeyFromValue(paymentDate);
-      if (!monthKey) return;
-      const [paymentYear, paymentMonth] = monthKey.split('-').map(Number);
-      if (paymentYear !== year) return;
-
-      const month = months[paymentMonth - 1];
-      const breakdown = normalizeBreakdown(installment.paymentBreakdown);
-      month.principalRecovered = roundMoney(month.principalRecovered + breakdown.principalPaid);
-      month.totalReceived = roundMoney(month.totalReceived + breakdown.totalPaid);
-      month.realRevenue = roundMoney(
-        month.realRevenue + breakdown.interestPaid + breakdown.lateFeePaid + breakdown.serviceFeePaid,
-      );
-    });
-
-    (Array.isArray(loan.renewalHistory) ? loan.renewalHistory : []).forEach((renewal) => {
-      const monthKey = makeMonthKeyFromValue(renewal.paymentDate);
-      if (!monthKey) return;
-      const [renewalYear, renewalMonth] = monthKey.split('-').map(Number);
-      if (renewalYear !== year) return;
-
-      const interestPaid = roundMoney(Number(renewal.interestPaid ?? renewal.amount ?? 0));
-      const lateFeePaid = roundMoney(Number(renewal.lateFeePaid || 0));
-      const totalPaid = roundMoney(Number(renewal.totalPaid ?? interestPaid + lateFeePaid));
-      const month = months[renewalMonth - 1];
-
-      month.totalReceived = roundMoney(month.totalReceived + totalPaid);
-      month.realRevenue = roundMoney(month.realRevenue + interestPaid + lateFeePaid);
-    });
-
-    (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
-      const monthKey = makeMonthKeyFromValue(resolveFiscalEntryDate(entry.operationId, entry.recordedAt));
-      if (!monthKey) return;
-      const [entryYear, entryMonth] = monthKey.split('-').map(Number);
-      if (entryYear !== year) return;
-      const month = months[entryMonth - 1];
-      month.principalRecovered = roundMoney(month.principalRecovered + Number(entry.principalPaid || 0));
-      month.totalReceived = roundMoney(month.totalReceived + Number(entry.totalPaid || 0));
-      month.realRevenue = roundMoney(
-        month.realRevenue + Number(entry.interestPaid || 0) + Number(entry.lateFeePaid || 0) + Number(entry.serviceFeePaid || 0),
-      );
     });
   });
 
+  const income = buildRealizedIncome(loans, cashMovements);
+  months.forEach((month) => {
+    const metrics = income.monthly[`${year}-${String(month.monthIndex + 1).padStart(2, '0')}`];
+    month.principalRecovered = metrics?.principalRecovered ?? 0;
+    month.totalReceived = metrics?.totalPaid ?? 0;
+    month.realRevenue = metrics?.taxableRevenue ?? 0;
+  });
   months.forEach((month) => {
     month.capitalBorrowed = month.loanOutflows;
     const range = getMonthRange(year, month.monthIndex);

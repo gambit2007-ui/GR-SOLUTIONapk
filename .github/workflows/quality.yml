@@ -23,5 +23,12 @@ jobs:
       - run: npm ci
       - run: npm run lint
       - run: npm run test
+        env:
+          TZ: America/Sao_Paulo
+      - name: Financial report regressions in UTC
+        run: npm test -- --run src/utils/__tests__/financialDates.test.ts src/utils/__tests__/realizedIncome.test.ts src/utils/__tests__/monthlyCashReportPdf.test.ts src/utils/__tests__/monthlyCashReportPdf.export.test.ts
+        env:
+          TZ: UTC
       - run: npm run test:rules
       - run: npm run build
+      - run: git diff --check

@@ -151,7 +151,7 @@ export const buildFinancialAudit = ({
       addIssue(issues, 'ERROR', 'DUPLICATE_LOAN_DISBURSEMENT', 'Contrato possui mais de uma retirada de concessao.', loan.id);
     }
 
-    const installmentOperationIds = new Set<string>();
+    const paymentEntryIds = new Set<string>();
     let recordedRemaining = 0;
     loan.installments.forEach((installment, installmentIndex) => {
       const installmentId = `${loan.id}:${installment.number || installmentIndex + 1}`;
@@ -162,12 +162,15 @@ export const buildFinancialAudit = ({
         addIssue(issues, 'ERROR', 'PAID_INSTALLMENT_WITH_BALANCE', 'Parcela marcada como paga ainda possui saldo base.', installmentId);
       }
 
+      // One operation may legitimately pay several installments, once per installment.
+      const installmentOperationIds = new Set<string>();
       (installment.paymentEntries || []).forEach((entry) => {
-        if (!entry.operationId) return;
-        if (installmentOperationIds.has(entry.operationId)) {
+        if ((entry.id && paymentEntryIds.has(entry.id)) ||
+          (entry.operationId && installmentOperationIds.has(entry.operationId))) {
           addIssue(issues, 'ERROR', 'DUPLICATE_PAYMENT_ENTRY', 'Operacao repetida no historico de parcelas.', installmentId);
         }
-        installmentOperationIds.add(entry.operationId);
+        if (entry.id) paymentEntryIds.add(entry.id);
+        if (entry.operationId) installmentOperationIds.add(entry.operationId);
       });
 
       if (

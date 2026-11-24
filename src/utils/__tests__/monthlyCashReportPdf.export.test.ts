@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CashMovement, Loan, MonthlySnapshot } from '../../types';
 import { generateMonthlyCashReportPdf } from '../monthlyCashReportPdf';
+import { generateAnnualCashReportPdf } from '../annualCashReportPdf';
 
 const { table, save } = vi.hoisted(() => ({ table: vi.fn(), save: vi.fn() }));
 
@@ -17,6 +18,7 @@ vi.mock('jspdf', () => ({
     text() {}
     getNumberOfPages() { return 1; }
     setPage() {}
+    addPage() {}
     save = save;
   },
 }));
@@ -44,6 +46,37 @@ const fixture = () => ({
 
 describe('generateMonthlyCashReportPdf', () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it('mantem o primeiro dia no mesmo mes nos PDFs anual e mensal', async () => {
+    const input = fixture();
+    input.cashMovements.forEach((movement) => { movement.date = '2026-11-01'; });
+    input.loans[0].installments[0].paymentEntries![0].recordedAt = '2026-11-01';
+    const original = structuredClone(input);
+    await generateMonthlyCashReportPdf(input);
+    expect(table.mock.calls[0][1].body).toContainEqual(['Lucro liquido realizado', 'R$ 8,00']);
+    table.mockClear();
+    await generateAnnualCashReportPdf({ ...input, caixa: 108, customersCount: 1 });
+    const months = table.mock.calls[1][1].body as string[][];
+    expect(months[10][2]).toBe('R$ 100,00');
+    expect(months[10][4]).toBe('R$ 27,00');
+    expect(months[9][2]).toBe('R$ 80,00');
+    expect(months[9][4]).toBe('R$ 10,00');
+    expect(input).toEqual(original);
+  });
+
+  it('nao trata registros sem data valida como saldo anterior nos PDFs', async () => {
+    const input = fixture();
+    input.cashMovements.push({
+      id: 'invalid-date', type: 'APORTE', amount: 999, date: 'invalido', description: 'Synthetic invalid date',
+    });
+    await generateMonthlyCashReportPdf(input);
+    expect(table.mock.calls[0][1].body).toContainEqual(['Saldo inicial calculado', 'R$ 0,00']);
+    table.mockClear();
+    await generateAnnualCashReportPdf({ ...input, caixa: 108, customersCount: 1 });
+    const months = table.mock.calls[1][1].body as string[][];
+    expect(months[9][11]).toBe('R$ 0,00');
+    expect(months[10][11]).toBe('R$ 108,00');
+  });
 
   it('inclui os pagamentos dos contratos no PDF de mes sem fechamento', async () => {
     const input = fixture();
