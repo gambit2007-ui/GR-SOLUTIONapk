@@ -1,5 +1,7 @@
 import type { CashMovement, Loan, MonthlySnapshot } from '../types';
 import { resolveCashDelta } from './domainParsers';
+import { parseFinancialDate as toDate } from './dateTime';
+import { buildRealizedIncome } from './realizedIncome';
 import {
   CASH_OUTFLOW_CATEGORY_LABELS,
   isFundingCostCategory,
@@ -8,7 +10,6 @@ import {
   sumFundingCostsByCategory,
   sumOperatingExpensesByCategory,
 } from './cashCategories';
-import { normalizeInstallmentStatus } from './loanCompat';
 import { calculateNetProfit } from './netProfit';
 
 interface MonthlyCashReportParams {
@@ -78,24 +79,6 @@ const formatCurrency = (value: number, withSign = false) => {
   return `${rounded >= 0 ? '+' : '-'}R$ ${formatted}`;
 };
 
-const toDate = (value: unknown): Date | null => {
-  if (!value) return null;
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  if (typeof value === 'number') {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-  if (typeof value === 'object' && typeof (value as { toDate?: unknown }).toDate === 'function') {
-    const parsed = (value as { toDate: () => Date }).toDate();
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-  const normalized = String(value).trim();
-  const parsed = /^\d{4}-\d{2}-\d{2}$/.test(normalized)
-    ? new Date(`${normalized}T12:00:00`)
-    : new Date(normalized);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
-};
-
 const formatDate = (date: Date) => date.toLocaleDateString('pt-BR');
 
 const getMovementTypeLabel = (movement: CashMovement) => {
@@ -116,26 +99,6 @@ const getMovementCategoryLabel = (movement: CashMovement, signedAmount: number) 
     ? 'Entrada de caixa'
     : CASH_OUTFLOW_CATEGORY_LABELS[resolveCashOutflowCategory(movement)];
 
-const getMonthKey = (value: unknown): string | null => {
-  const date = toDate(value);
-  if (!date) return null;
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-};
-
-const getNumber = (value: unknown) => roundMoney(Number(value || 0));
-
-const addBreakdownToMetrics = (
-  metrics: { principalRecovered: number; realizedFinancialRevenue: number },
-  breakdown: { principalPaid?: unknown; interestPaid?: unknown; lateFeePaid?: unknown; serviceFeePaid?: unknown },
-) => {
-  metrics.principalRecovered = roundMoney(metrics.principalRecovered + getNumber(breakdown.principalPaid));
-  metrics.realizedFinancialRevenue = roundMoney(
-    metrics.realizedFinancialRevenue
-      + getNumber(breakdown.interestPaid)
-      + getNumber(breakdown.lateFeePaid)
-      + getNumber(breakdown.serviceFeePaid),
-  );
-};
 
 export const buildMonthlyCashReportData = ({
   year,
@@ -165,44 +128,7 @@ export const buildMonthlyCashReportData = ({
   const totalEntries = roundMoney(rows.reduce((total, row) => total + Math.max(row.signedAmount, 0), 0));
   const totalExits = roundMoney(rows.reduce((total, row) => total + Math.abs(Math.min(row.signedAmount, 0)), 0));
   const netChange = roundMoney(totalEntries - totalExits);
-  const financialMetrics = { principalRecovered: 0, realizedFinancialRevenue: 0 };
-  const movementDatesByOperationId = new Map<string, string>();
-  cashMovements.forEach((movement) => {
-    const operationId = String(movement.operationId || movement.id || '').trim();
-    if (operationId && movement.date) movementDatesByOperationId.set(operationId, String(movement.date));
-  });
-  const matchesSelectedMonth = (operationId: string | undefined, fallback: unknown) =>
-    getMonthKey(operationId ? movementDatesByOperationId.get(operationId) || fallback : fallback) === periodKey;
-
-  loans.forEach((loan) => {
-    (Array.isArray(loan.installments) ? loan.installments : []).forEach((installment) => {
-      const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
-      if (paymentEntries.length > 0) {
-        paymentEntries.forEach((entry) => {
-          if (matchesSelectedMonth(entry.operationId, entry.recordedAt)) addBreakdownToMetrics(financialMetrics, entry);
-        });
-        return;
-      }
-      if (normalizeInstallmentStatus(installment.status) === 'PAID' && installment.paymentBreakdown) {
-        const paymentDate = installment.paidAt || installment.paymentDate || installment.lastPaymentDate;
-        if (matchesSelectedMonth(undefined, paymentDate)) addBreakdownToMetrics(financialMetrics, installment.paymentBreakdown);
-      }
-    });
-
-    (Array.isArray(loan.renewalHistory) ? loan.renewalHistory : []).forEach((renewal) => {
-      if (!matchesSelectedMonth(undefined, renewal.paymentDate)) return;
-      financialMetrics.realizedFinancialRevenue = roundMoney(
-        financialMetrics.realizedFinancialRevenue
-          + getNumber(renewal.interestPaid ?? renewal.amount)
-          + getNumber(renewal.lateFeePaid),
-      );
-    });
-
-    (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
-      if (matchesSelectedMonth(entry.operationId, entry.recordedAt)) addBreakdownToMetrics(financialMetrics, entry);
-    });
-  });
-
+  const financialMetrics = buildRealizedIncome(loans, cashMovements).monthly[periodKey];
   const liveOperatingExpenses = roundMoney(rows.reduce(
     (total, row) => row.signedAmount < 0 && isOperatingExpenseCategory(resolveCashOutflowCategory(row.movement))
       ? total + Math.abs(row.signedAmount)
@@ -218,7 +144,7 @@ export const buildMonthlyCashReportData = ({
   const snapshot = monthlySnapshots.find((item) => item.month === periodKey);
   const realizedFinancialRevenue = snapshot
     ? roundMoney(snapshot.financialRevenue ?? snapshot.realProfit)
-    : financialMetrics.realizedFinancialRevenue;
+    : financialMetrics?.taxableRevenue ?? 0;
   const operatingExpenses = snapshot?.operatingExpenses
     ?? (snapshot?.outflowCategoryTotals
       ? sumOperatingExpensesByCategory(snapshot.outflowCategoryTotals)
@@ -240,7 +166,7 @@ export const buildMonthlyCashReportData = ({
     netChange,
     closingCash: roundMoney(openingCash + netChange),
     movementCount: rows.length,
-    principalRecovered: snapshot ? roundMoney(snapshot.principalReceived) : financialMetrics.principalRecovered,
+    principalRecovered: snapshot ? roundMoney(snapshot.principalReceived) : financialMetrics?.principalRecovered ?? 0,
     realizedFinancialRevenue,
     operatingExpenses,
     operatingResult,

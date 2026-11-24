@@ -6,7 +6,6 @@ import {
   CashMovementCategory,
   CashOutflowCategory,
   MovementType,
-  PaymentBreakdown,
   MonthlySnapshot,
 } from '../types';
 import { useMemo, useRef } from 'react';
@@ -35,7 +34,7 @@ import {
   normalizeInstallmentStatus,
 } from '../utils/loanCompat';
 import { getInstallmentOutstanding } from '../utils/financialEngine';
-import { canCloseMonth, getLocalISODate } from '../utils/dateTime';
+import { canCloseMonth, getLocalISODate, getFinancialMonthKey as makeMonthKey, parseFinancialDate as getDateFromUnknown } from '../utils/dateTime';
 import {
   calculateNetReceivedFromCashMovements,
   groupReceivedCashByInvestor,
@@ -57,6 +56,7 @@ import {
   sumOperatingExpensesByCategory,
 } from '../utils/cashCategories';
 import { calculateNetProfit, calculateNetRoi } from '../utils/netProfit';
+import { buildRealizedIncome, type FiscalMonthMetrics } from '../utils/realizedIncome';
 import { enableAccessControlForCurrentUser } from '../services/accessControlService';
 import { getCustomerCount } from '../services/customerService';
 import type { BackupPayload } from '../services/backupService';
@@ -79,14 +79,6 @@ interface ReportsProps {
   showToast: (msg: string, type?: 'success' | 'error') => void;
 }
 
-interface FiscalMonthMetrics {
-  principalRecovered: number;
-  interestReceived: number;
-  lateFeesReceived: number;
-  serviceFeesReceived: number;
-  taxableRevenue: number;
-  totalPaid: number;
-}
 
 type OutflowCategoryTotals = Record<CashOutflowReportCategory, number>;
 
@@ -236,12 +228,6 @@ const Reports: React.FC<ReportsProps> = ({
     return Number.isFinite(parsed) ? parsed : Number.NaN;
   };
 
-  const makeMonthKey = (dateValue: string) => {
-    const date = new Date(dateValue);
-    if (Number.isNaN(date.getTime())) return null;
-    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
-  };
-
   const makeDueDateMonthKey = (dateValue: string | undefined) => {
     const normalized = String(dateValue || '').trim();
     const isoMonth = normalized.match(/^(\d{4})-(\d{2})/);
@@ -252,23 +238,8 @@ const Reports: React.FC<ReportsProps> = ({
   const getMonthShortLabel = (monthIndex: number, year: number) =>
     `${monthNamesUpper[monthIndex]}/${String(year).slice(2)}`;
 
-  const getDateFromUnknown = (value: unknown): Date | null => {
-    if (!value) return null;
-    if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-    if (typeof value === 'number') {
-      const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? null : date;
-    }
-    if (typeof value === 'object' && 'toDate' in value && typeof (value as { toDate?: unknown }).toDate === 'function') {
-      const date = (value as { toDate: () => Date }).toDate();
-      return Number.isNaN(date.getTime()) ? null : date;
-    }
-    const date = new Date(String(value));
-    return Number.isNaN(date.getTime()) ? null : date;
-  };
-
   const getLoanCreatedDate = (loan: Loan): Date | null => (
-    getDateFromUnknown(loan.createdAt) || getDateFromUnknown(`${loan.startDate}T12:00:00`)
+    getDateFromUnknown(loan.createdAt) || getDateFromUnknown(loan.startDate)
   );
 
   const getMonthRange = (monthKey: string) => {
@@ -285,8 +256,7 @@ const Reports: React.FC<ReportsProps> = ({
   };
 
   const getMovementTime = (movement: CashMovement) => {
-    const timestamp = new Date(movement.date).getTime();
-    return Number.isFinite(timestamp) ? timestamp : 0;
+    return getDateFromUnknown(movement.date)?.getTime() ?? Number.NaN;
   };
 
   const isCategorizedOutflowMovement = (movement: CashMovement) => {
@@ -322,121 +292,7 @@ const Reports: React.FC<ReportsProps> = ({
     return roundMoney(paidAmount + getRemainingInstallmentValue(installment));
   };
 
-  const fiscalData = useMemo(() => {
-    const monthly: Record<string, FiscalMonthMetrics> = {};
-    const movementDatesByOperationId = new Map<string, string>();
-    cashMovements.forEach((movement) => {
-      const operationId = String(movement.operationId || movement.id || '').trim();
-      if (operationId && movement.date) movementDatesByOperationId.set(operationId, movement.date);
-    });
-    const resolveFiscalEntryDate = (operationId: string | undefined, fallback: string): string => (
-      operationId ? movementDatesByOperationId.get(operationId) || fallback : fallback
-    );
-
-    const totals = {
-      principalRecovered: 0,
-      interestReceived: 0,
-      lateFeesReceived: 0,
-      serviceFeesReceived: 0,
-      taxableRevenue: 0,
-      totalPaid: 0,
-    };
-
-    const registerMetrics = (monthKey: string, breakdown: PaymentBreakdown) => {
-      if (!monthly[monthKey]) {
-        monthly[monthKey] = {
-          principalRecovered: 0,
-          interestReceived: 0,
-          lateFeesReceived: 0,
-          serviceFeesReceived: 0,
-          taxableRevenue: 0,
-          totalPaid: 0,
-        };
-      }
-
-      const principalPaid = roundMoney(Number(breakdown.principalPaid || 0));
-      const interestPaid = roundMoney(Number(breakdown.interestPaid || 0));
-      const lateFeePaid = roundMoney(Number(breakdown.lateFeePaid || 0));
-      const serviceFeePaid = roundMoney(Number(breakdown.serviceFeePaid || 0));
-      const totalPaid = roundMoney(Number(breakdown.totalPaid || 0));
-      const taxableRevenue = roundMoney(interestPaid + lateFeePaid + serviceFeePaid);
-
-      monthly[monthKey].principalRecovered = roundMoney(monthly[monthKey].principalRecovered + principalPaid);
-      monthly[monthKey].interestReceived = roundMoney(monthly[monthKey].interestReceived + interestPaid);
-      monthly[monthKey].lateFeesReceived = roundMoney(monthly[monthKey].lateFeesReceived + lateFeePaid);
-      monthly[monthKey].serviceFeesReceived = roundMoney(monthly[monthKey].serviceFeesReceived + serviceFeePaid);
-      monthly[monthKey].taxableRevenue = roundMoney(monthly[monthKey].taxableRevenue + taxableRevenue);
-      monthly[monthKey].totalPaid = roundMoney(monthly[monthKey].totalPaid + totalPaid);
-
-      totals.principalRecovered = roundMoney(totals.principalRecovered + principalPaid);
-      totals.interestReceived = roundMoney(totals.interestReceived + interestPaid);
-      totals.lateFeesReceived = roundMoney(totals.lateFeesReceived + lateFeePaid);
-      totals.serviceFeesReceived = roundMoney(totals.serviceFeesReceived + serviceFeePaid);
-      totals.taxableRevenue = roundMoney(totals.taxableRevenue + taxableRevenue);
-      totals.totalPaid = roundMoney(totals.totalPaid + totalPaid);
-    };
-
-    loans.forEach((loan) => {
-      const installments = Array.isArray(loan.installments) ? loan.installments : [];
-      installments.forEach((installment) => {
-        const paymentEntries = Array.isArray(installment.paymentEntries) ? installment.paymentEntries : [];
-        if (paymentEntries.length > 0) {
-          paymentEntries.forEach((entry) => {
-            const monthKey = makeMonthKey(resolveFiscalEntryDate(entry.operationId, entry.recordedAt));
-            if (!monthKey) return;
-            registerMetrics(monthKey, {
-              principalPaid: Number(entry.principalPaid || 0),
-              interestPaid: Number(entry.interestPaid || 0),
-              lateFeePaid: Number(entry.lateFeePaid || 0),
-              serviceFeePaid: Number(entry.serviceFeePaid || 0),
-              discountApplied: Number(entry.discountApplied || 0),
-              totalPaid: Number(entry.totalPaid || 0),
-            });
-          });
-          return;
-        }
-
-        if (normalizeInstallmentStatus(installment.status) !== 'PAID') return;
-        const breakdown = installment.paymentBreakdown;
-        if (!breakdown) return;
-
-        const paymentDate = installment.paidAt || installment.paymentDate || installment.lastPaymentDate;
-        if (!paymentDate) return;
-
-        const monthKey = makeMonthKey(paymentDate);
-        if (!monthKey) return;
-        registerMetrics(monthKey, breakdown);
-      });
-
-      (Array.isArray(loan.fiscalPaymentEntries) ? loan.fiscalPaymentEntries : []).forEach((entry) => {
-        const monthKey = makeMonthKey(resolveFiscalEntryDate(entry.operationId, entry.recordedAt));
-        if (!monthKey) return;
-        registerMetrics(monthKey, entry);
-      });
-
-      const renewalHistory = Array.isArray(loan.renewalHistory) ? loan.renewalHistory : [];
-      renewalHistory.forEach((renewal) => {
-        const monthKey = makeMonthKey(renewal.paymentDate);
-        if (!monthKey) return;
-
-        const interestPaid = roundMoney(Number(renewal.interestPaid ?? renewal.amount ?? 0));
-        const lateFeePaid = roundMoney(Number(renewal.lateFeePaid || 0));
-        const totalPaid = roundMoney(Number(renewal.totalPaid ?? interestPaid + lateFeePaid));
-
-        registerMetrics(monthKey, {
-          principalPaid: 0,
-          interestPaid,
-          lateFeePaid,
-          serviceFeePaid: 0,
-          discountApplied: 0,
-          totalPaid,
-        });
-      });
-    });
-
-    return { monthly, totals };
-  }, [cashMovements, loans]);
-
+  const fiscalData = useMemo(() => buildRealizedIncome(loans, cashMovements), [cashMovements, loans]);
   // Calculos Financeiros
   const totalAportes = cashMovements
     .filter((m) => ['APORTE', 'ENTRADA'].includes(String(m.type || '').toUpperCase()))
@@ -468,8 +324,8 @@ const Reports: React.FC<ReportsProps> = ({
     });
 
     cashMovements.forEach((movement) => {
-      const movementDate = new Date(movement.date);
-      if (!Number.isNaN(movementDate.getTime())) years.add(movementDate.getFullYear());
+      const movementDate = getDateFromUnknown(movement.date);
+      if (movementDate) years.add(movementDate.getFullYear());
     });
 
     return Array.from(years).sort((a, b) => b - a);
@@ -486,9 +342,9 @@ const Reports: React.FC<ReportsProps> = ({
   }, [fiscalData.monthly, reportYear]);
 
   const yearlyOutflowCategoryTotals = cashMovements.reduce((totals, movement) => {
-    const date = new Date(movement.date);
+    const date = getDateFromUnknown(movement.date);
     if (
-      Number.isNaN(date.getTime()) ||
+      !date ||
       date.getFullYear() !== reportYear ||
       !isCategorizedOutflowMovement(movement)
     ) {
@@ -587,8 +443,8 @@ const Reports: React.FC<ReportsProps> = ({
     }
 
     cashMovements.forEach((movement) => {
-      const date = new Date(movement.date);
-      if (Number.isNaN(date.getTime()) || date.getFullYear() !== reportYear) return;
+      const date = getDateFromUnknown(movement.date);
+      if (!date || date.getFullYear() !== reportYear) return;
 
       const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
       if (!months[key]) return;
@@ -1041,6 +897,12 @@ const Reports: React.FC<ReportsProps> = ({
 
   return (
     <div className="space-y-8">
+      {fiscalData.undatedEntries > 0 && (
+        <p role="status" className="rounded-2xl border border-amber-500/30 p-4 text-xs text-amber-300">
+          Existem {fiscalData.undatedEntries} registro(s) de recebimento sem data valida.
+          Eles nao foram atribuidos a um mes. Confira o historico antes de fechar resultados.
+        </p>
+      )}
       {/* Cartao principal de caixa */}
       <div className="bg-[#050505] border border-zinc-900 p-6 sm:p-8 md:p-12 rounded-[3rem] relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-8">
         <div className="absolute top-0 right-0 p-8 opacity-5">

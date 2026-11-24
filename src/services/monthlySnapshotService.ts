@@ -15,6 +15,8 @@ import { canCloseMonth } from '../utils/dateTime';
 
 export type MonthlySnapshotInput = Omit<MonthlySnapshot, 'id' | 'createdAt' | 'updatedAt'>;
 
+const MONTHLY_SNAPSHOT_SCHEMA_VERSION = 3;
+
 const roundMoney = (value: number): number =>
   Number((Number.isFinite(value) ? value : 0).toFixed(2));
 
@@ -57,7 +59,7 @@ export const generateMonthlySnapshot = (input: MonthlySnapshotInput): MonthlySna
   reversals: roundMoney(toNumber(input.reversals)),
   overdueAmount: roundMoney(toNumber(input.overdueAmount)),
   outflowCategoryTotals: input.outflowCategoryTotals,
-  schemaVersion: 3,
+  schemaVersion: MONTHLY_SNAPSHOT_SCHEMA_VERSION,
   status: 'CLOSED',
   closedByUid: toOptionalString(input.closedByUid),
 });
@@ -114,7 +116,7 @@ export const saveMonthlySnapshot = async (snapshot: MonthlySnapshot): Promise<vo
     if (existingSnapshot.exists()) throw new Error('MES_JA_FECHADO');
     tx.set(snapshotRef, sanitizeFirestorePayload({
       ...snapshotPayload,
-      schemaVersion: 2,
+      schemaVersion: snapshot.schemaVersion ?? MONTHLY_SNAPSHOT_SCHEMA_VERSION,
       status: 'CLOSED',
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),

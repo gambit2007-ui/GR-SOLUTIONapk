@@ -12,6 +12,30 @@ const movement = (id: string, type: CashMovement['type'], amount: number, date: 
 });
 
 describe('buildMonthlyCashReportData', () => {
+  it('mantem receitas, despesas e caixa no primeiro dia do mes correto', () => {
+    const loan = {
+      id: 'loan-first-day', installments: [{
+        status: 'PAID', paidAt: '2026-11-01',
+        paymentBreakdown: { principalPaid: 100, interestPaid: 20, lateFeePaid: 0, serviceFeePaid: 0 },
+      }], renewalHistory: [], fiscalPaymentEntries: [],
+    } as unknown as Loan;
+    const input = {
+      year: 2026, loans: [loan], monthlySnapshots: [],
+      cashMovements: [
+        movement('prior', 'APORTE', 1000, '2026-10-31'),
+        movement('payment', 'PAGAMENTO', 120, '2026-11-01'),
+        { ...movement('expense', 'SAIDA', 5, '2026-11-01'), category: 'DESPESA_OPERACIONAL' as const },
+      ],
+    };
+    const before = structuredClone(input);
+    const november = buildMonthlyCashReportData({ ...input, month: 11 });
+    const october = buildMonthlyCashReportData({ ...input, month: 10 });
+    expect(november).toMatchObject({ openingCash: 1000, closingCash: 1115, principalRecovered: 100,
+      realizedFinancialRevenue: 20, operatingExpenses: 5, netProfit: 15 });
+    expect(october).toMatchObject({ closingCash: 1000, realizedFinancialRevenue: 0, operatingExpenses: 0 });
+    expect(input).toEqual(before);
+  });
+
   it('restringe a conferencia ao mes selecionado e conserva o saldo acumulado anterior', () => {
     const report = buildMonthlyCashReportData({
       year: 2026,
