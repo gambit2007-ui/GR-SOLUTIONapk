@@ -675,7 +675,8 @@ const LoanSection: React.FC<LoanSectionProps> = ({
     const confirmed = window.confirm(
       `Excluir definitivamente o contrato ${label}?\n\n` +
       'Permitido somente porque ele nao possui recebimentos, renovacoes ou outras movimentacoes financeiras. ' +
-      'A retirada inicial sera preservada e recebera um estorno auditavel no caixa.',
+      'O contrato e sua retirada inicial serao excluidos juntos, e o saldo do caixa sera recomposto. ' +
+      'Nao sera criado estorno no livro caixa. O registro da exclusao permanecera na auditoria.',
     );
     if (!confirmed) return;
 
@@ -1462,7 +1463,9 @@ const LoanSection: React.FC<LoanSectionProps> = ({
             Number(loan.version || 0) === 0 &&
             loan.lastOperationType === 'LOAN_CREATED' &&
             loan.lastOperationId === `loan-created-${loan.id}`;
-          const isCancelledDirectLoan = resolvedLoanStatus === 'CANCELLED';
+          const isCancelledDirectLoan = resolvedLoanStatus === 'CANCELLED' &&
+            Number(loan.version || 0) === 1 && loan.lastOperationType === 'CANCELLATION' &&
+            Boolean(loan.cancellationReason?.trim());
           const canDeletePristineDirectLoan = isAdmin &&
             !isBancarized &&
             (isPristineActiveDirectLoan || isCancelledDirectLoan) &&
