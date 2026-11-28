@@ -1,0 +1,599 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function accessControlEnabled() {
+      return exists(/databases/$(database)/documents/settings/accessControl) &&
+        get(/databases/$(database)/documents/settings/accessControl).data.enforced == true;
+    }
+
+    function hasAdminClaim() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
+    function hasAuthorizedUserDocument() {
+      return isSignedIn() && exists(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid));
+    }
+
+    function hasAdminRoleDocument() {
+      return hasAuthorizedUserDocument() &&
+        get(/databases/$(database)/documents/authorizedUsers/$(request.auth.uid)).data.role == 'ADMIN';
+    }
+
+    function isAdmin() {
+      return hasAdminClaim() || hasAdminRoleDocument() || (isSignedIn() && !accessControlEnabled());
+    }
+
+    function isAuthorized() {
+      return isSignedIn() && (!accessControlEnabled() || hasAdminClaim() || hasAuthorizedUserDocument());
+    }
+
+    function validPositiveMoney(value) {
+      return value is number && value > 0 && value < 1000000000;
+    }
+
+    function validCustomer(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 200;
+    }
+
+    function validLoan(data) {
+      return data.customerId is string && data.customerId.size() > 0 &&
+        data.customerName is string && data.customerName.size() > 0 &&
+        validPositiveMoney(data.amount) &&
+        data.installments is list && data.installments.size() <= 1000 &&
+        data.status in ['ATIVO', 'QUITADO', 'ATRASADO', 'CANCELADO', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
+    }
+
+    function validLoanOperationAudit(data) {
+      return data.lastOperationId is string &&
+        data.lastOperationId.size() >= 8 && data.lastOperationId.size() <= 160 &&
+        data.lastOperationType in [
+          'LOAN_CREATED',
+          'CONTRACT_EDIT',
+          'PAYMENT',
+          'PAYMENT_REVERSAL',
+          'INTEREST_RENEWAL',
+          'CANCELLATION'
+        ] &&
+        data.lastOperationAt == request.time &&
+        data.lastOperationByUid is string &&
+        data.lastOperationByUid == request.auth.uid;
+    }
+
+    function hasLinkedCashMovement(data, loanId) {
+      let operationId = data.lastOperationId;
+      let movementPath = /databases/$(database)/documents/cashMovement/$(operationId);
+      return existsAfter(movementPath) &&
+        getAfter(movementPath).data.loanId == loanId &&
+        getAfter(movementPath).data.operationId == operationId &&
+        getAfter(movementPath).data.createdByUid == request.auth.uid &&
+        (
+          (data.lastOperationType == 'LOAN_CREATED' && getAfter(movementPath).data.type == 'RETIRADA') ||
+          (data.lastOperationType == 'PAYMENT' && getAfter(movementPath).data.type == 'PAGAMENTO') ||
+          (data.lastOperationType == 'PAYMENT_REVERSAL' && getAfter(movementPath).data.type == 'ESTORNO') ||
+          (data.lastOperationType == 'INTEREST_RENEWAL' && getAfter(movementPath).data.type == 'PAGAMENTO')
+        );
+    }
+
+    function hasPaymentHistory(data) {
+      return data.get('hasFinancialHistory', false) == true ||
+        data.get('paidAmount', 0) > 0 ||
+        data.get('fiscalPaymentEntries', []).size() > 0;
+    }
+
+    // A physical deletion is limited to a direct loan without financial history:
+    // either untouched, or immediately cancelled as its sole subsequent operation.
+    // Financial history must be cancelled/audited, never deleted.
+    function isSafeDirectLoanForDeletion(data, loanId) {
+      return data.get('formalizationType', 'DIRECT') != 'BANCARIZED' &&
+        data.get('provider', 'GR') != 'CREDIGRUPO' &&
+        data.get('hasFinancialHistory', false) == false &&
+        data.get('paidAmount', 0) == 0 &&
+        data.get('fiscalPaymentEntries', []).size() == 0 &&
+        data.get('maxHistoricalOverdueDays', 0) == 0 &&
+        data.get('renewalHistory', []).size() == 0 &&
+        data.get('renewCount', 0) == 0 &&
+        (
+          (
+            data.get('status', 'ATIVO') in ['ATIVO', 'ACTIVE'] &&
+            data.get('version', 0) == 0 &&
+            data.get('lastOperationType', '') == 'LOAN_CREATED' &&
+            data.get('lastOperationId', '') == 'loan-created-' + loanId
+          ) ||
+          (
+            data.get('status', '') in ['CANCELADO', 'CANCELLED'] &&
+            data.get('version', 0) == 1 &&
+            data.get('lastOperationType', '') == 'CANCELLATION' &&
+            data.get('cancellationReason', '') is string &&
+            data.get('cancellationReason', '').size() > 0
+          )
+        );
+    }
+
+    function isOriginalLoanWithdrawal(data, loanId) {
+      return data.type == 'RETIRADA' &&
+        data.amount is number && data.amount > 0 &&
+        data.loanId == loanId &&
+        data.operationId == 'loan-created-' + loanId;
+    }
+
+    function validLoanDeletionCashUpdate(loanId) {
+      let cashPath = /databases/$(database)/documents/settings/caixa;
+      let movementId = 'loan-created-' + loanId;
+      let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
+      let previousCash = exists(cashPath) ? get(cashPath).data.get('value', 0) : 0;
+      return existsAfter(cashPath) &&
+        getAfter(cashPath).data.get('lastMovementId', '') == movementId &&
+        getAfter(cashPath).data.get('lastOperationType', '') == 'LOAN_DELETED' &&
+        getAfter(cashPath).data.get('lastLoanId', '') == loanId &&
+        getAfter(cashPath).data.get('updatedByUid', '') == request.auth.uid &&
+        getAfter(cashPath).data.get('updatedAt', null) == request.time &&
+        getAfter(cashPath).data.get('value', 0) >= previousCash + get(movementPath).data.amount - 0.001 &&
+        getAfter(cashPath).data.get('value', 0) <= previousCash + get(movementPath).data.amount + 0.001;
+    }
+
+    function validUnpaidLoanDeletion(loanId) {
+      let movementId = 'loan-created-' + loanId;
+      let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
+      return isSafeDirectLoanForDeletion(resource.data, loanId) &&
+        exists(movementPath) &&
+        isOriginalLoanWithdrawal(get(movementPath).data, loanId) &&
+        !existsAfter(movementPath) &&
+        validLoanDeletionCashUpdate(loanId);
+    }
+
+    function validUnpaidLoanDeletionCashUpdate() {
+      let loanId = request.resource.data.get('lastLoanId', '');
+      let loanPath = /databases/$(database)/documents/loans/$(loanId);
+      let movementId = 'loan-created-' + loanId;
+      let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
+      return loanId is string && loanId.size() > 0 &&
+        exists(loanPath) &&
+        exists(movementPath) &&
+        isSafeDirectLoanForDeletion(get(loanPath).data, loanId) &&
+        isOriginalLoanWithdrawal(get(movementPath).data, loanId) &&
+        !existsAfter(loanPath) &&
+        !existsAfter(movementPath) &&
+        validLoanDeletionCashUpdate(loanId);
+    }
+
+    function validContractEdit(previousData, nextData) {
+      return nextData.lastOperationType == 'CONTRACT_EDIT' &&
+        !hasPaymentHistory(previousData);
+    }
+
+    // Changing the principal is allowed only before any financial history and
+    // only with an immutable, compensating ledger entry in the same transaction.
+    function validPrincipalCashAdjustment(previousData, nextData, loanId) {
+      let movementPath = /databases/$(database)/documents/cashMovement/$(nextData.lastOperationId);
+      let amountDifference = nextData.amount - previousData.amount;
+      return nextData.lastOperationType == 'CONTRACT_EDIT' &&
+        !hasPaymentHistory(previousData) &&
+        previousData.status in ['ATIVO', 'ACTIVE'] &&
+        nextData.status == previousData.status &&
+        nextData.amount != previousData.amount &&
+        existsAfter(movementPath) &&
+        getAfter(movementPath).data.loanId == loanId &&
+        getAfter(movementPath).data.operationId == nextData.lastOperationId &&
+        getAfter(movementPath).data.createdByUid == request.auth.uid &&
+        (
+          (
+            amountDifference > 0 &&
+            getAfter(movementPath).data.type == 'RETIRADA' &&
+            getAfter(movementPath).data.amount >= amountDifference - 0.001 &&
+            getAfter(movementPath).data.amount <= amountDifference + 0.001
+          ) ||
+          (
+            amountDifference < 0 &&
+            getAfter(movementPath).data.type == 'ENTRADA' &&
+            getAfter(movementPath).data.amount >= 0 - amountDifference - 0.001 &&
+            getAfter(movementPath).data.amount <= 0 - amountDifference + 0.001
+          )
+        );
+    }
+
+    function validCancellation(previousData, nextData) {
+      return nextData.lastOperationType == 'CANCELLATION' &&
+        previousData.status in ['ATIVO', 'ATRASADO', 'ACTIVE'] &&
+        nextData.status in ['CANCELADO', 'CANCELLED'] &&
+        nextData.cancellationReason is string && nextData.cancellationReason.size() > 0;
+    }
+
+    function validHistoricalOverdueUpdate(previousData, nextData) {
+      let previousMaximum = previousData.get('maxHistoricalOverdueDays', 0);
+      let nextMaximum = nextData.get('maxHistoricalOverdueDays', 0);
+      return previousMaximum is int && nextMaximum is int &&
+        previousMaximum >= 0 && nextMaximum >= previousMaximum;
+    }
+
+    function validLoanUpdate(previousData, nextData, loanId) {
+      return validLoan(nextData) &&
+        validHistoricalOverdueUpdate(previousData, nextData) &&
+        previousData.get('formalizationType', 'DIRECT') != 'BANCARIZED' &&
+        (
+          nextData.amount == previousData.amount ||
+          validPrincipalCashAdjustment(previousData, nextData, loanId)
+        ) &&
+        nextData.customerId == previousData.customerId &&
+        nextData.get('contractNumber', '') == previousData.get('contractNumber', '') &&
+        nextData.get('createdAt', null) == previousData.get('createdAt', null) &&
+        nextData.get('formalizationType', 'DIRECT') == previousData.get('formalizationType', 'DIRECT') &&
+        nextData.get('provider', 'GR') == previousData.get('provider', 'GR') &&
+        nextData.get('funding', null) == previousData.get('funding', null) &&
+        nextData.get('credigrupo', null) == previousData.get('credigrupo', null) &&
+        nextData.version is int &&
+        nextData.version == previousData.get('version', 0) + 1 &&
+        validLoanOperationAudit(nextData) &&
+        (
+          validContractEdit(previousData, nextData) ||
+          validCancellation(previousData, nextData) ||
+          hasLinkedCashMovement(nextData, loanId)
+        );
+    }
+
+    function validMovement(data) {
+      return data.type in ['APORTE', 'RETIRADA', 'PAGAMENTO', 'ESTORNO', 'ENTRADA', 'SAIDA'] &&
+        validPositiveMoney(data.amount) &&
+        data.description is string && data.description.size() > 0 && data.description.size() <= 500 &&
+        data.date is string &&
+        data.recordedAt == request.time &&
+        data.createdByUid is string && data.createdByUid == request.auth.uid;
+    }
+
+    function cashMovementDelta(movement) {
+      return movement.type in ['APORTE', 'PAGAMENTO', 'ENTRADA']
+        ? movement.amount
+        : 0 - movement.amount;
+    }
+
+    function previousCashValue() {
+      return resource == null ? 0 : resource.data.get('value', 0);
+    }
+
+    function validLedgerCashUpdate() {
+      let movementId = request.resource.data.lastMovementId;
+      let movementPath = /databases/$(database)/documents/cashMovement/$(movementId);
+      return movementId is string &&
+        existsAfter(movementPath) &&
+        getAfter(movementPath).data.createdByUid == request.auth.uid &&
+        request.resource.data.updatedByUid == request.auth.uid &&
+        request.resource.data.updatedAt == request.time &&
+        request.resource.data.value is number &&
+        request.resource.data.value >= previousCashValue() + cashMovementDelta(getAfter(movementPath).data) - 0.001 &&
+        request.resource.data.value <= previousCashValue() + cashMovementDelta(getAfter(movementPath).data) + 0.001;
+    }
+
+    function validAdminCashReconciliation() {
+      let auditId = request.resource.data.get('reconciledAuditId', 'missing');
+      let auditPath = /databases/$(database)/documents/financialAuditEvents/$(auditId);
+      return isAdmin() &&
+        auditId is string &&
+        existsAfter(auditPath) &&
+        getAfter(auditPath).data.type == 'CASH_RECONCILIATION' &&
+        getAfter(auditPath).data.actorUid == request.auth.uid &&
+        request.resource.data.value is number &&
+        request.resource.data.reconciledByUid == request.auth.uid &&
+        request.resource.data.reconciledAt == request.time &&
+        request.resource.data.updatedAt == request.time;
+    }
+
+    function validContractCounterUpdate() {
+      let loanId = request.resource.data.lastLoanId;
+      let loanPath = /databases/$(database)/documents/loans/$(loanId);
+      let previousNumber = resource == null ? 0 : resource.data.get('lastNumber', 0);
+      return loanId is string &&
+        existsAfter(loanPath) &&
+        getAfter(loanPath).data.contractNumber == request.resource.data.lastContractNumber &&
+        request.resource.data.lastContractNumber is string &&
+        request.resource.data.lastNumber is int &&
+        request.resource.data.lastNumber > previousNumber &&
+        request.resource.data.updatedByUid == request.auth.uid &&
+        request.resource.data.updatedAt == request.time;
+    }
+
+    match /authorizedUsers/{uid} {
+      allow read: if isAuthorized() || (isSignedIn() && request.auth.uid == uid);
+      allow create: if isSignedIn() && (
+        isAdmin() ||
+        (!accessControlEnabled() && request.auth.uid == uid)
+      );
+      allow update, delete: if isAdmin();
+    }
+
+    match /clientes/{customerId} {
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() && validCustomer(request.resource.data) &&
+        (isAdmin() || (!('environment' in request.resource.data) && !('testData' in request.resource.data))) &&
+        !('credigrupo' in request.resource.data);
+      allow update: if isAuthorized() && validCustomer(request.resource.data) &&
+        (isAdmin() || !request.resource.data.diff(resource.data).affectedKeys().hasAny(['environment', 'testData'])) &&
+        request.resource.data.get('credigrupo', null) == resource.data.get('credigrupo', null);
+      allow delete: if false;
+    }
+
+    match /loans/{loanId} {
+      allow read: if isAuthorized();
+      // Concessoes passam pelo servidor, que revalida o risco antes de criar o contrato.
+      allow create: if false;
+      allow update: if isAuthorized() && validLoanUpdate(resource.data, request.resource.data, loanId);
+      allow delete: if isAuthorized() && validUnpaidLoanDeletion(loanId);
+    }
+
+    match /creditRiskDecisions/{decisionId} {
+      allow read: if hasAdminClaim() || hasAdminRoleDocument();
+      allow write: if false;
+    }
+
+    match /financialAuditEvents/{eventId} {
+      allow read: if hasAdminClaim() || hasAdminRoleDocument();
+      allow create: if isAuthorized() &&
+        request.resource.data.id == eventId &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.recordedAt == request.time &&
+        (
+          (
+            request.resource.data.type in ['CONTRACT_EDIT', 'CANCELLATION'] &&
+            request.resource.data.loanId is string &&
+            existsAfter(/databases/$(database)/documents/loans/$(request.resource.data.loanId)) &&
+            getAfter(/databases/$(database)/documents/loans/$(request.resource.data.loanId)).data.lastOperationId == eventId &&
+            getAfter(/databases/$(database)/documents/loans/$(request.resource.data.loanId)).data.lastOperationAt == request.time
+          ) ||
+          (
+            request.resource.data.type == 'LOAN_DELETION' &&
+            request.resource.data.loanId is string &&
+            exists(/databases/$(database)/documents/loans/$(request.resource.data.loanId)) &&
+            !existsAfter(/databases/$(database)/documents/loans/$(request.resource.data.loanId)) &&
+            getAfter(/databases/$(database)/documents/settings/caixa).data.lastOperationType == 'LOAN_DELETED' &&
+            getAfter(/databases/$(database)/documents/settings/caixa).data.lastLoanId == request.resource.data.loanId &&
+            getAfter(/databases/$(database)/documents/settings/caixa).data.updatedAt == request.time
+          ) ||
+          (
+            request.resource.data.type == 'CASH_RECONCILIATION' &&
+            !('loanId' in request.resource.data) &&
+            isAdmin() &&
+            getAfter(/databases/$(database)/documents/settings/caixa).data.reconciledAuditId == eventId &&
+            getAfter(/databases/$(database)/documents/settings/caixa).data.updatedAt == request.time
+          )
+        );
+      allow update, delete: if false;
+    }
+
+    match /cashMovement/{movementId} {
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() &&
+        validMovement(request.resource.data) &&
+        (
+          !('loanId' in request.resource.data) ||
+          (
+            request.resource.data.operationId is string &&
+            request.resource.data.operationId == movementId
+          )
+        );
+      allow update: if false;
+      allow delete: if isAuthorized() &&
+        resource.data.operationId == movementId &&
+        resource.data.operationId is string &&
+        exists(/databases/$(database)/documents/loans/$(resource.data.loanId)) &&
+        isSafeDirectLoanForDeletion(
+          get(/databases/$(database)/documents/loans/$(resource.data.loanId)).data,
+          resource.data.loanId
+        ) &&
+        isOriginalLoanWithdrawal(resource.data, resource.data.loanId) &&
+        !existsAfter(/databases/$(database)/documents/loans/$(resource.data.loanId)) &&
+        validLoanDeletionCashUpdate(resource.data.loanId);
+    }
+
+    match /settings/accessControl {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && !accessControlEnabled() &&
+        request.resource.data.enforced == true;
+      allow update, delete: if isAdmin();
+    }
+
+    match /settings/{documentId} {
+      allow read: if isAuthorized();
+      allow write: if documentId == 'caixa' && isAuthorized() &&
+        (validLedgerCashUpdate() || validAdminCashReconciliation() || validUnpaidLoanDeletionCashUpdate());
+      allow write: if documentId == 'contractCounter' && isAuthorized() && validContractCounterUpdate();
+      allow write: if documentId == 'fees' && isAdmin();
+    }
+
+    match /monthlySnapshots/{month} {
+      allow read: if isAuthorized();
+      allow create: if isAuthorized() &&
+        request.resource.data.month == month &&
+        request.resource.data.status == 'CLOSED' &&
+        request.resource.data.closedByUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /migrationRuns/{runId} {
+      allow read, create: if isAuthorized();
+      allow update, delete: if false;
+    }
+
+    match /diagnosticEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if isAuthorized() &&
+        request.resource.data.source is string &&
+        request.resource.data.source.size() > 0 && request.resource.data.source.size() <= 120 &&
+        request.resource.data.errorCode is string &&
+        request.resource.data.errorCode.size() > 0 && request.resource.data.errorCode.size() <= 120 &&
+        request.resource.data.severity == 'ERROR' &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.recordedAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // Extratos são uma camada de conferência isolada: nunca participam do livro caixa.
+    match /bankStatementImports/{statementId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'bank', 'sha256', 'periodStart', 'periodEnd', 'closingBalanceCents',
+          'incomeCents', 'expenseCents', 'transactionCount', 'status', 'createdByUid', 'createdAt'
+        ]) &&
+        request.resource.data.bank == 'C6 Bank' &&
+        request.resource.data.sha256 is string && request.resource.data.sha256.size() == 64 &&
+        request.resource.data.periodStart is string && request.resource.data.periodStart.size() == 10 &&
+        request.resource.data.periodEnd is string && request.resource.data.periodEnd.size() == 10 &&
+        request.resource.data.closingBalanceCents is int &&
+        request.resource.data.incomeCents is int && request.resource.data.incomeCents >= 0 &&
+        request.resource.data.expenseCents is int && request.resource.data.expenseCents >= 0 &&
+        request.resource.data.transactionCount is int &&
+        request.resource.data.transactionCount > 0 && request.resource.data.transactionCount <= 400 &&
+        request.resource.data.status == 'ACTIVE' &&
+        request.resource.data.createdByUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time;
+      allow update: if isAdmin() && resource.data.status == 'ACTIVE' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'removedByUid', 'removedAt']) &&
+        request.resource.data.status == 'REMOVED' &&
+        request.resource.data.removedByUid == request.auth.uid &&
+        request.resource.data.removedAt == request.time;
+      allow delete: if false;
+    }
+
+    match /bankStatementEntries/{entryId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasOnly([
+          'statementId', 'sequence', 'transactionDate', 'accountingDate',
+          'direction', 'type', 'description', 'amountCents'
+        ]) &&
+        request.resource.data.statementId is string &&
+        request.resource.data.statementId.size() > 0 && request.resource.data.statementId.size() <= 100 &&
+        request.resource.data.sequence is int && request.resource.data.sequence > 0 &&
+        request.resource.data.transactionDate is string && request.resource.data.transactionDate.size() == 10 &&
+        request.resource.data.accountingDate is string && request.resource.data.accountingDate.size() == 10 &&
+        request.resource.data.direction in ['IN', 'OUT'] &&
+        request.resource.data.type is string && request.resource.data.type.size() <= 40 &&
+        request.resource.data.description is string && request.resource.data.description.size() > 0 && request.resource.data.description.size() <= 500 &&
+        request.resource.data.amountCents is int && request.resource.data.amountCents > 0;
+      allow update, delete: if false;
+    }
+
+    match /bankStatementLinks/{entryId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasOnly(['statementId', 'entryId', 'movementId', 'actorUid', 'matchBasis', 'matchMode', 'expectedPayer', 'bankPayer', 'exceptionNote', 'createdAt']) &&
+        request.resource.data.entryId == entryId &&
+        request.resource.data.statementId is string &&
+        request.resource.data.movementId is string &&
+        request.resource.data.matchBasis in ['NAME_AMOUNT_DIRECTION', 'AMOUNT_DIRECTION', 'THIRD_PARTY_PIX'] &&
+        (!request.resource.data.keys().hasAny(['matchMode']) ||
+          (request.resource.data.matchMode == 'AUTO' && request.resource.data.matchBasis == 'NAME_AMOUNT_DIRECTION')) &&
+        request.resource.data.expectedPayer is string && request.resource.data.expectedPayer.size() <= 200 &&
+        request.resource.data.bankPayer is string && request.resource.data.bankPayer.size() <= 200 &&
+        request.resource.data.exceptionNote is string && request.resource.data.exceptionNote.size() <= 1000 &&
+        (request.resource.data.keys().hasAny(['matchMode']) || request.resource.data.exceptionNote.size() >= 8) &&
+        (request.resource.data.matchBasis != 'THIRD_PARTY_PIX' || request.resource.data.exceptionNote.size() >= 8) &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        exists(/databases/$(database)/documents/bankStatementEntries/$(entryId)) &&
+        get(/databases/$(database)/documents/bankStatementEntries/$(entryId)).data.statementId == request.resource.data.statementId &&
+        exists(/databases/$(database)/documents/cashMovement/$(request.resource.data.movementId)) &&
+        existsAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)) &&
+        getAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)).data.entryId == entryId &&
+        getAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)).data.statementId == request.resource.data.statementId &&
+        getAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)).data.matchBasis == request.resource.data.matchBasis &&
+        (request.resource.data.keys().hasAny(['matchMode']) ==
+          getAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)).data.keys().hasAny(['matchMode'])) &&
+        (!request.resource.data.keys().hasAny(['matchMode']) ||
+          getAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)).data.matchMode == request.resource.data.matchMode) &&
+        getAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)).data.expectedPayer == request.resource.data.expectedPayer &&
+        getAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)).data.bankPayer == request.resource.data.bankPayer &&
+        getAfter(/databases/$(database)/documents/bankMovementLinks/$(request.resource.data.movementId)).data.exceptionNote == request.resource.data.exceptionNote &&
+        get(/databases/$(database)/documents/bankStatementImports/$(request.resource.data.statementId)).data.status == 'ACTIVE';
+      allow delete: if isAdmin() &&
+        !existsAfter(/databases/$(database)/documents/bankMovementLinks/$(resource.data.movementId));
+      allow update: if false;
+    }
+
+    match /bankMovementLinks/{movementId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasOnly(['statementId', 'entryId', 'movementId', 'actorUid', 'matchBasis', 'matchMode', 'expectedPayer', 'bankPayer', 'exceptionNote', 'createdAt']) &&
+        request.resource.data.movementId == movementId &&
+        request.resource.data.statementId is string &&
+        request.resource.data.entryId is string &&
+        request.resource.data.matchBasis in ['NAME_AMOUNT_DIRECTION', 'AMOUNT_DIRECTION', 'THIRD_PARTY_PIX'] &&
+        (!request.resource.data.keys().hasAny(['matchMode']) ||
+          (request.resource.data.matchMode == 'AUTO' && request.resource.data.matchBasis == 'NAME_AMOUNT_DIRECTION')) &&
+        request.resource.data.expectedPayer is string && request.resource.data.expectedPayer.size() <= 200 &&
+        request.resource.data.bankPayer is string && request.resource.data.bankPayer.size() <= 200 &&
+        request.resource.data.exceptionNote is string && request.resource.data.exceptionNote.size() <= 1000 &&
+        (request.resource.data.keys().hasAny(['matchMode']) || request.resource.data.exceptionNote.size() >= 8) &&
+        (request.resource.data.matchBasis != 'THIRD_PARTY_PIX' || request.resource.data.exceptionNote.size() >= 8) &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time &&
+        exists(/databases/$(database)/documents/cashMovement/$(movementId)) &&
+        exists(/databases/$(database)/documents/bankStatementEntries/$(request.resource.data.entryId)) &&
+        existsAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)) &&
+        getAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)).data.movementId == movementId &&
+        getAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)).data.statementId == request.resource.data.statementId &&
+        getAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)).data.matchBasis == request.resource.data.matchBasis &&
+        (request.resource.data.keys().hasAny(['matchMode']) ==
+          getAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)).data.keys().hasAny(['matchMode'])) &&
+        (!request.resource.data.keys().hasAny(['matchMode']) ||
+          getAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)).data.matchMode == request.resource.data.matchMode) &&
+        getAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)).data.expectedPayer == request.resource.data.expectedPayer &&
+        getAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)).data.bankPayer == request.resource.data.bankPayer &&
+        getAfter(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)).data.exceptionNote == request.resource.data.exceptionNote;
+      allow delete: if isAdmin() &&
+        !existsAfter(/databases/$(database)/documents/bankStatementLinks/$(resource.data.entryId));
+      allow update: if false;
+    }
+
+    match /bankMovementJustifications/{justificationId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasOnly(['statementId', 'movementId', 'reason', 'note', 'actorUid', 'createdAt']) &&
+        exists(/databases/$(database)/documents/bankStatementImports/$(request.resource.data.statementId)) &&
+        get(/databases/$(database)/documents/bankStatementImports/$(request.resource.data.statementId)).data.status == 'ACTIVE' &&
+        exists(/databases/$(database)/documents/cashMovement/$(request.resource.data.movementId)) &&
+        request.resource.data.reason in ['CASH', 'OTHER_ACCOUNT', 'THIRD_PARTY_PIX', 'OTHER_METHOD', 'NEEDS_CORRECTION'] &&
+        request.resource.data.note is string && request.resource.data.note.size() >= 8 && request.resource.data.note.size() <= 1000 &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    // An unmatched bank receipt can be reviewed without creating a GR financial entry.
+    match /bankEntryJustifications/{justificationId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasOnly(['statementId', 'entryId', 'note', 'actorUid', 'createdAt']) &&
+        request.resource.data.statementId is string &&
+        request.resource.data.entryId is string &&
+        exists(/databases/$(database)/documents/bankStatementImports/$(request.resource.data.statementId)) &&
+        get(/databases/$(database)/documents/bankStatementImports/$(request.resource.data.statementId)).data.status == 'ACTIVE' &&
+        exists(/databases/$(database)/documents/bankStatementEntries/$(request.resource.data.entryId)) &&
+        get(/databases/$(database)/documents/bankStatementEntries/$(request.resource.data.entryId)).data.statementId == request.resource.data.statementId &&
+        get(/databases/$(database)/documents/bankStatementEntries/$(request.resource.data.entryId)).data.direction == 'IN' &&
+        !exists(/databases/$(database)/documents/bankStatementLinks/$(request.resource.data.entryId)) &&
+        request.resource.data.note is string && request.resource.data.note.size() >= 8 && request.resource.data.note.size() <= 1000 &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /bankStatementAuditEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin() &&
+        request.resource.data.keys().hasOnly(['statementId', 'action', 'entryId', 'movementId', 'actorUid', 'createdAt']) &&
+        request.resource.data.statementId is string && request.resource.data.statementId.size() > 0 &&
+        request.resource.data.action in ['IMPORTED', 'LINKED', 'AUTO_LINKED', 'UNLINKED', 'REMOVED', 'JUSTIFIED', 'BANK_ENTRY_JUSTIFIED'] &&
+        request.resource.data.actorUid == request.auth.uid &&
+        request.resource.data.createdAt == request.time;
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

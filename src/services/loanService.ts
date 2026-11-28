@@ -2,6 +2,7 @@ import {
   collection,
   doc,
   getDocs,
+  getDocsFromServer,
   query,
   runTransaction,
   serverTimestamp,
@@ -22,6 +23,7 @@ import { parseLoan, parseMovementType } from '../utils/domainParsers';
 import { applyLoanPaymentToCurrentLoan, reverseLatestInstallmentPayment } from '../utils/financialEngine';
 import { parseFeeSettings } from './settingsService';
 import { normalizeLoanStatus } from '../utils/loanCompat';
+import { getFinancialMonthKey } from '../utils/dateTime';
 
 export interface LoanMovementPayload {
   type: MovementType;
@@ -253,8 +255,8 @@ export const cancelLoan = async (
 
 /**
  * Deletes an untouched or cancelled direct contract without financial history.
- * The original grant withdrawal is retained and reversed, preserving the
- * complete cash-book audit trail.
+ * Removes only its original withdrawal, restoring cash atomically. The separate
+ * immutable audit event retains the technical evidence; no reversal is created.
  */
 export const deletePristineDirectLoan = async (loanId: string, actor?: MovementActor): Promise<void> => {
   const safeLoanId = String(loanId || '').trim();
@@ -264,34 +266,47 @@ export const deletePristineDirectLoan = async (loanId: string, actor?: MovementA
   const originalMovementId = `loan-created-${safeLoanId}`;
   const reversalMovementId = `loan-deletion-reversal-${safeLoanId}`;
   const auditEventId = `loan-deleted-${safeLoanId}`;
-  const linkedMovementsSnapshot = await getDocs(
-    query(collection(db, 'cashMovement'), where('loanId', '==', safeLoanId)),
-  );
-
   await runTransaction(db, async (tx) => {
     const loanRef = doc(db, 'loans', safeLoanId);
     const originalMovementRef = doc(db, 'cashMovement', originalMovementId);
     const reversalMovementRef = doc(db, 'cashMovement', reversalMovementId);
     const auditEventRef = doc(db, 'financialAuditEvents', auditEventId);
-    const [loanSnapshot, originalMovementSnapshot, reversalMovementSnapshot, auditEventSnapshot, cashBalance] = await Promise.all([
+    const cashRef = doc(db, 'settings', 'caixa');
+    const [loanSnapshot, originalMovementSnapshot, reversalMovementSnapshot, auditEventSnapshot, cashSnapshot] = await Promise.all([
       tx.get(loanRef),
       tx.get(originalMovementRef),
       tx.get(reversalMovementRef),
       tx.get(auditEventRef),
-      readCashBalanceInTransaction(tx),
+      tx.get(cashRef),
     ]);
 
     if (!loanSnapshot.exists()) throw new Error('CONTRATO_NAO_ENCONTRADO');
+    const rawLoan = loanSnapshot.data();
+    // Do not let compatibility parsing discard malformed or legacy history.
+    const hasRawHistory = [rawLoan.fiscalPaymentEntries, rawLoan.renewalHistory].some(
+      (entries) => entries != null && (!Array.isArray(entries) || entries.length > 0),
+    ) || Number(rawLoan.paidAmount ?? 0) !== 0 || !Array.isArray(rawLoan.installments) || rawLoan.installments.some((installment: Record<string, unknown>) =>
+      ['paidAmount', 'partialPaid', 'paymentAmount', 'lastPaidValue'].some((field) => Number(installment[field] ?? 0) !== 0) ||
+      installment.paymentBreakdown != null ||
+      (installment.paymentEntries != null && (!Array.isArray(installment.paymentEntries) || installment.paymentEntries.length > 0)) ||
+      ['PAGO', 'PAID', 'LIQUIDADO'].includes(String(installment.status || '').toUpperCase()) ||
+      Boolean(installment.paidAt || installment.paymentDate || installment.lastPaymentDate),
+    );
+    const cashBalance = cashSnapshot.data()?.value;
+    if (typeof cashBalance !== 'number' || !Number.isFinite(cashBalance)) throw new Error('SALDO_CAIXA_INVALIDO');
     const loan = parseLoan(loanSnapshot.id, loanSnapshot.data());
     const isDirectLoan = loan.formalizationType !== 'BANCARIZED' && loan.provider !== 'CREDIGRUPO';
     const isPristineActiveLoan =
-      normalizeLoanStatus(loan.status) === 'ACTIVE' &&
+      ['ATIVO', 'ACTIVE'].includes(String(rawLoan.status)) &&
       Number(loan.version || 0) === 0 &&
       loan.lastOperationType === 'LOAN_CREATED' &&
       loan.lastOperationId === originalMovementId;
-    const isCancelledWithoutFinancialHistory = normalizeLoanStatus(loan.status) === 'CANCELLED';
+    const isCancelledWithoutFinancialHistory = normalizeLoanStatus(loan.status) === 'CANCELLED' &&
+      Number(loan.version || 0) === 1 && loan.lastOperationType === 'CANCELLATION' &&
+      Boolean(loan.cancellationReason?.trim());
     if (!isDirectLoan) throw new Error('CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO');
-    if ((!isPristineActiveLoan && !isCancelledWithoutFinancialHistory) || hasFinancialHistory(loan)) {
+    if ((!isPristineActiveLoan && !isCancelledWithoutFinancialHistory) || hasFinancialHistory(loan) || hasRawHistory ||
+      Number(rawLoan.maxHistoricalOverdueDays || 0) !== 0) {
       throw new Error('CONTRATO_NAO_ELEGIVEL_PARA_EXCLUSAO_SEGURA');
     }
     if (!originalMovementSnapshot.exists()) throw new Error('MOVIMENTO_ORIGINAL_NAO_ENCONTRADO');
@@ -308,25 +323,42 @@ export const deletePristineDirectLoan = async (loanId: string, actor?: MovementA
       String(originalMovement.loanId || '') === safeLoanId &&
       String(originalMovement.operationId || '') === originalMovementId;
     if (!isOriginalWithdrawal) throw new Error('MOVIMENTO_ORIGINAL_INVALIDO');
+    const originalMonth = getFinancialMonthKey(originalMovement.date);
+    if (!originalMonth) throw new Error('MOVIMENTO_ORIGINAL_INVALIDO');
+    const closingSnapshot = await tx.get(doc(db, 'monthlySnapshots', originalMonth));
+    if (closingSnapshot.exists()) throw new Error('MOVIMENTO_EM_MES_FECHADO');
+    // Reading cash first invalidates concurrent writes. Any retry refreshes links;
+    // Rules can also reject the whole operation rather than allow a partial delete.
+    const linkedMovementsSnapshot = await getDocsFromServer(
+      query(collection(db, 'cashMovement'), where('loanId', '==', safeLoanId)),
+    );
+    if (linkedMovementsSnapshot.metadata.fromCache || linkedMovementsSnapshot.metadata.hasPendingWrites) {
+      throw new Error('MOVIMENTOS_AGUARDANDO_SINCRONIZACAO');
+    }
     if (linkedMovementsSnapshot.size !== 1 || linkedMovementsSnapshot.docs[0]?.id !== originalMovementId) {
       throw new Error('CONTRATO_POSSUI_MOVIMENTACOES_VINCULADAS');
     }
 
-    await appendCashMovementInTransaction(tx, {
-      type: 'ENTRADA',
-      amount: originalAmount,
-      description: `ESTORNO: EXCLUSAO DE CONTRATO ${loan.contractNumber || safeLoanId}`,
-      loanId: safeLoanId,
-      operationId: reversalMovementId,
-      actor,
-    }, { currentCashBalance: cashBalance, movementId: reversalMovementId });
-
+    tx.delete(originalMovementRef);
+    tx.set(cashRef, {
+      value: round2(cashBalance + originalAmount),
+      lastMovementId: originalMovementId,
+      lastOperationType: 'LOAN_DELETED',
+      lastLoanId: safeLoanId,
+      updatedByUid: actor.uid,
+      updatedAt: serverTimestamp(),
+    }, { merge: true });
     tx.set(auditEventRef, sanitizeFirestorePayload({
       id: auditEventId,
       type: 'LOAN_DELETION',
       loanId: safeLoanId,
       originalMovementId,
-      reversalMovementId,
+      removedMovementIds: [originalMovementId],
+      originalMovementDate: originalMovement.date,
+      originalMovementType: originalMovement.type,
+      previousStatus: loan.status,
+      previousVersion: loan.version,
+      reason: loan.cancellationReason || 'Contrato criado por engano, sem recebimentos',
       previousCash: cashBalance,
       newCash: round2(cashBalance + originalAmount),
       amount: originalAmount,

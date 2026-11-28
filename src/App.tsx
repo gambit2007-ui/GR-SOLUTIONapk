@@ -411,17 +411,29 @@ const App: React.FC = () => {
   const handleDeletePristineDirectLoan = async (loanId: string) => {
     try {
       await deletePristineDirectLoan(loanId, movementActor);
-      showToast('Contrato excluido com estorno auditavel registrado no caixa.', 'success');
+      showToast('Contrato e retirada inicial excluidos. Saldo recomposto e auditoria preservada.', 'success');
     } catch (error: unknown) {
       void reportOperationalError('loan.delete-pristine', error, movementActor);
       const code = error instanceof Error ? error.message : '';
-      const message = code === 'CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO'
+      const knownErrors: Record<string, string> = {
+        MOVIMENTO_ORIGINAL_NAO_ENCONTRADO: 'Retirada inicial nao encontrada. Exclusao bloqueada para revisao.',
+        MOVIMENTO_ORIGINAL_INVALIDO: 'Retirada inicial inconsistente. Exclusao bloqueada para revisao.',
+        SALDO_CAIXA_INVALIDO: 'Saldo do caixa invalido. Exclusao bloqueada para revisao.',
+        MOVIMENTO_EM_MES_FECHADO: 'A retirada pertence a um mes fechado. Historico preservado; exclusao bloqueada.',
+        MOVIMENTOS_AGUARDANDO_SINCRONIZACAO: 'Aguarde a sincronizacao dos movimentos antes de tentar novamente.',
+        EXCLUSAO_JA_PROCESSADA: 'Ja existe registro dessa exclusao. Atualize a tela antes de continuar.',
+        CONTRATO_NAO_ENCONTRADO: 'Contrato nao encontrado. Atualize a tela para conferir o resultado.',
+        AUTOR_NAO_IDENTIFICADO: 'Sessao nao identificada. Entre novamente antes de excluir.',
+      };
+      const message = knownErrors[code] || (code === 'CONTRATO_BANCARIZADO_NAO_PODE_SER_EXCLUIDO'
         ? 'Contratos bancarizados nao podem ser excluidos por esta funcao.'
         : code === 'CONTRATO_POSSUI_MOVIMENTACOES_VINCULADAS'
           ? 'Contrato possui movimentacoes vinculadas e nao pode ser excluido.'
           : code === 'CONTRATO_NAO_ELEGIVEL_PARA_EXCLUSAO_SEGURA'
             ? 'A exclusao e permitida somente para contratos diretos recem-criados e sem historico.'
-            : 'Nao foi possivel excluir o contrato com seguranca.';
+            : getSafeErrorCode(error) === 'permission-denied'
+              ? 'Exclusao bloqueada pelas permissoes do Firestore (permission-denied).'
+              : 'Nao foi possivel excluir o contrato com seguranca. Confira os diagnosticos.');
       showToast(message, 'error');
       throw error;
     }
